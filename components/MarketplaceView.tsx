@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { ArrowRight, CheckCircle2, Search, Share2, ShoppingBag, X } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Search, Share2, ShoppingBag, Store, X } from 'lucide-react';
 import type { NairaScoutSnapshot, ProductListing } from '@/lib/nairascout-store';
 import { formatWholeNaira } from '@/lib/commission-engine';
 import ProductImage from './ProductImage';
@@ -270,16 +270,20 @@ export default function MarketplaceView({
                       </h3>
                     </button>
 
-                    <div className="mt-1.5 flex items-center gap-1.5 text-xs text-[#4B554E]">
+                    {/* Distinct Seller badge vs KYC-approved indicator */}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-[#4B554E]">
                       <span>{product.sellerName}</span>
-                      {product.sellerVerified && (
-                        <>
-                          <CheckCircle2
-                            className="w-3.5 h-3.5 text-[#0B6E4F]"
-                            aria-label="Verified Seller"
-                          />
-                          <span className="text-[#0B6E4F] font-medium">Verified Seller</span>
-                        </>
+                      {product.hasActiveSellerBadge && (
+                        <span className="inline-flex items-center gap-1 text-[#111814] font-medium">
+                          <Store className="w-3 h-3 text-[#5C665E]" aria-hidden="true" />
+                          Seller
+                        </span>
+                      )}
+                      {product.isSellerVerified && (
+                        <span className="inline-flex items-center gap-1 text-[#0B6E4F] font-medium">
+                          <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                          KYC Verified
+                        </span>
                       )}
                     </div>
                   </div>
@@ -363,9 +367,15 @@ export default function MarketplaceView({
                 <h3 className="mt-2 font-display text-2xl font-bold text-[#111814]">
                   {selectedProduct.title}
                 </h3>
-                <p className="mt-1 text-xs text-[#0B6E4F] font-medium">
-                  Seller: {selectedProduct.sellerName} (Verified Identity)
-                </p>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-[#4B554E]">Seller: {selectedProduct.sellerName}</span>
+                  {selectedProduct.hasActiveSellerBadge && (
+                    <span className="font-medium text-[#111814]">· Active Seller</span>
+                  )}
+                  {selectedProduct.isSellerVerified && (
+                    <span className="font-medium text-[#0B6E4F]">· KYC Verified</span>
+                  )}
+                </div>
 
                 <p className="mt-4 text-sm text-[#4B554E] leading-relaxed">
                   {selectedProduct.description}

@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { CheckCircle2, Minus, Plus, ShieldCheck, X } from 'lucide-react';
+import { CheckCircle2, Mail, Minus, Plus, ShieldCheck, X } from 'lucide-react';
 import type {
   MarketplaceOrder,
+  NairaScoutSnapshot,
   ProductListing,
   ProductReferralEvent,
 } from '@/lib/nairascout-store';
@@ -11,11 +12,13 @@ import { formatKoboToNaira } from '@/lib/commission-engine';
 import ProductImage from './ProductImage';
 
 interface CheckoutDrawerProps {
+  authenticated: boolean;
   session: {
     product: ProductListing;
     referralEvent: ProductReferralEvent | null;
   } | null;
   onClose: () => void;
+  onOtpAuthenticated: (token: string | null, snapshot: NairaScoutSnapshot) => void;
   onConfirmOrder: (payload: {
     productListingId: string;
     quantity: number;
@@ -24,13 +27,24 @@ interface CheckoutDrawerProps {
 }
 
 export default function CheckoutDrawer({
+  authenticated,
   session,
   onClose,
+  onOtpAuthenticated,
   onConfirmOrder,
 }: CheckoutDrawerProps) {
   const [quantity, setQuantity] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState<MarketplaceOrder | null>(null);
+
+  // Inline Email OTP state for unauthenticated external buyers
+  const [otpEmail, setOtpEmail] = useState('');
+  const [otpDisplayName, setOtpDisplayName] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpStep, setOtpStep] = useState<'email' | 'code'>('email');
+  const [previewOtpHint, setPreviewOtpHint] = useState<string | null>(null);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [otpBusy, setOtpBusy] = useState(false);
 
   if (!session) return null;
 
@@ -38,6 +52,61 @@ export default function CheckoutDrawer({
   const isReferral = Boolean(referralEvent);
   const merchTotalKobo = product.priceKobo * quantity;
   const totalChargedKobo = merchTotalKobo + product.deliveryFeeKobo;
+
+  const handleRequestOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setOtpError(null);
+    setOtpBusy(true);
+    try {
+      const res = await fetch('/api/auth/otp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'NairaScout',
+        },
+        body: JSON.stringify({ action: 'request', email: otpEmail }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setOtpError(data.error || 'Could not send OTP.');
+      } else {
+        setPreviewOtpHint(data.previewOtpCode || null);
+        setOtpStep('code');
+      }
+    } finally {
+      setOtpBusy(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setOtpError(null);
+    setOtpBusy(true);
+    try {
+      const res = await fetch('/api/auth/otp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'NairaScout',
+        },
+        body: JSON.stringify({
+          action: 'verify',
+          email: otpEmail,
+          code: otpCode,
+          displayName: otpDisplayName,
+          referralEventId: referralEvent?.id ?? null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setOtpError(data.error || 'OTP verification failed.');
+      } else if (data.snapshot) {
+        onOtpAuthenticated(data.token ?? null, data.snapshot);
+      }
+    } finally {
+      setOtpBusy(false);
+    }
+  };
 
   const handleCheckout = async () => {
     setSubmitting(true);
@@ -55,6 +124,10 @@ export default function CheckoutDrawer({
   const handleResetAndClose = () => {
     setConfirmedOrder(null);
     setQuantity(1);
+    setOtpStep('email');
+    setOtpCode('');
+    setOtpError(null);
+    setPreviewOtpHint(null);
     onClose();
   };
 
@@ -194,7 +267,7 @@ export default function CheckoutDrawer({
                 </p>
                 <p>
                   {isReferral
-                    ? `Referred by @${referralEvent?.senderHandle}. Completing payment anchors the 20% referral pool to Seller ${product.sellerName}'s permanent referral ancestry.`
+                    ? `Referred by @${referralEvent?.senderHandle}. Attribution is preserved across Email OTP verification and checkout.`
                     : 'Checkout was initiated from the general marketplace feed, so no referral commission will be generated.'}
                 </p>
               </div>
@@ -246,6 +319,90 @@ export default function CheckoutDrawer({
                 </div>
               </div>
 
+              {/* Inline Email OTP Gate for Unauthenticated External Buyers */}
+              {!authenticated && (
+                <div className="bg-[#FAFAF8] border border-[#E4E4DE] rounded-xl p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Mail className="w-4 h-4 text-[#0B6E4F]" aria-hidden="true" />
+                    <p className="text-xs font-semibold text-[#111814]">
+                      Quick Email OTP Verification to Complete Order
+                    </p>
+                  </div>
+                  <p className="text-xs text-[#5C665E]">
+                    Verify your email to create your free Scout identity while preserving{' '}
+                    {isReferral ? `referral card ${referralEvent?.id}` : 'this checkout session'}.
+                  </p>
+
+                  {otpError && (
+                    <p className="text-xs text-[#B91C1C] font-medium">{otpError}</p>
+                  )}
+
+                  {otpStep === 'email' ? (
+                    <form onSubmit={handleRequestOtp} className="space-y-2.5">
+                      <input
+                        type="email"
+                        required
+                        value={otpEmail}
+                        onChange={(e) => setOtpEmail(e.target.value)}
+                        placeholder="you@example.com"
+                        aria-label="Email address for OTP"
+                        className="w-full px-3 py-2 text-sm bg-white border border-[#D8D8D0] rounded-lg"
+                      />
+                      <input
+                        type="text"
+                        value={otpDisplayName}
+                        onChange={(e) => setOtpDisplayName(e.target.value)}
+                        placeholder="Your full name (for new accounts)"
+                        aria-label="Full name"
+                        className="w-full px-3 py-2 text-sm bg-white border border-[#D8D8D0] rounded-lg"
+                      />
+                      <button
+                        type="submit"
+                        disabled={otpBusy}
+                        className="w-full py-2 px-3 text-xs font-semibold text-white bg-[#111814] rounded-lg cursor-pointer"
+                      >
+                        {otpBusy ? 'Sending OTP...' : 'Send 6-Digit Email Code'}
+                      </button>
+                    </form>
+                  ) : (
+                    <form onSubmit={handleVerifyOtp} className="space-y-2.5">
+                      {previewOtpHint && (
+                        <p className="text-xs bg-white border border-[#CBE2D8] text-[#0B6E4F] p-2 rounded">
+                          Preview verification code:{' '}
+                          <span className="font-mono font-bold">{previewOtpHint}</span>
+                        </p>
+                      )}
+                      <input
+                        type="text"
+                        required
+                        maxLength={6}
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value)}
+                        placeholder="Enter 6-digit code"
+                        aria-label="6-digit OTP code"
+                        className="w-full px-3 py-2 font-mono text-sm bg-white border border-[#D8D8D0] rounded-lg"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="submit"
+                          disabled={otpBusy}
+                          className="flex-1 py-2 px-3 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg cursor-pointer"
+                        >
+                          {otpBusy ? 'Verifying...' : 'Verify & Continue'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setOtpStep('email')}
+                          className="px-3 py-2 text-xs text-[#4B554E] border border-[#D8D8D0] rounded-lg cursor-pointer"
+                        >
+                          Change Email
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
+
               {/* Totals */}
               <div className="space-y-2.5 text-sm">
                 <div className="flex justify-between text-[#4B554E]">
@@ -277,11 +434,13 @@ export default function CheckoutDrawer({
               </div>
               <button
                 type="button"
-                disabled={submitting}
+                disabled={submitting || !authenticated}
                 onClick={handleCheckout}
                 className="w-full py-3 px-4 text-sm font-semibold text-white bg-[#0B6E4F] rounded-lg hover:bg-[#09583F] disabled:opacity-45 cursor-pointer"
               >
-                {submitting
+                {!authenticated
+                  ? 'Verify Email OTP Above to Place Order'
+                  : submitting
                   ? 'Processing Order...'
                   : `Complete Order · ${formatKoboToNaira(totalChargedKobo)}`}
               </button>

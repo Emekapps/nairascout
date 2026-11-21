@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { Check, Copy, Send, X } from 'lucide-react';
 import type {
   NairaScoutSnapshot,
@@ -12,6 +13,7 @@ import { formatWholeNaira } from '@/lib/commission-engine';
 interface ReferProductModalProps {
   product: ProductListing | null;
   snapshot: NairaScoutSnapshot;
+  initialRecipientId?: string | null;
   onClose: () => void;
   onSendReferral: (payload: {
     productListingId: string;
@@ -23,11 +25,14 @@ interface ReferProductModalProps {
 export default function ReferProductModal({
   product,
   snapshot,
+  initialRecipientId,
   onClose,
   onSendReferral,
 }: ReferProductModalProps) {
   const activeContacts = snapshot.scoutsList.filter((c) => !c.blocked);
-  const [recipientId, setRecipientId] = useState<string>(activeContacts[0]?.scoutId || '');
+  const [recipientId, setRecipientId] = useState<string>(
+    initialRecipientId || activeContacts[0]?.scoutId || ''
+  );
   const [note, setNote] = useState('');
   const [createdEvent, setCreatedEvent] = useState<ProductReferralEvent | null>(null);
   const [copied, setCopied] = useState(false);
@@ -35,13 +40,15 @@ export default function ReferProductModal({
 
   if (!product) return null;
 
+  const selectedId = recipientId || activeContacts[0]?.scoutId || '';
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!recipientId) return;
+    if (!selectedId) return;
     setSubmitting(true);
     const ev = await onSendReferral({
       productListingId: product.id,
-      recipientScoutId: recipientId,
+      recipientScoutId: selectedId,
       note,
     });
     if (ev) {
@@ -51,7 +58,7 @@ export default function ReferProductModal({
   };
 
   const shareUrl = createdEvent
-    ? `https://nairascout.ng/p/${product.id}?refEvent=${createdEvent.id}`
+    ? `${typeof window !== 'undefined' ? window.location.origin : 'https://nairascout.ng'}/?refEvent=${createdEvent.id}&refScout=${createdEvent.senderHandle}`
     : '';
 
   const handleCopy = () => {
@@ -106,7 +113,20 @@ export default function ReferProductModal({
           </p>
         </div>
 
-        {createdEvent ? (
+        {!snapshot.authenticated ? (
+          <div className="space-y-4 text-xs text-[#4B554E]">
+            <p>
+              Sign in or create a free Scout account to send product referrals from your Scouts
+              List and earn across up to 13 generations.
+            </p>
+            <Link
+              href="/auth/login"
+              className="block w-full text-center py-2.5 px-4 font-semibold text-white bg-[#0B6E4F] rounded-lg"
+            >
+              Sign In to Refer Products
+            </Link>
+          </div>
+        ) : createdEvent ? (
           <div className="space-y-4">
             <div className="bg-[#F3F8F6] border border-[#CBE2D8] rounded-lg p-4 text-xs text-[#0B6E4F] space-y-1">
               <p className="font-semibold">
@@ -114,7 +134,7 @@ export default function ReferProductModal({
               </p>
               <p>
                 Sent to @{createdEvent.recipientHandle}. Attribution is preserved if the recipient
-                initiates checkout from this referral card.
+                initiates checkout from this referral card or link.
               </p>
             </div>
 
@@ -149,6 +169,13 @@ export default function ReferProductModal({
               Done
             </button>
           </div>
+        ) : activeContacts.length === 0 ? (
+          <div className="text-xs text-[#5C665E] space-y-2">
+            <p>
+              You have no active non-blocked contacts in your Scouts List yet. Invite a Scout in
+              the Network → Scouts List tab first.
+            </p>
+          </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -160,7 +187,7 @@ export default function ReferProductModal({
               </label>
               <select
                 id="ref-recipient"
-                value={recipientId}
+                value={selectedId}
                 onChange={(e) => setRecipientId(e.target.value)}
                 required
                 className="w-full px-3 py-2 text-sm bg-white border border-[#D8D8D0] rounded-lg focus:outline-none focus:border-[#0B6E4F]"
@@ -192,7 +219,7 @@ export default function ReferProductModal({
 
             <button
               type="submit"
-              disabled={!recipientId || submitting}
+              disabled={!selectedId || submitting}
               className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg hover:bg-[#09583F] disabled:opacity-45 cursor-pointer"
             >
               <Send className="w-3.5 h-3.5" aria-hidden="true" />

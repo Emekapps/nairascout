@@ -1,5 +1,10 @@
 'use client';
 
+import { useState } from 'react';
+import Link from 'next/link';
+import { BookOpen, ChevronDown, LogIn, LogOut, Settings, Shield } from 'lucide-react';
+import type { ActiveScoutDTO } from '@/lib/nairascout-store';
+
 export type NavTab = 'marketplace' | 'referrals' | 'network' | 'wallet' | 'seller';
 
 interface HeaderNavProps {
@@ -7,6 +12,10 @@ interface HeaderNavProps {
   onSelectTab: (tab: NavTab) => void;
   onOpenGuide: () => void;
   inboxCount: number;
+  authenticated: boolean;
+  activeScout: ActiveScoutDTO | null;
+  adminBootstrapAvailable: boolean;
+  onLogout: () => Promise<void>;
 }
 
 const NAV_ITEMS: { id: NavTab; label: string }[] = [
@@ -22,7 +31,13 @@ export default function HeaderNav({
   onSelectTab,
   onOpenGuide,
   inboxCount,
+  authenticated,
+  activeScout,
+  adminBootstrapAvailable,
+  onLogout,
 }: HeaderNavProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
     <header className="sticky top-0 z-30 bg-[#FAFAF8]/95 backdrop-blur-sm border-b border-[#E4E4DE]">
       <div className="max-w-[1280px] mx-auto px-4 sm:px-8 h-16 flex items-center justify-between gap-8">
@@ -67,15 +82,86 @@ export default function HeaderNav({
           })}
         </nav>
 
-        {/* Zone 3: Single primary action */}
-        <div className="shrink-0">
-          <button
-            type="button"
-            onClick={onOpenGuide}
-            className="px-4 py-2 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg hover:bg-[#09583F] transition-colors duration-150 whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0B6E4F]"
-          >
-            Trust &amp; Guide
-          </button>
+        {/* Zone 3: Single primary action (Authenticated Account Menu or Sign In) */}
+        <div className="relative shrink-0">
+          {authenticated && activeScout ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setMenuOpen((prev) => !prev)}
+                aria-expanded={menuOpen}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg hover:bg-[#09583F] transition-colors duration-150 whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0B6E4F]"
+              >
+                <span>@{activeScout.handle}</span>
+                <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
+              </button>
+
+              {menuOpen && (
+                <div className="absolute right-0 mt-2 w-56 bg-white border border-[#E4E4DE] rounded-xl shadow-sm py-1.5 z-50">
+                  <div className="px-3.5 py-2 border-b border-[#ECECE6]">
+                    <p className="text-xs font-semibold text-[#111814] truncate">
+                      {activeScout.displayName}
+                    </p>
+                    <p className="text-[11px] text-[#5C665E] truncate">{activeScout.email}</p>
+                  </div>
+
+                  <Link
+                    href="/settings"
+                    onClick={() => setMenuOpen(false)}
+                    className="flex items-center gap-2 px-3.5 py-2 text-xs text-[#111814] hover:bg-[#F5F5F0]"
+                  >
+                    <Settings className="w-3.5 h-3.5 text-[#5C665E]" aria-hidden="true" />
+                    Account Settings
+                  </Link>
+
+                  {(activeScout.adminRole || adminBootstrapAvailable) && (
+                    <Link
+                      href="/admin"
+                      onClick={() => setMenuOpen(false)}
+                      className="flex items-center gap-2 px-3.5 py-2 text-xs text-[#111814] hover:bg-[#F5F5F0]"
+                    >
+                      <Shield className="w-3.5 h-3.5 text-[#0B6E4F]" aria-hidden="true" />
+                      {activeScout.adminRole ? 'Admin Console' : 'Claim Super Admin'}
+                    </Link>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onOpenGuide();
+                    }}
+                    className="w-full flex items-center gap-2 px-3.5 py-2 text-xs text-[#111814] hover:bg-[#F5F5F0] text-left cursor-pointer"
+                  >
+                    <BookOpen className="w-3.5 h-3.5 text-[#5C665E]" aria-hidden="true" />
+                    Trust &amp; Guide
+                  </button>
+
+                  <div className="border-t border-[#ECECE6] mt-1 pt-1">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setMenuOpen(false);
+                        await onLogout();
+                      }}
+                      className="w-full flex items-center gap-2 px-3.5 py-2 text-xs text-[#B91C1C] hover:bg-[#FEF2F2] text-left cursor-pointer"
+                    >
+                      <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
+                      Sign Out
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <Link
+              href="/auth/login"
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg hover:bg-[#09583F] transition-colors duration-150 whitespace-nowrap shrink-0"
+            >
+              <LogIn className="w-3.5 h-3.5" aria-hidden="true" />
+              Sign In
+            </Link>
+          )}
         </div>
       </div>
 

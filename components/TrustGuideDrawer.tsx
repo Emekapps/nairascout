@@ -55,7 +55,9 @@ export default function TrustGuideDrawer({
               Programme Guide &amp; Trust
             </h2>
             <p className="text-xs text-[#5C665E]">
-              Signed in as {snapshot.activeScout.displayName} (@{snapshot.activeScout.handle})
+              {snapshot.activeScout
+                ? `Signed in as ${snapshot.activeScout.displayName} (@${snapshot.activeScout.handle})`
+                : 'Browsing as guest'}
             </p>
           </div>
           <button
@@ -105,12 +107,12 @@ export default function TrustGuideDrawer({
           <div className="space-y-5 text-sm text-[#3B443E] leading-relaxed">
             <div>
               <h3 className="font-display font-semibold text-[#111814]">
-                1. Product Commerce, Not Recruitment
+                1. One Primary Identity, Scout-First Participation
               </h3>
               <p className="mt-1 text-xs text-[#556158]">
-                Scout accounts are free. NairaScout never pays commissions for user registration,
-                adding Scouts List contacts, or Seller subscriptions. Commissions arise strictly
-                from genuine qualifying merchandise purchases.
+                Every registered user receives a free Scout account. Seller capabilities attach to
+                the same identity and require Seller verification approval before publishing
+                listings.
               </p>
             </div>
 
@@ -130,11 +132,9 @@ export default function TrustGuideDrawer({
                 3. 20% Pool &amp; Thirteen-Generation Schedules
               </h3>
               <p className="mt-1 text-xs text-[#556158]">
-                Sellers receive 90% and NairaScout earns 10% of eligible merchandise revenue
-                (excluding delivery and separately charged taxes). Up to 20% of NairaScout’s
-                commission forms the referral pool. Actual ancestry depth selects the schedule
-                (1/2 for 1 gen; 1/4, 1/5 for 2 gens; 1/5, 1/6, 1/10 for 3 gens; 1/6 down to 1/120
-                for 4–13 gens). Ineligible ancestors receive ₦0 and are never skipped.
+                Sellers receive 90% and NairaScout earns 10% of eligible merchandise revenue. Up to
+                20% of NairaScout’s commission forms the referral pool. Actual ancestry depth
+                selects the schedule. Ineligible ancestors receive ₦0 and are never skipped.
               </p>
             </div>
 
@@ -143,10 +143,8 @@ export default function TrustGuideDrawer({
                 4. Fulfilment, Reversals &amp; Monthly Payouts
               </h3>
               <p className="mt-1 text-xs text-[#556158]">
-                Sellers have 10 calendar days to fulfil paid orders. Commissions move from Pending
-                to Available only after delivery confirmation and fraud/dispute checks. Available
-                balances from the preceding month are paid on the 15th (₦5,000 minimum, KYC +
-                verified Nigerian bank required).
+                Available balances from the preceding month are paid on the 15th (₦5,000 minimum,
+                KYC + verified Nigerian bank required).
               </p>
             </div>
           </div>
@@ -154,75 +152,85 @@ export default function TrustGuideDrawer({
 
         {section === 'notifications' && (
           <div className="divide-y divide-[#ECECE6]">
-            {snapshot.notifications.map((n) => (
-              <div key={n.id} className="py-3.5 first:pt-0 space-y-1">
-                <div className="flex items-center justify-between text-xs text-[#5C665E]">
-                  <span className="uppercase tracking-wider font-medium">{n.category}</span>
-                  <span className="font-mono">{n.createdAt.slice(0, 10)}</span>
+            {snapshot.notifications.length === 0 ? (
+              <p className="text-xs text-[#5C665E] py-4">No notifications.</p>
+            ) : (
+              snapshot.notifications.map((n) => (
+                <div key={n.id} className="py-3.5 first:pt-0 space-y-1">
+                  <div className="flex items-center justify-between text-xs text-[#5C665E]">
+                    <span className="uppercase tracking-wider font-medium">{n.category}</span>
+                    <span className="font-mono">{n.createdAt.slice(0, 10)}</span>
+                  </div>
+                  <p className="text-sm font-semibold text-[#111814]">{n.title}</p>
+                  <p className="text-xs text-[#4B554E] leading-relaxed">{n.body}</p>
                 </div>
-                <p className="text-sm font-semibold text-[#111814]">{n.title}</p>
-                <p className="text-xs text-[#4B554E] leading-relaxed">{n.body}</p>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         )}
 
         {section === 'support' && (
           <div className="space-y-6">
-            <form onSubmit={handleSupportSubmit} className="space-y-3.5">
-              <div>
-                <label htmlFor="sup-topic" className="block text-xs font-medium text-[#4B554E] mb-1">
-                  Appeal or Inquiry Topic
-                </label>
-                <select
-                  id="sup-topic"
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value as SupportCase['topic'])}
-                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg bg-white"
+            {!snapshot.authenticated ? (
+              <p className="text-xs text-[#5C665E]">
+                Please sign in to submit or track a support or appeal case.
+              </p>
+            ) : (
+              <form onSubmit={handleSupportSubmit} className="space-y-3.5">
+                <div>
+                  <label htmlFor="sup-topic" className="block text-xs font-medium text-[#4B554E] mb-1">
+                    Appeal or Inquiry Topic
+                  </label>
+                  <select
+                    id="sup-topic"
+                    value={topic}
+                    onChange={(e) => setTopic(e.target.value as SupportCase['topic'])}
+                    className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg bg-white"
+                  >
+                    <option value="commission">Commission Calculation / Ancestry</option>
+                    <option value="attribution">Referral-Card Attribution</option>
+                    <option value="payout">Monthly Payout / Bank Verification</option>
+                    <option value="fulfilment">Order Fulfilment / Dispute</option>
+                    <option value="abuse">Abuse / Spam Report</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="sup-subj" className="block text-xs font-medium text-[#4B554E] mb-1">
+                    Subject
+                  </label>
+                  <input
+                    id="sup-subj"
+                    type="text"
+                    required
+                    value={subject}
+                    onChange={(e) => setSubject(e.target.value)}
+                    placeholder="Order ID or ledger reference..."
+                    className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="sup-det" className="block text-xs font-medium text-[#4B554E] mb-1">
+                    Details &amp; Evidence
+                  </label>
+                  <textarea
+                    id="sup-det"
+                    rows={3}
+                    required
+                    value={details}
+                    onChange={(e) => setDetails(e.target.value)}
+                    placeholder="Describe the transaction or attribution issue..."
+                    className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg cursor-pointer"
                 >
-                  <option value="commission">Commission Calculation / Ancestry</option>
-                  <option value="attribution">Referral-Card Attribution</option>
-                  <option value="payout">Monthly Payout / Bank Verification</option>
-                  <option value="fulfilment">Order Fulfilment / Dispute</option>
-                  <option value="abuse">Abuse / Spam Report</option>
-                </select>
-              </div>
-              <div>
-                <label htmlFor="sup-subj" className="block text-xs font-medium text-[#4B554E] mb-1">
-                  Subject
-                </label>
-                <input
-                  id="sup-subj"
-                  type="text"
-                  required
-                  value={subject}
-                  onChange={(e) => setSubject(e.target.value)}
-                  placeholder="Order ID or ledger reference..."
-                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
-                />
-              </div>
-              <div>
-                <label htmlFor="sup-det" className="block text-xs font-medium text-[#4B554E] mb-1">
-                  Details &amp; Evidence
-                </label>
-                <textarea
-                  id="sup-det"
-                  rows={3}
-                  required
-                  value={details}
-                  onChange={(e) => setDetails(e.target.value)}
-                  placeholder="Describe the transaction or attribution issue..."
-                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg cursor-pointer"
-              >
-                {submitting ? 'Submitting...' : 'Submit Support Case'}
-              </button>
-            </form>
+                  {submitting ? 'Submitting...' : 'Submit Support Case'}
+                </button>
+              </form>
+            )}
 
             {snapshot.supportCases.length > 0 && (
               <div className="space-y-2 border-t border-[#ECECE6] pt-4">

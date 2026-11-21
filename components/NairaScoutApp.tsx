@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion } from 'motion/react';
 import type {
   MarketplaceOrder,
@@ -23,11 +24,19 @@ import TrustGuideDrawer from './TrustGuideDrawer';
 
 interface NairaScoutAppProps {
   initialSnapshot: NairaScoutSnapshot;
+  initialRefEvent?: string | null;
 }
 
-export default function NairaScoutApp({ initialSnapshot }: NairaScoutAppProps) {
+export default function NairaScoutApp({
+  initialSnapshot,
+  initialRefEvent,
+}: NairaScoutAppProps) {
+  const router = useRouter();
   const [snapshot, setSnapshot] = useState<NairaScoutSnapshot>(initialSnapshot);
-  const [activeTab, setActiveTab] = useState<NavTab>('marketplace');
+  const [bearerToken, setBearerToken] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<NavTab>(
+    initialRefEvent ? 'referrals' : 'marketplace'
+  );
   const [checkoutSession, setCheckoutSession] = useState<{
     product: ProductListing;
     referralEvent: ProductReferralEvent | null;
@@ -40,13 +49,24 @@ export default function NairaScoutApp({ initialSnapshot }: NairaScoutAppProps) {
     setFeedback({ type, message });
     setTimeout(() => {
       setFeedback((prev) => (prev?.message === message ? null : prev));
-    }, 4500);
+    }, 5000);
   };
 
-  const callApi = async (body: Record<string, unknown>) => {
-    const res = await fetch('/api/nairascout', {
+  const buildHeaders = (): HeadersInit => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-Requested-With': 'NairaScout',
+    };
+    if (bearerToken) {
+      headers['Authorization'] = `Bearer ${bearerToken}`;
+    }
+    return headers;
+  };
+
+  const callJsonApi = async (url: string, body: Record<string, unknown>) => {
+    const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildHeaders(),
       body: JSON.stringify(body),
     });
     const data = await res.json();
@@ -58,6 +78,21 @@ export default function NairaScoutApp({ initialSnapshot }: NairaScoutAppProps) {
       setSnapshot(data.snapshot);
     }
     return data;
+  };
+
+  const callApi = async (body: Record<string, unknown>) => {
+    return callJsonApi('/api/nairascout', body);
+  };
+
+  const handleLogout = async () => {
+    const data = await callJsonApi('/api/auth/session', { action: 'logout' });
+    setBearerToken(null);
+    if (data?.snapshot) {
+      setSnapshot(data.snapshot);
+    }
+    setActiveTab('marketplace');
+    showFeedback('ok', 'Signed out cleanly.');
+    router.refresh();
   };
 
   const handleConfirmOrder = async (payload: {
@@ -114,44 +149,81 @@ export default function NairaScoutApp({ initialSnapshot }: NairaScoutAppProps) {
     }
   };
 
-  const handleManageContact = async (
-    contactId: string,
-    operation: 'remove' | 'toggle_block'
-  ) => {
-    const data = await callApi({ action: 'manage_contact', contactId, operation });
+  const handleManageContact = async (payload: {
+    contactId?: string;
+    targetUserId?: string;
+    operation: 'remove' | 'block' | 'unblock';
+  }) => {
+    const data = await callApi({ action: 'manage_contact', ...payload });
     if (data) {
-      showFeedback('ok', 'Scouts List updated.');
+      showFeedback('ok', 'Scouts List relationship updated.');
     }
   };
 
-  const handleUpdateInvitePolicy = async (
-    policy: 'anyone' | 'contacts_only' | 'disabled'
-  ) => {
-    const data = await callApi({ action: 'update_invite_policy', policy });
-    if (data) {
-      showFeedback('ok', 'Invitation privacy preference saved.');
-    }
+  const handleReportAbuse = async (payload: {
+    reportedUserId: string;
+    reason: string;
+    description: string;
+  }): Promise<boolean> => {
+    const data = await callApi({ action: 'report_abuse', ...payload });
+    if (!data?.report) return false;
+    showFeedback('ok', `Abuse report ${data.report.id} logged for Trust & Safety review.`);
+    return true;
   };
 
-  const handleCreateListing = async (payload: {
+  const handleActivateSeller = async (payload: {
+    sellerType: 'INDIVIDUAL' | 'BUSINESS';
+    sellerName: string;
+    description: string;
+    businessCategory: string;
+    businessRegNumber?: string;
+    businessAddress?: string;
+    planId: SellerPlanId;
+    evidencePaths: string[];
+    termsAccepted: boolean;
+  }): Promise<boolean> => {
+    const data = await callJsonApi('/api/seller/onboarding', payload);
+    if (!data?.seller) return false;
+    showFeedback(
+      'ok',
+      'Seller onboarding submitted. You may create Draft listings while verification is pending.'
+    );
+    return true;
+  };
+
+  const handleCreateDraftListing = async (payload: {
     title: string;
     category: string;
     priceNaira: number;
     deliveryFeeNaira: number;
     stock: number;
     description: string;
-  }) => {
-    const data = await callApi({ action: 'create_listing', ...payload });
+  }): Promise<boolean> => {
+    const data = await callJsonApi('/api/seller/listings', payload);
     if (!data?.listing) return false;
-    showFeedback('ok', `Listing "${data.listing.title}" published to Marketplace.`);
+    showFeedback('ok', `Draft listing "${data.listing.title}" saved.`);
     return true;
+  };
+
+  const handlePublishListing = async (listingId: string) => {
+    const data = await callJsonApi(`/api/seller/listings/${encodeURIComponent(listingId)}/publish`, {});
+    if (data?.listing) {
+      showFeedback('ok', `Listing "${data.listing.title}" published to Marketplace.`);
+    }
   };
 
   const handleSelectPlan = async (planId: SellerPlanId) => {
     const data = await callApi({ action: 'update_seller_plan', planId });
     if (data) {
-      showFeedback('ok', `Seller plan switched to ${planId}.`);
+      showFeedback('ok', `Seller plan updated to ${planId}.`);
     }
+  };
+
+  const handleManageTeam = async (payload: Record<string, unknown>): Promise<boolean> => {
+    const data = await callJsonApi('/api/seller/team', payload);
+    if (!data) return false;
+    showFeedback('ok', 'Seller team membership updated.');
+    return true;
   };
 
   const handleSubmitSupport = async (payload: {
@@ -174,6 +246,10 @@ export default function NairaScoutApp({ initialSnapshot }: NairaScoutAppProps) {
         onSelectTab={setActiveTab}
         onOpenGuide={() => setGuideOpen(true)}
         inboxCount={activeInboxCount}
+        authenticated={snapshot.authenticated}
+        activeScout={snapshot.activeScout}
+        adminBootstrapAvailable={snapshot.adminBootstrapAvailable}
+        onLogout={handleLogout}
       />
 
       {feedback && (
@@ -215,14 +291,19 @@ export default function NairaScoutApp({ initialSnapshot }: NairaScoutAppProps) {
                 setCheckoutSession({ product, referralEvent })
               }
               onOpenReferModal={(product) => setReferModalProduct(product)}
-              onInviteScout={handleInviteScout}
-              onRespondInvite={handleRespondInvite}
-              onManageContact={handleManageContact}
-              onUpdateInvitePolicy={handleUpdateInvitePolicy}
             />
           )}
 
-          {activeTab === 'network' && <NetworkView snapshot={snapshot} />}
+          {activeTab === 'network' && (
+            <NetworkView
+              snapshot={snapshot}
+              onInviteScout={handleInviteScout}
+              onRespondInvite={handleRespondInvite}
+              onManageContact={handleManageContact}
+              onReportAbuse={handleReportAbuse}
+              onOpenReferForProduct={(product) => setReferModalProduct(product)}
+            />
+          )}
 
           {activeTab === 'wallet' && <WalletView snapshot={snapshot} />}
 
@@ -230,8 +311,11 @@ export default function NairaScoutApp({ initialSnapshot }: NairaScoutAppProps) {
             <SellerHubView
               snapshot={snapshot}
               onAdvanceOrder={handleAdvanceOrder}
-              onCreateListing={handleCreateListing}
+              onCreateDraftListing={handleCreateDraftListing}
+              onPublishListing={handlePublishListing}
               onSelectPlan={handleSelectPlan}
+              onActivateSeller={handleActivateSeller}
+              onManageTeam={handleManageTeam}
             />
           )}
         </motion.div>
@@ -270,8 +354,14 @@ export default function NairaScoutApp({ initialSnapshot }: NairaScoutAppProps) {
       </footer>
 
       <CheckoutDrawer
+        authenticated={snapshot.authenticated}
         session={checkoutSession}
         onClose={() => setCheckoutSession(null)}
+        onOtpAuthenticated={(token, nextSnapshot) => {
+          if (token) setBearerToken(token);
+          setSnapshot(nextSnapshot);
+          showFeedback('ok', 'Email verified. Complete your order below.');
+        }}
         onConfirmOrder={handleConfirmOrder}
       />
 

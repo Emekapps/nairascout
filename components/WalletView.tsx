@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   AlertTriangle,
   Banknote,
@@ -62,8 +63,6 @@ export default function WalletView({ snapshot }: WalletViewProps) {
   const [statusFilter, setStatusFilter] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const { wallet, activeScout } = snapshot;
-
   const filteredLedger = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return snapshot.ledgerEntries.filter((entry) => {
@@ -76,6 +75,28 @@ export default function WalletView({ snapshot }: WalletViewProps) {
       return statusOk && textOk;
     });
   }, [snapshot.ledgerEntries, statusFilter, searchQuery]);
+
+  if (!snapshot.authenticated || !snapshot.activeScout) {
+    return (
+      <div className="bg-white border border-[#E4E4DE] rounded-xl p-10 text-center space-y-3">
+        <h1 className="font-display text-2xl font-bold text-[#111814]">
+          Sign In to View Your Referral Earnings Wallet
+        </h1>
+        <p className="text-sm text-[#5C665E] max-w-md mx-auto">
+          Wallet balances, immutable ledger entries, and Nigerian payout verification details are
+          accessible only to the authenticated Scout.
+        </p>
+        <Link
+          href="/auth/login"
+          className="inline-block px-4 py-2 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg"
+        >
+          Sign In
+        </Link>
+      </div>
+    );
+  }
+
+  const { wallet, activeScout } = snapshot;
 
   return (
     <div className="space-y-10">
@@ -144,13 +165,12 @@ export default function WalletView({ snapshot }: WalletViewProps) {
           <p className="text-sm text-[#4B554E] leading-relaxed">
             Commissions that became Available during the preceding calendar month qualify once
             cumulative eligible balance meets the ₦5,000 minimum, KYC is verified, and a
-            same-name Nigerian bank account is confirmed. NairaScout does not offer on-demand
-            withdrawals.
+            same-name Nigerian bank account is confirmed.
           </p>
           <div className="pt-2 flex flex-wrap gap-6 text-xs text-[#4B554E]">
             <span>
               KYC Identity:{' '}
-              <strong className="text-[#0B6E4F]">
+              <strong className={activeScout.kycVerified ? 'text-[#0B6E4F]' : 'text-[#B45309]'}>
                 {activeScout.kycVerified ? 'Verified' : 'Pending'}
               </strong>
             </span>
@@ -173,7 +193,7 @@ export default function WalletView({ snapshot }: WalletViewProps) {
           <p className="text-xs text-[#0B6E4F] font-medium">
             {wallet.eligibleForNextPayout
               ? 'Minimum ₦5,000 threshold satisfied'
-              : 'Accumulating toward ₦5,000 payout minimum'}
+              : 'Requires KYC, verified bank & ₦5,000 minimum'}
           </p>
         </div>
       </section>

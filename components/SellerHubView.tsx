@@ -1,19 +1,29 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, PackagePlus, Store } from 'lucide-react';
+import Link from 'next/link';
 import {
+  AlertTriangle,
+  Check,
+  Lock,
+  PackagePlus,
+  ShieldCheck,
+  Store,
+  Users,
+} from 'lucide-react';
+import type {
   NairaScoutSnapshot,
   OrderFulfilmentStatus,
-  SELLER_PLANS,
   SellerPlanId,
 } from '@/lib/nairascout-store';
+import { SELLER_PLANS } from '@/lib/seller-plans';
 import { formatKoboToNaira, formatWholeNaira } from '@/lib/commission-engine';
+import type { SellerTeamPermissions } from '@/lib/db/schema';
 
 interface SellerHubViewProps {
   snapshot: NairaScoutSnapshot;
   onAdvanceOrder: (orderId: string, nextStatus: OrderFulfilmentStatus) => Promise<void>;
-  onCreateListing: (payload: {
+  onCreateDraftListing: (payload: {
     title: string;
     category: string;
     priceNaira: number;
@@ -21,16 +31,34 @@ interface SellerHubViewProps {
     stock: number;
     description: string;
   }) => Promise<boolean>;
+  onPublishListing: (listingId: string) => Promise<void>;
   onSelectPlan: (planId: SellerPlanId) => Promise<void>;
+  onActivateSeller: (payload: {
+    sellerType: 'INDIVIDUAL' | 'BUSINESS';
+    sellerName: string;
+    description: string;
+    businessCategory: string;
+    businessRegNumber?: string;
+    businessAddress?: string;
+    planId: SellerPlanId;
+    evidencePaths: string[];
+    termsAccepted: boolean;
+  }) => Promise<boolean>;
+  onManageTeam: (payload: Record<string, unknown>) => Promise<boolean>;
 }
 
 export default function SellerHubView({
   snapshot,
   onAdvanceOrder,
-  onCreateListing,
+  onCreateDraftListing,
+  onPublishListing,
   onSelectPlan,
+  onActivateSeller,
+  onManageTeam,
 }: SellerHubViewProps) {
-  const [subTab, setSubTab] = useState<'operations' | 'plans'>('operations');
+  const [subTab, setSubTab] = useState<'operations' | 'plans' | 'team'>('operations');
+
+  // Draft listing form
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('Kitchen & Pantry');
   const [priceNaira, setPriceNaira] = useState('18500');
@@ -39,14 +67,345 @@ export default function SellerHubView({
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const currentPlan = SELLER_PLANS[snapshot.activeScout.sellerPlan];
-  const { sellerStats } = snapshot;
+  // Onboarding wizard state
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
+  const [sellerType, setSellerType] = useState<'INDIVIDUAL' | 'BUSINESS'>('INDIVIDUAL');
+  const [sellerName, setSellerName] = useState('');
+  const [sellerDesc, setSellerDesc] = useState('');
+  const [bizCat, setBizCat] = useState('Home & Craft');
+  const [bizReg, setBizReg] = useState('');
+  const [bizAddr, setBizAddr] = useState('');
+  const [docFilename, setDocFilename] = useState('gov-id-nin.pdf');
+  const [wizardPlan, setWizardPlan] = useState<SellerPlanId>('starter');
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
-  const handleCreate = async (e: React.FormEvent) => {
+  // Team invite state
+  const [memberEmail, setMemberEmail] = useState('');
+  const [memberRole, setMemberRole] = useState<'BUSINESS_ADMIN' | 'TEAM_MEMBER'>('TEAM_MEMBER');
+  const [memberPerms, setMemberPerms] = useState<SellerTeamPermissions>({
+    canManageListings: true,
+    canManageOrders: true,
+    canViewAnalytics: true,
+    canManageBilling: false,
+    canManageTeam: false,
+  });
+
+  if (!snapshot.authenticated || !snapshot.activeScout) {
+    return (
+      <div className="bg-white border border-[#E4E4DE] rounded-xl p-10 text-center space-y-3">
+        <Store className="w-8 h-8 text-[#0B6E4F] mx-auto" aria-hidden="true" />
+        <h1 className="font-display text-2xl font-bold text-[#111814]">
+          Seller Capabilities Attach to Your Scout Identity
+        </h1>
+        <p className="text-sm text-[#5C665E] max-w-lg mx-auto">
+          Sign in or register for a free Scout account first, then activate Individual or Business
+          Seller capabilities under the same primary identity.
+        </p>
+        <div className="pt-2 flex justify-center gap-3">
+          <Link
+            href="/auth/login"
+            className="px-4 py-2 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg"
+          >
+            Sign In
+          </Link>
+          <Link
+            href="/auth/register"
+            className="px-4 py-2 text-xs font-semibold text-[#111814] border border-[#D8D8D0] rounded-lg"
+          >
+            Create Scout Account
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const scout = snapshot.activeScout;
+
+  // Seller Activation Wizard when user has no SellerProfile yet
+  if (!scout.sellerProfile) {
+    const handleCompleteWizard = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setSubmitting(true);
+      await onActivateSeller({
+        sellerType,
+        sellerName: sellerName || `${scout.displayName} Store`,
+        description: sellerDesc,
+        businessCategory: bizCat,
+        businessRegNumber: bizReg,
+        businessAddress: bizAddr,
+        planId: wizardPlan,
+        evidencePaths: [`verification-docs/${scout.id}/${docFilename || 'kyc.pdf'}`],
+        termsAccepted,
+      });
+      setSubmitting(false);
+    };
+
+    return (
+      <div className="max-w-3xl mx-auto space-y-6">
+        <div className="border-b border-[#E4E4DE] pb-5">
+          <h1 className="font-display text-3xl font-bold text-[#111814]">
+            Activate Seller Capabilities
+          </h1>
+          <p className="mt-1.5 text-sm text-[#4B554E]">
+            Attached to your primary identity (@{scout.handle}). You may create draft listings
+            immediately, while public publishing requires Seller verification approval.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs font-medium">
+          {[
+            { step: 1, label: '1. Seller Type' },
+            { step: 2, label: '2. Business Profile' },
+            { step: 3, label: '3. Verification Docs' },
+            { step: 4, label: '4. Plan & Terms' },
+          ].map((s) => (
+            <button
+              key={s.step}
+              type="button"
+              onClick={() => setWizardStep(s.step as 1 | 2 | 3 | 4)}
+              className={`px-3 py-1.5 rounded-lg cursor-pointer ${
+                wizardStep === s.step
+                  ? 'bg-[#111814] text-white'
+                  : 'bg-[#F0F0EA] text-[#5C665E]'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        <form
+          onSubmit={handleCompleteWizard}
+          className="bg-white border border-[#E4E4DE] rounded-xl p-6 space-y-5"
+        >
+          {wizardStep === 1 && (
+            <div className="space-y-4">
+              <h2 className="font-display text-lg font-bold text-[#111814]">
+                Step 1: Choose Seller Type
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <button
+                  type="button"
+                  onClick={() => setSellerType('INDIVIDUAL')}
+                  className={`p-4 text-left rounded-xl border cursor-pointer ${
+                    sellerType === 'INDIVIDUAL'
+                      ? 'border-[#0B6E4F] bg-[#F3F8F6]'
+                      : 'border-[#E4E4DE]'
+                  }`}
+                >
+                  <p className="font-display font-bold text-[#111814]">Individual Seller</p>
+                  <p className="text-xs text-[#5C665E] mt-1">
+                    For sole merchants and independent artisans selling under verified personal KYC.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSellerType('BUSINESS')}
+                  className={`p-4 text-left rounded-xl border cursor-pointer ${
+                    sellerType === 'BUSINESS'
+                      ? 'border-[#0B6E4F] bg-[#F3F8F6]'
+                      : 'border-[#E4E4DE]'
+                  }`}
+                >
+                  <p className="font-display font-bold text-[#111814]">Business Seller</p>
+                  <p className="text-xs text-[#5C665E] mt-1">
+                    For registered CAC entities with business verification and Sprawl team accounts.
+                  </p>
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWizardStep(2)}
+                className="px-5 py-2.5 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg cursor-pointer"
+              >
+                Continue to Profile Details
+              </button>
+            </div>
+          )}
+
+          {wizardStep === 2 && (
+            <div className="space-y-4">
+              <h2 className="font-display text-lg font-bold text-[#111814]">
+                Step 2: Seller &amp; Business Details
+              </h2>
+              <div>
+                <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                  Storefront / Seller Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={sellerName}
+                  onChange={(e) => setSellerName(e.target.value)}
+                  placeholder="e.g., Lagos Botanical Studio"
+                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                    Primary Category
+                  </label>
+                  <select
+                    value={bizCat}
+                    onChange={(e) => setBizCat(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg bg-white"
+                  >
+                    <option value="Home & Craft">Home &amp; Craft</option>
+                    <option value="Kitchen & Pantry">Kitchen &amp; Pantry</option>
+                    <option value="Audio & Tech">Audio &amp; Tech</option>
+                    <option value="Beauty & Botanicals">Beauty &amp; Botanicals</option>
+                    <option value="Fashion & Leather">Fashion &amp; Leather</option>
+                  </select>
+                </div>
+                {sellerType === 'BUSINESS' && (
+                  <div>
+                    <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                      CAC Registration Number
+                    </label>
+                    <input
+                      type="text"
+                      value={bizReg}
+                      onChange={(e) => setBizReg(e.target.value)}
+                      placeholder="RC-123456 or BN-..."
+                      className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
+                    />
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                  Business / Fulfilment Address
+                </label>
+                <input
+                  type="text"
+                  value={bizAddr}
+                  onChange={(e) => setBizAddr(e.target.value)}
+                  placeholder="Street, City, State"
+                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                  Description
+                </label>
+                <textarea
+                  rows={2}
+                  value={sellerDesc}
+                  onChange={(e) => setSellerDesc(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setWizardStep(3)}
+                className="px-5 py-2.5 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg cursor-pointer"
+              >
+                Continue to Verification Docs
+              </button>
+            </div>
+          )}
+
+          {wizardStep === 3 && (
+            <div className="space-y-4">
+              <h2 className="font-display text-lg font-bold text-[#111814]">
+                Step 3: Upload Verification Documents
+              </h2>
+              <p className="text-xs text-[#5C665E]">
+                Stored securely in private bucket <span className="font-mono">verification-docs</span>{' '}
+                and inspected via short-lived 60s signed URLs by Verification Officers.
+              </p>
+              <div>
+                <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                  Select Government ID / CAC Certificate File
+                </label>
+                <input
+                  type="file"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) setDocFilename(f.name);
+                  }}
+                  className="block w-full text-xs text-[#4B554E] file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-[#F3F3EF] file:font-semibold"
+                />
+                <p className="mt-1 text-xs font-mono text-[#0B6E4F]">
+                  Target object: verification-docs/{scout.id}/{docFilename}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWizardStep(4)}
+                className="px-5 py-2.5 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg cursor-pointer"
+              >
+                Continue to Plan Selection
+              </button>
+            </div>
+          )}
+
+          {wizardStep === 4 && (
+            <div className="space-y-4">
+              <h2 className="font-display text-lg font-bold text-[#111814]">
+                Step 4: Select Initial Plan &amp; Accept Seller Terms
+              </h2>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {(['starter', 'traction', 'growth', 'sprawl'] as SellerPlanId[]).map((pid) => {
+                  const p = SELLER_PLANS[pid];
+                  return (
+                    <button
+                      key={pid}
+                      type="button"
+                      onClick={() => setWizardPlan(pid)}
+                      className={`p-3 text-left rounded-lg border cursor-pointer ${
+                        wizardPlan === pid ? 'border-[#0B6E4F] bg-[#F3F8F6]' : 'border-[#E4E4DE]'
+                      }`}
+                    >
+                      <p className="text-xs font-bold text-[#111814]">{p.name}</p>
+                      <p className="font-mono text-xs text-[#0B6E4F] mt-1">
+                        {p.monthlyPriceKobo === 0 ? 'Free' : `${formatWholeNaira(p.monthlyPriceKobo)}/mo`}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <label className="flex items-start gap-2.5 text-xs text-[#4B554E] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={termsAccepted}
+                  onChange={(e) => setTermsAccepted(e.target.checked)}
+                  className="mt-0.5 accent-[#0B6E4F]"
+                />
+                <span>
+                  I accept NairaScout Seller Terms, the 10-day fulfilment SLA, and the 10%
+                  marketplace commission schedule (separate from Scout referral commissions).
+                </span>
+              </label>
+
+              <button
+                type="submit"
+                disabled={submitting || !termsAccepted}
+                className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg hover:bg-[#09583F] disabled:opacity-45 cursor-pointer"
+              >
+                {submitting ? 'Activating Seller Profile...' : 'Submit Onboarding & Activate Seller'}
+              </button>
+            </div>
+          )}
+        </form>
+      </div>
+    );
+  }
+
+  const currentPlan = SELLER_PLANS[scout.sellerPlan];
+  const { sellerStats } = snapshot;
+  const sellerProfile = scout.sellerProfile;
+  const canPublishNow =
+    sellerProfile.sellerStatus === 'ACTIVE' &&
+    scout.sellerVerificationStatus === 'APPROVED';
+
+  const handleCreateDraft = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !description.trim()) return;
     setSubmitting(true);
-    const ok = await onCreateListing({
+    const ok = await onCreateDraftListing({
       title,
       category,
       priceNaira: Number(priceNaira),
@@ -61,6 +420,20 @@ export default function SellerHubView({
     setSubmitting(false);
   };
 
+  const handleInviteTeam = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!memberEmail.trim()) return;
+    setSubmitting(true);
+    const ok = await onManageTeam({
+      operation: 'invite',
+      memberEmail,
+      role: memberRole,
+      permissions: memberPerms,
+    });
+    if (ok) setMemberEmail('');
+    setSubmitting(false);
+  };
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-[#E4E4DE] pb-6">
@@ -69,8 +442,9 @@ export default function SellerHubView({
             Seller Operations &amp; Subscriptions
           </h1>
           <p className="mt-1.5 text-sm text-[#4B554E] max-w-2xl">
-            Manage product listings within your Seller plan allowance, fulfil paid orders within
-            the 10-day SLA, and track direct vs. referral-generated revenue.
+            {sellerProfile.sellerName} · {sellerProfile.sellerType} · Seller Status:{' '}
+            <strong>{sellerProfile.sellerStatus}</strong> · Verification:{' '}
+            <strong>{scout.sellerVerificationStatus}</strong>
           </p>
         </div>
 
@@ -82,7 +456,7 @@ export default function SellerHubView({
               subTab === 'operations' ? 'bg-white text-[#111814] shadow-xs' : 'text-[#556158]'
             }`}
           >
-            Fulfilment &amp; Listings
+            Drafts, Listings &amp; Orders
           </button>
           <button
             type="button"
@@ -91,14 +465,43 @@ export default function SellerHubView({
               subTab === 'plans' ? 'bg-white text-[#111814] shadow-xs' : 'text-[#556158]'
             }`}
           >
-            Seller Plans ({currentPlan.name})
+            Plans ({currentPlan.name})
           </button>
+          {sellerProfile.sellerType === 'BUSINESS' && (
+            <button
+              type="button"
+              onClick={() => setSubTab('team')}
+              className={`inline-flex items-center gap-1 px-3.5 py-2 text-xs font-semibold rounded-md transition-colors whitespace-nowrap cursor-pointer ${
+                subTab === 'team' ? 'bg-white text-[#111814] shadow-xs' : 'text-[#556158]'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" aria-hidden="true" />
+              Team
+            </button>
+          )}
         </div>
       </div>
 
-      {subTab === 'operations' ? (
+      {/* Mandatory Verification Gate Banner */}
+      {!canPublishNow && (
+        <div className="bg-[#FFFBEB] border border-[#E5CFA3] rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-[#B45309] shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="text-xs text-[#78350F] space-y-1">
+            <p className="font-semibold">
+              Seller Verification Gate Active ({scout.sellerVerificationStatus})
+            </p>
+            <p>
+              You can create and edit Draft listings now, but publishing to the public Marketplace
+              is blocked (HTTP 403) until a Verification Officer marks your{' '}
+              <span className="font-mono">SELLER</span> verification record as{' '}
+              <span className="font-mono">APPROVED</span>.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {subTab === 'operations' && (
         <div className="space-y-10">
-          {/* Seller Aggregate Analytics */}
           <section className="grid grid-cols-2 lg:grid-cols-4 gap-6 border-b border-[#E4E4DE] pb-8">
             <div>
               <p className="text-xs text-[#5C665E]">Eligible Merchandise Revenue</p>
@@ -126,128 +529,192 @@ export default function SellerHubView({
               <p className="mt-1 text-xs text-[#5C665E]">Separate from Scout wallet</p>
             </div>
             <div>
-              <p className="text-xs text-[#5C665E]">Plan Listing Quotas</p>
+              <p className="text-xs text-[#5C665E]">Listings &amp; Publications</p>
               <p className="mt-1 font-mono text-2xl font-bold text-[#111814] tabular-nums">
                 {sellerStats.activeListingsCount} / {currentPlan.maxActiveListings}
               </p>
               <p className="mt-1 text-xs text-[#5C665E]">
-                {sellerStats.monthlyPublicationsUsed} / {currentPlan.monthlyPublications} monthly
-                publications
+                {sellerStats.draftListingsCount} drafts · {sellerStats.monthlyPublicationsUsed} /{' '}
+                {currentPlan.monthlyPublications} monthly pubs
               </p>
             </div>
           </section>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-            {/* Order Fulfilment & Commission Release Pipeline */}
-            <div className="lg:col-span-7 space-y-4">
-              <div>
+            <div className="lg:col-span-7 space-y-8">
+              {/* Seller Listings (Drafts vs Published) */}
+              <section className="space-y-3">
                 <h2 className="font-display text-xl font-bold text-[#111814]">
-                  Order Fulfilment &amp; Commission Release Pipeline
+                  Your Listings ({snapshot.sellerListings.length})
                 </h2>
-                <p className="text-xs text-[#5C665E]">
-                  Confirming delivery transitions linked Scout commissions from Pending to
-                  Available in the immutable ledger. Disputes place them On Hold; refunds create
-                  Reversed entries.
-                </p>
-              </div>
-
-              <div className="bg-white border border-[#E4E4DE] rounded-xl divide-y divide-[#ECECE6]">
-                {snapshot.orders.map((order) => (
-                  <div key={order.id} className="p-5 space-y-3">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <p className="font-mono text-xs font-semibold text-[#0B6E4F]">
-                          {order.id} ·{' '}
-                          {order.attributionType === 'referral_card'
-                            ? `Referral-Generated (${order.referralEventId})`
-                            : 'Direct Marketplace'}
-                        </p>
-                        <h3 className="mt-1 font-display text-base font-semibold text-[#111814]">
-                          {order.productTitle} (×{order.quantity})
-                        </h3>
-                        <p className="text-xs text-[#5C665E]">
-                          Seller: {order.sellerName} · Merchandise:{' '}
-                          <span className="font-mono text-[#111814]">
-                            {formatKoboToNaira(order.eligibleMerchandiseKobo)}
-                          </span>{' '}
-                          · Pool:{' '}
-                          <span className="font-mono text-[#111814]">
-                            {formatKoboToNaira(order.commissionSnapshot.referralPoolKobo)}
-                          </span>
-                        </p>
-                      </div>
-
-                      <span className="text-xs font-semibold px-2.5 py-1 rounded bg-[#F3F3EF] text-[#111814]">
-                        {order.fulfilmentStatus}
-                      </span>
+                <div className="bg-white border border-[#E4E4DE] rounded-xl divide-y divide-[#ECECE6]">
+                  {snapshot.sellerListings.length === 0 ? (
+                    <div className="p-6 text-sm text-[#5C665E]">
+                      No listings yet. Create a Draft listing on the right.
                     </div>
-
-                    {order.fulfilmentStatus !== 'Delivered' &&
-                      order.fulfilmentStatus !== 'Refunded' && (
-                        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#F2F2EC]">
-                          {order.fulfilmentStatus === 'Paid' && (
-                            <button
-                              type="button"
-                              onClick={() => onAdvanceOrder(order.id, 'Processing')}
-                              className="px-3 py-1.5 text-xs font-medium bg-[#F3F3EF] hover:bg-[#E4E4DC] rounded-md text-[#111814] cursor-pointer"
+                  ) : (
+                    snapshot.sellerListings.map((lst) => (
+                      <div
+                        key={lst.id}
+                        className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        <div>
+                          <p className="font-mono text-xs text-[#5C665E]">
+                            {lst.id} · {lst.category} ·{' '}
+                            <span
+                              className={
+                                lst.status === 'PUBLISHED'
+                                  ? 'text-[#0B6E4F] font-semibold'
+                                  : 'text-[#B45309] font-semibold'
+                              }
                             >
-                              Mark Processing
-                            </button>
-                          )}
-                          {(order.fulfilmentStatus === 'Paid' ||
-                            order.fulfilmentStatus === 'Processing') && (
-                            <button
-                              type="button"
-                              onClick={() => onAdvanceOrder(order.id, 'Dispatched')}
-                              className="px-3 py-1.5 text-xs font-medium bg-[#F3F3EF] hover:bg-[#E4E4DC] rounded-md text-[#111814] cursor-pointer"
-                            >
-                              Mark Dispatched
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => onAdvanceOrder(order.id, 'Delivered')}
-                            className="px-3 py-1.5 text-xs font-semibold bg-[#0B6E4F] hover:bg-[#09583F] rounded-md text-white cursor-pointer"
-                          >
-                            Confirm Delivery (Release Commission)
-                          </button>
-                          {order.fulfilmentStatus !== 'Disputed' && (
-                            <button
-                              type="button"
-                              onClick={() => onAdvanceOrder(order.id, 'Disputed')}
-                              className="px-3 py-1.5 text-xs font-medium border border-[#E5CFA3] text-[#B45309] rounded-md hover:bg-[#FFFBEB] cursor-pointer"
-                            >
-                              Hold (Dispute)
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => onAdvanceOrder(order.id, 'Refunded')}
-                            className="px-3 py-1.5 text-xs font-medium border border-[#E8D0D0] text-[#B91C1C] rounded-md hover:bg-[#FEF2F2] cursor-pointer"
-                          >
-                            Refund &amp; Reverse
-                          </button>
+                              {lst.status}
+                            </span>
+                          </p>
+                          <p className="font-display text-sm font-semibold text-[#111814] mt-0.5">
+                            {lst.title}
+                          </p>
+                          <p className="font-mono text-xs text-[#4B554E] mt-0.5">
+                            {formatWholeNaira(lst.priceKobo)} · {lst.stock} in stock
+                          </p>
                         </div>
-                      )}
-                  </div>
-                ))}
-              </div>
+
+                        {lst.status === 'DRAFT' && (
+                          <button
+                            type="button"
+                            disabled={!canPublishNow}
+                            title={
+                              canPublishNow
+                                ? 'Publish listing to Marketplace'
+                                : 'SELLER verification must be APPROVED before publishing'
+                            }
+                            onClick={() => onPublishListing(lst.id)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg hover:bg-[#09583F] disabled:opacity-45 shrink-0 cursor-pointer"
+                          >
+                            {canPublishNow ? (
+                              <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
+                            ) : (
+                              <Lock className="w-3.5 h-3.5" aria-hidden="true" />
+                            )}
+                            Publish Listing
+                          </button>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </section>
+
+              {/* Orders & Fulfilment */}
+              <section className="space-y-3">
+                <div>
+                  <h2 className="font-display text-xl font-bold text-[#111814]">
+                    Order Fulfilment &amp; Commission Release Pipeline
+                  </h2>
+                  <p className="text-xs text-[#5C665E]">
+                    Confirming delivery transitions linked Scout commissions from Pending to
+                    Available in the immutable ledger.
+                  </p>
+                </div>
+
+                <div className="bg-white border border-[#E4E4DE] rounded-xl divide-y divide-[#ECECE6]">
+                  {snapshot.orders.length === 0 ? (
+                    <div className="p-6 text-sm text-[#5C665E]">No orders yet.</div>
+                  ) : (
+                    snapshot.orders.map((order) => (
+                      <div key={order.id} className="p-5 space-y-3">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <p className="font-mono text-xs font-semibold text-[#0B6E4F]">
+                              {order.id} ·{' '}
+                              {order.attributionType === 'referral_card'
+                                ? `Referral-Generated (${order.referralEventId})`
+                                : 'Direct Marketplace'}
+                            </p>
+                            <h3 className="mt-1 font-display text-base font-semibold text-[#111814]">
+                              {order.productTitle} (×{order.quantity})
+                            </h3>
+                            <p className="text-xs text-[#5C665E]">
+                              Seller: {order.sellerName} · Merchandise:{' '}
+                              <span className="font-mono text-[#111814]">
+                                {formatKoboToNaira(order.eligibleMerchandiseKobo)}
+                              </span>
+                            </p>
+                          </div>
+
+                          <span className="text-xs font-semibold px-2.5 py-1 rounded bg-[#F3F3EF] text-[#111814]">
+                            {order.fulfilmentStatus}
+                          </span>
+                        </div>
+
+                        {order.fulfilmentStatus !== 'Delivered' &&
+                          order.fulfilmentStatus !== 'Refunded' && (
+                            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#F2F2EC]">
+                              {order.fulfilmentStatus === 'Paid' && (
+                                <button
+                                  type="button"
+                                  onClick={() => onAdvanceOrder(order.id, 'Processing')}
+                                  className="px-3 py-1.5 text-xs font-medium bg-[#F3F3EF] hover:bg-[#E4E4DC] rounded-md text-[#111814] cursor-pointer"
+                                >
+                                  Mark Processing
+                                </button>
+                              )}
+                              {(order.fulfilmentStatus === 'Paid' ||
+                                order.fulfilmentStatus === 'Processing') && (
+                                <button
+                                  type="button"
+                                  onClick={() => onAdvanceOrder(order.id, 'Dispatched')}
+                                  className="px-3 py-1.5 text-xs font-medium bg-[#F3F3EF] hover:bg-[#E4E4DC] rounded-md text-[#111814] cursor-pointer"
+                                >
+                                  Mark Dispatched
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => onAdvanceOrder(order.id, 'Delivered')}
+                                className="px-3 py-1.5 text-xs font-semibold bg-[#0B6E4F] hover:bg-[#09583F] rounded-md text-white cursor-pointer"
+                              >
+                                Confirm Delivery (Release Commission)
+                              </button>
+                              {order.fulfilmentStatus !== 'Disputed' && (
+                                <button
+                                  type="button"
+                                  onClick={() => onAdvanceOrder(order.id, 'Disputed')}
+                                  className="px-3 py-1.5 text-xs font-medium border border-[#E5CFA3] text-[#B45309] rounded-md hover:bg-[#FFFBEB] cursor-pointer"
+                                >
+                                  Hold (Dispute)
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => onAdvanceOrder(order.id, 'Refunded')}
+                                className="px-3 py-1.5 text-xs font-medium border border-[#E8D0D0] text-[#B91C1C] rounded-md hover:bg-[#FEF2F2] cursor-pointer"
+                              >
+                                Refund &amp; Reverse
+                              </button>
+                            </div>
+                          )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </section>
             </div>
 
-            {/* Publish Listing Form */}
+            {/* Create Draft Listing Form */}
             <div className="lg:col-span-5 bg-white border border-[#E4E4DE] rounded-xl p-6 space-y-4 self-start">
               <div className="flex items-center gap-2">
                 <PackagePlus className="w-4 h-4 text-[#0B6E4F]" aria-hidden="true" />
                 <h2 className="font-display text-lg font-bold text-[#111814]">
-                  Publish Product Listing
+                  Create Draft Listing
                 </h2>
               </div>
               <p className="text-xs text-[#5C665E]">
-                Active plan: <strong>{currentPlan.name}</strong> ({sellerStats.activeListingsCount}{' '}
-                of {currentPlan.maxActiveListings} active slots used · 10-day duration).
+                Drafts can be created anytime during onboarding. Publishing consumes a monthly
+                publication slot and requires Seller verification approval.
               </p>
 
-              <form onSubmit={handleCreate} className="space-y-3.5">
+              <form onSubmit={handleCreateDraft} className="space-y-3.5">
                 <div>
                   <label htmlFor="lst-title" className="block text-xs font-medium text-[#4B554E] mb-1">
                     Product Name
@@ -346,30 +813,30 @@ export default function SellerHubView({
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg hover:bg-[#09583F] disabled:opacity-45 cursor-pointer"
+                  className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#111814] rounded-lg hover:bg-[#26332B] disabled:opacity-45 cursor-pointer"
                 >
-                  {submitting ? 'Publishing...' : 'Publish Listing to Marketplace'}
+                  {submitting ? 'Saving Draft...' : 'Save as Draft Listing'}
                 </button>
               </form>
             </div>
           </div>
         </div>
-      ) : (
-        /* Seller Subscription Plans Comparison */
+      )}
+
+      {subTab === 'plans' && (
         <div className="space-y-6">
           <div className="bg-white border border-[#E4E4DE] rounded-xl p-5 flex items-start gap-3">
             <Store className="w-5 h-5 text-[#0B6E4F] shrink-0 mt-0.5" aria-hidden="true" />
             <p className="text-sm text-[#4B554E]">
               Seller subscriptions purchase Seller listing, video, and operational capacity.
-              Subscriptions are strictly separate from the referral commission programme and never
-              create or increase a Scout’s referral commission entitlement.
+              Subscriptions are strictly separate from the referral commission programme.
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {(['starter', 'traction', 'growth', 'sprawl'] as SellerPlanId[]).map((planId) => {
               const plan = SELLER_PLANS[planId];
-              const isCurrent = snapshot.activeScout.sellerPlan === planId;
+              const isCurrent = scout.sellerPlan === planId;
               return (
                 <div
                   key={planId}
@@ -379,9 +846,7 @@ export default function SellerHubView({
                 >
                   <div>
                     <div className="flex items-center justify-between">
-                      <h3 className="font-display text-xl font-bold text-[#111814]">
-                        {plan.name}
-                      </h3>
+                      <h3 className="font-display text-xl font-bold text-[#111814]">{plan.name}</h3>
                       {isCurrent && (
                         <span className="text-xs font-semibold text-[#0B6E4F]">Current</span>
                       )}
@@ -409,15 +874,7 @@ export default function SellerHubView({
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-3.5 h-3.5 text-[#0B6E4F] shrink-0" />
-                        <span>{plan.listingDurationDays}-day listing duration · 6 images</span>
-                      </li>
-                      <li className="flex items-center gap-2">
-                        <Check className="w-3.5 h-3.5 text-[#0B6E4F] shrink-0" />
                         <span>Video: {plan.videoQuota}</span>
-                      </li>
-                      <li className="flex items-center gap-2">
-                        <Check className="w-3.5 h-3.5 text-[#0B6E4F] shrink-0" />
-                        <span>{plan.analyticsLevel} analytics &amp; order tools</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-3.5 h-3.5 text-[#0B6E4F] shrink-0" />
@@ -445,6 +902,116 @@ export default function SellerHubView({
               );
             })}
           </div>
+        </div>
+      )}
+
+      {subTab === 'team' && (
+        <div className="space-y-6">
+          {!currentPlan.sellerTeamAccounts ? (
+            <div className="bg-white border border-[#E4E4DE] rounded-xl p-8 space-y-3">
+              <div className="flex items-center gap-2 text-[#B45309]">
+                <Lock className="w-5 h-5" aria-hidden="true" />
+                <h2 className="font-display text-lg font-bold text-[#111814]">
+                  Seller Team Accounts Require the Sprawl Plan
+                </h2>
+              </div>
+              <p className="text-sm text-[#4B554E]">
+                Business Sellers on the Sprawl plan (₦250,000/mo) can delegate listing, order, and
+                analytics permissions to team members while keeping primary Scout identities
+                separate.
+              </p>
+              <button
+                type="button"
+                onClick={() => setSubTab('plans')}
+                className="px-4 py-2 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg cursor-pointer"
+              >
+                View Sprawl Plan Entitlements
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              <div className="lg:col-span-7 bg-white border border-[#E4E4DE] rounded-xl divide-y divide-[#ECECE6]">
+                {scout.teamMembers.map((m) => (
+                  <div key={m.id} className="p-4 flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-[#111814]">
+                        {m.displayName}{' '}
+                        <span className="font-mono text-xs text-[#5C665E]">@{m.username}</span>
+                      </p>
+                      <p className="text-xs text-[#5C665E]">
+                        {m.role} · {m.email}
+                      </p>
+                    </div>
+                    {m.role !== 'BUSINESS_OWNER' && (
+                      <button
+                        type="button"
+                        onClick={() => onManageTeam({ operation: 'revoke', memberId: m.id })}
+                        className="px-3 py-1.5 text-xs font-medium text-[#B91C1C] border border-[#E8D0D0] rounded-md cursor-pointer"
+                      >
+                        Revoke
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="lg:col-span-5 bg-white border border-[#E4E4DE] rounded-xl p-5 space-y-4">
+                <h3 className="font-display text-lg font-bold text-[#111814]">
+                  Add Business Team Member
+                </h3>
+                <form onSubmit={handleInviteTeam} className="space-y-3">
+                  <input
+                    type="email"
+                    required
+                    value={memberEmail}
+                    onChange={(e) => setMemberEmail(e.target.value)}
+                    placeholder="Registered Scout email..."
+                    className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
+                  />
+                  <select
+                    value={memberRole}
+                    onChange={(e) =>
+                      setMemberRole(e.target.value as 'BUSINESS_ADMIN' | 'TEAM_MEMBER')
+                    }
+                    className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg bg-white"
+                  >
+                    <option value="TEAM_MEMBER">Team Member</option>
+                    <option value="BUSINESS_ADMIN">Business Admin</option>
+                  </select>
+                  <div className="space-y-1.5 text-xs text-[#4B554E]">
+                    {(
+                      [
+                        ['canManageListings', 'Manage Listings'],
+                        ['canManageOrders', 'Manage Orders'],
+                        ['canViewAnalytics', 'View Analytics'],
+                        ['canManageBilling', 'Manage Billing'],
+                        ['canManageTeam', 'Manage Team'],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <label key={key} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={memberPerms[key]}
+                          onChange={(e) =>
+                            setMemberPerms((p) => ({ ...p, [key]: e.target.checked }))
+                          }
+                          className="accent-[#0B6E4F]"
+                        />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="w-full py-2.5 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg cursor-pointer"
+                  >
+                    Add Team Member
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -1,4 +1,9 @@
 {
   "/api/nairascout/route": "app/api/nairascout/route.js",
-  "/page": "app/page.js"
+  "/api/seller/listings/route": "app/api/seller/listings/route.js",
+  "/api/auth/session/route": "app/api/auth/session/route.js",
+  "/api/seller/onboarding/route": "app/api/seller/onboarding/route.js",
+  "/api/seller/listings/[id]/publish/route": "app/api/seller/listings/[id]/publish/route.js",
+  "/api/admin/route": "app/api/admin/route.js",
+  "/api/settings/route": "app/api/settings/route.js"
 }
