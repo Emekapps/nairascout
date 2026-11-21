@@ -1,0 +1,275 @@
+'use client';
+
+import { useMemo, useState } from 'react';
+import {
+  AlertTriangle,
+  Banknote,
+  CheckCircle2,
+  Clock,
+  RotateCcw,
+  Search,
+  ShieldCheck,
+} from 'lucide-react';
+import type { LedgerEntryStatus, NairaScoutSnapshot } from '@/lib/nairascout-store';
+import { formatKoboToNaira } from '@/lib/commission-engine';
+
+interface WalletViewProps {
+  snapshot: NairaScoutSnapshot;
+}
+
+function StatusLabel({ status }: { status: LedgerEntryStatus }) {
+  if (status === 'Available') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#0B6E4F]">
+        <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+        Available
+      </span>
+    );
+  }
+  if (status === 'Pending') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#B45309]">
+        <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+        Pending
+      </span>
+    );
+  }
+  if (status === 'On Hold') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#B45309]">
+        <AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" />
+        On Hold
+      </span>
+    );
+  }
+  if (status === 'Paid') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#111814]">
+        <Banknote className="w-3.5 h-3.5" aria-hidden="true" />
+        Paid
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#B91C1C]">
+      <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+      Reversed
+    </span>
+  );
+}
+
+export default function WalletView({ snapshot }: WalletViewProps) {
+  const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const { wallet, activeScout } = snapshot;
+
+  const filteredLedger = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return snapshot.ledgerEntries.filter((entry) => {
+      const statusOk = statusFilter === 'All' || entry.status === statusFilter;
+      const textOk =
+        !q ||
+        entry.reference.toLowerCase().includes(q) ||
+        entry.orderId.toLowerCase().includes(q) ||
+        entry.description.toLowerCase().includes(q);
+      return statusOk && textOk;
+    });
+  }, [snapshot.ledgerEntries, statusFilter, searchQuery]);
+
+  return (
+    <div className="space-y-10">
+      <div className="border-b border-[#E4E4DE] pb-6">
+        <h1 className="font-display text-3xl font-bold text-[#111814]">
+          Referral Earnings Wallet &amp; Ledger
+        </h1>
+        <p className="mt-1.5 text-sm text-[#4B554E] max-w-2xl">
+          Internal accounting derived strictly from the immutable financial ledger. Separate from
+          Seller proceeds. Paid and Reversed figures are cumulative historical states.
+        </p>
+      </div>
+
+      {/* Five Distinct Wallet States */}
+      <section className="grid grid-cols-2 md:grid-cols-5 gap-5">
+        <div className="bg-white border border-[#E4E4DE] rounded-xl p-5">
+          <p className="text-xs text-[#5C665E]">Available</p>
+          <p className="mt-2 font-mono text-2xl font-bold text-[#0B6E4F] tabular-nums">
+            {formatKoboToNaira(wallet.availableKobo)}
+          </p>
+          <p className="mt-1 text-xs text-[#5C665E]">Passed fulfilment &amp; checks</p>
+        </div>
+
+        <div className="bg-white border border-[#E4E4DE] rounded-xl p-5">
+          <p className="text-xs text-[#5C665E]">Pending</p>
+          <p className="mt-2 font-mono text-2xl font-bold text-[#B45309] tabular-nums">
+            {formatKoboToNaira(wallet.pendingKobo)}
+          </p>
+          <p className="mt-1 text-xs text-[#5C665E]">Not withdrawable yet</p>
+        </div>
+
+        <div className="bg-white border border-[#E4E4DE] rounded-xl p-5">
+          <p className="text-xs text-[#5C665E]">On Hold</p>
+          <p className="mt-2 font-mono text-2xl font-bold text-[#111814] tabular-nums">
+            {formatKoboToNaira(wallet.onHoldKobo)}
+          </p>
+          <p className="mt-1 text-xs text-[#5C665E]">Dispute or review hold</p>
+        </div>
+
+        <div className="bg-[#F5F5F0] border border-[#E4E4DE] rounded-xl p-5">
+          <p className="text-xs text-[#5C665E]">Paid (Cumulative)</p>
+          <p className="mt-2 font-mono text-2xl font-semibold text-[#111814] tabular-nums">
+            {formatKoboToNaira(wallet.paidKobo)}
+          </p>
+          <p className="mt-1 text-xs text-[#5C665E]">Settled to bank account</p>
+        </div>
+
+        <div className="bg-[#F5F5F0] border border-[#E4E4DE] rounded-xl p-5">
+          <p className="text-xs text-[#5C665E]">Reversed (Cumulative)</p>
+          <p className="mt-2 font-mono text-2xl font-semibold text-[#B91C1C] tabular-nums">
+            {formatKoboToNaira(wallet.reversedKobo)}
+          </p>
+          <p className="mt-1 text-xs text-[#5C665E]">Refunds &amp; cancellations</p>
+        </div>
+      </section>
+
+      {/* Monthly Payout Policy & KYC Readiness */}
+      <section className="bg-white border border-[#E4E4DE] rounded-xl p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+        <div className="lg:col-span-8 space-y-2">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-[#0B6E4F]" aria-hidden="true" />
+            <h2 className="font-display text-lg font-bold text-[#111814]">
+              Monthly Payout Cycle — 15th of Each Month
+            </h2>
+          </div>
+          <p className="text-sm text-[#4B554E] leading-relaxed">
+            Commissions that became Available during the preceding calendar month qualify once
+            cumulative eligible balance meets the ₦5,000 minimum, KYC is verified, and a
+            same-name Nigerian bank account is confirmed. NairaScout does not offer on-demand
+            withdrawals.
+          </p>
+          <div className="pt-2 flex flex-wrap gap-6 text-xs text-[#4B554E]">
+            <span>
+              KYC Identity:{' '}
+              <strong className="text-[#0B6E4F]">
+                {activeScout.kycVerified ? 'Verified' : 'Pending'}
+              </strong>
+            </span>
+            <span>
+              Bank Account:{' '}
+              <strong className="text-[#111814]">{activeScout.bankSummary}</strong>
+            </span>
+            <span>
+              Next Scheduled Run:{' '}
+              <strong className="text-[#111814]">{wallet.nextPayoutDate}</strong>
+            </span>
+          </div>
+        </div>
+
+        <div className="lg:col-span-4 border-t lg:border-t-0 lg:border-l border-[#ECECE6] pt-4 lg:pt-0 lg:pl-6 space-y-1.5">
+          <p className="text-xs text-[#5C665E]">Preceding-Month Eligible Available</p>
+          <p className="font-mono text-xl font-bold text-[#111814] tabular-nums">
+            {formatKoboToNaira(wallet.precedingMonthAvailableKobo)}
+          </p>
+          <p className="text-xs text-[#0B6E4F] font-medium">
+            {wallet.eligibleForNextPayout
+              ? 'Minimum ₦5,000 threshold satisfied'
+              : 'Accumulating toward ₦5,000 payout minimum'}
+          </p>
+        </div>
+      </section>
+
+      {/* Immutable Ledger Table */}
+      <section className="space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h2 className="font-display text-xl font-bold text-[#111814]">
+              Immutable Financial Ledger
+            </h2>
+            <p className="text-xs text-[#5C665E]">
+              Entries are append-only; delivery releases and refund reversals create new linked
+              references.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative">
+              <Search
+                className="w-4 h-4 text-[#6C776E] absolute left-3 top-1/2 -translate-y-1/2"
+                aria-hidden="true"
+              />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search ref or order ID..."
+                aria-label="Search ledger entries"
+                className="pl-9 pr-3 py-2 text-xs bg-white border border-[#D8D8D0] rounded-lg w-52 focus:outline-none focus:border-[#0B6E4F]"
+              />
+            </div>
+
+            <div className="flex items-center gap-1 p-1 bg-[#EFEFE9] rounded-lg">
+              {['All', 'Available', 'Pending', 'On Hold', 'Paid', 'Reversed'].map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => setStatusFilter(st)}
+                  className={`px-2.5 py-1 text-xs font-medium rounded-md whitespace-nowrap cursor-pointer ${
+                    statusFilter === st ? 'bg-white text-[#111814] shadow-xs' : 'text-[#556158]'
+                  }`}
+                >
+                  {st}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white border border-[#E4E4DE] rounded-xl overflow-x-auto">
+          {filteredLedger.length === 0 ? (
+            <div className="p-10 text-center text-sm text-[#5C665E]">
+              No ledger entries match the selected filter.
+            </div>
+          ) : (
+            <table className="w-full text-left border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-[#E4E4DE] text-xs text-[#5C665E]">
+                  <th className="py-3 px-4 font-medium">Ledger Reference</th>
+                  <th className="py-3 px-4 font-medium">Order / Event</th>
+                  <th className="py-3 px-4 font-medium">Gen · Fraction</th>
+                  <th className="py-3 px-4 font-medium">Description</th>
+                  <th className="py-3 px-4 font-medium">Status</th>
+                  <th className="py-3 px-4 font-medium text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#ECECE6]">
+                {filteredLedger.map((entry) => (
+                  <tr key={entry.id} className="hover:bg-[#FAFAF8]">
+                    <td className="py-3 px-4 font-mono text-xs text-[#111814] whitespace-nowrap">
+                      {entry.reference}
+                    </td>
+                    <td className="py-3 px-4 font-mono text-xs text-[#4B554E] whitespace-nowrap">
+                      {entry.orderId}
+                      {entry.referralEventId ? ` · ${entry.referralEventId}` : ''}
+                    </td>
+                    <td className="py-3 px-4 font-mono text-xs text-[#4B554E] whitespace-nowrap">
+                      Gen {entry.generation} ({entry.fractionLabel})
+                    </td>
+                    <td className="py-3 px-4 text-xs text-[#3B443E] max-w-md">
+                      {entry.description}
+                    </td>
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      <StatusLabel status={entry.status} />
+                    </td>
+                    <td className="py-3 px-4 font-mono text-right tabular-nums font-semibold text-[#111814] whitespace-nowrap">
+                      {formatKoboToNaira(entry.amountKobo)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}

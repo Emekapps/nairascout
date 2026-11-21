@@ -1,0 +1,4 @@
+{
+  "/api/nairascout/route": "app/api/nairascout/route.js",
+  "/page": "app/page.js"
+}

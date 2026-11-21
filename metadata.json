@@ -1,0 +1,6 @@
+{
+  "name": "NairaScout",
+  "description": "A thirteen-generation referral marketing and social commerce marketplace connecting Nigerian Sellers, product Scouts, and buyers with transparent referral-card attribution and kobo-exact commission accounting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
