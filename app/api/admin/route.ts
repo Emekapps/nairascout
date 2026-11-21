@@ -19,25 +19,25 @@ export async function GET(req: NextRequest) {
 
   try {
     const signPath = req.nextUrl.searchParams.get('signPath');
-    const adminData = getAdminConsoleSnapshot(identity.userId);
+    const adminData = await getAdminConsoleSnapshot(identity.userId);
 
     if (signPath) {
       const supabaseAdmin = createSupabaseAdminClient();
-      if (supabaseAdmin) {
-        const cleanPath = signPath.replace(/^verification-docs\//, '');
-        const { data, error } = await supabaseAdmin.storage
-          .from('verification-docs')
-          .createSignedUrl(cleanPath, 60);
-        if (error) {
-          return NextResponse.json({ error: error.message }, { status: 400 });
-        }
-        return NextResponse.json({ signedUrl: data.signedUrl, expiresInSeconds: 60 });
+      if (!supabaseAdmin) {
+        return NextResponse.json(
+          { error: 'Supabase service role key is not configured for signed document access.' },
+          { status: 503 }
+        );
       }
-      return NextResponse.json({
-        signedUrl: null,
-        previewDocumentSummary: `Preview signed token (60s TTL) for private object: ${signPath}`,
-        expiresInSeconds: 60,
-      });
+
+      const cleanPath = signPath.replace(/^verification-docs\//, '');
+      const { data, error } = await supabaseAdmin.storage
+        .from('verification-docs')
+        .createSignedUrl(cleanPath, 60);
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+      return NextResponse.json({ signedUrl: data.signedUrl, expiresInSeconds: 60 });
     }
 
     return NextResponse.json(adminData);
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     const action = String(body?.action || '');
 
     if (action === 'review_verification') {
-      const updated = adminReviewVerification(identity.userId, {
+      const updated = await adminReviewVerification(identity.userId, {
         verificationId: String(body.verificationId || ''),
         decision: body.decision as 'APPROVED' | 'REJECTED' | 'ACTION_REQUIRED',
         reviewerNotes: String(body.reviewerNotes || ''),
@@ -72,12 +72,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         ok: true,
         verification: updated,
-        admin: getAdminConsoleSnapshot(identity.userId),
+        admin: await getAdminConsoleSnapshot(identity.userId),
       });
     }
 
     if (action === 'user_governance') {
-      adminApplyUserAction(identity.userId, {
+      await adminApplyUserAction(identity.userId, {
         targetUserId: String(body.targetUserId || ''),
         actionType: body.actionType,
         accountStatus: body.accountStatus as AccountStatus | undefined,
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
       });
       return NextResponse.json({
         ok: true,
-        admin: getAdminConsoleSnapshot(identity.userId),
+        admin: await getAdminConsoleSnapshot(identity.userId),
       });
     }
 

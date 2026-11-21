@@ -19,6 +19,7 @@ import type {
 import { SELLER_PLANS } from '@/lib/seller-plans';
 import { formatKoboToNaira, formatWholeNaira } from '@/lib/commission-engine';
 import type { SellerTeamPermissions } from '@/lib/db/schema';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
 interface SellerHubViewProps {
   snapshot: NairaScoutSnapshot;
@@ -76,6 +77,7 @@ export default function SellerHubView({
   const [bizReg, setBizReg] = useState('');
   const [bizAddr, setBizAddr] = useState('');
   const [docFilename, setDocFilename] = useState('gov-id-nin.pdf');
+  const [docFile, setDocFile] = useState<File | null>(null);
   const [wizardPlan, setWizardPlan] = useState<SellerPlanId>('starter');
   const [termsAccepted, setTermsAccepted] = useState(false);
 
@@ -126,6 +128,17 @@ export default function SellerHubView({
     const handleCompleteWizard = async (e: React.FormEvent) => {
       e.preventDefault();
       setSubmitting(true);
+      let targetPath = `verification-docs/${scout.id}/${docFilename || 'kyc.pdf'}`;
+      const supabase = createSupabaseBrowserClient();
+      if (docFile && supabase) {
+        const objectKey = `${scout.id}/${Date.now()}-${docFile.name}`;
+        const { error: uploadErr } = await supabase.storage
+          .from('verification-docs')
+          .upload(objectKey, docFile, { upsert: true });
+        if (!uploadErr) {
+          targetPath = `verification-docs/${objectKey}`;
+        }
+      }
       await onActivateSeller({
         sellerType,
         sellerName: sellerName || `${scout.displayName} Store`,
@@ -134,7 +147,7 @@ export default function SellerHubView({
         businessRegNumber: bizReg,
         businessAddress: bizAddr,
         planId: wizardPlan,
-        evidencePaths: [`verification-docs/${scout.id}/${docFilename || 'kyc.pdf'}`],
+        evidencePaths: [targetPath],
         termsAccepted,
       });
       setSubmitting(false);
@@ -323,7 +336,10 @@ export default function SellerHubView({
                   type="file"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
-                    if (f) setDocFilename(f.name);
+                    if (f) {
+                      setDocFile(f);
+                      setDocFilename(f.name);
+                    }
                   }}
                   className="block w-full text-xs text-[#4B554E] file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-[#F3F3EF] file:font-semibold"
                 />

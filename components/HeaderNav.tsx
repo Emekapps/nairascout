@@ -14,7 +14,6 @@ interface HeaderNavProps {
   inboxCount: number;
   authenticated: boolean;
   activeScout: ActiveScoutDTO | null;
-  adminBootstrapAvailable: boolean;
   onLogout: () => Promise<void>;
 }
 
@@ -33,7 +32,6 @@ export default function HeaderNav({
   inboxCount,
   authenticated,
   activeScout,
-  adminBootstrapAvailable,
   onLogout,
 }: HeaderNavProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -114,14 +112,14 @@ export default function HeaderNav({
                     Account Settings
                   </Link>
 
-                  {(activeScout.adminRole || adminBootstrapAvailable) && (
+                  {activeScout.adminRole && (
                     <Link
                       href="/admin"
                       onClick={() => setMenuOpen(false)}
                       className="flex items-center gap-2 px-3.5 py-2 text-xs text-[#111814] hover:bg-[#F5F5F0]"
                     >
                       <Shield className="w-3.5 h-3.5 text-[#0B6E4F]" aria-hidden="true" />
-                      {activeScout.adminRole ? 'Admin Console' : 'Claim Super Admin'}
+                      Admin Console
                     </Link>
                   )}
 

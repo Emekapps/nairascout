@@ -24,11 +24,11 @@ export async function POST(
 
   try {
     const { id } = await context.params;
-    const listing = publishSellerListingById(identity.userId, id);
+    const listing = await publishSellerListingById(identity.userId, id);
     return NextResponse.json({
       ok: true,
       listing,
-      snapshot: getNairaScoutSnapshot(identity.userId),
+      snapshot: await getNairaScoutSnapshot(identity.userId),
     });
   } catch (err) {
     if (err instanceof AuthorizationError) {

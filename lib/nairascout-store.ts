@@ -1,9 +1,10 @@
-import crypto from 'node:crypto';
+import { and, desc, eq, inArray, or } from 'drizzle-orm';
 import {
   AncestorNode,
   CommissionBreakdown,
   COMMISSION_RULE_VERSION,
   calculateThirteenGenerationCommissions,
+  selectCommissionSchedule,
   validateAncestryRelationship,
 } from './commission-engine';
 import {
@@ -19,13 +20,36 @@ import {
   assertAdminRole,
   assertCanManageSellerDrafts,
   assertCanManageSellerTeam,
-  assertCanPublishListing,
   assertCanParticipateAsScout,
+  assertCanPublishListing,
   toPublicScoutProfileDTO,
 } from './auth/rbac';
-import { SellerTeamPermissions } from './db/schema';
-import { hashPassword, verifyPassword } from './auth/session';
-
+import { loadDbAuthContext, SupabaseSessionIdentity } from './auth/session';
+import { getDb, isPostgresConfigured, NairaScoutDb, requireDb } from './db';
+import {
+  abuseReports,
+  auditLogs,
+  platformAdminRoles,
+  referralAncestry,
+  scoutProfiles,
+  scoutsListContacts,
+  scoutsListInvitations,
+  sellerProfiles,
+  sellerTeamMembers,
+  SellerTeamPermissions,
+  userBlocks,
+  users,
+  verificationRecords,
+} from './db/schema';
+import {
+  commissionLedgerEntries,
+  ensureCommerceTables,
+  marketplaceOrders,
+  platformNotifications,
+  productListings,
+  productReferralEvents,
+  supportCases,
+} from './db/commerce-schema';
 import {
   SELLER_PLANS,
   SellerPlanId,
@@ -33,8 +57,21 @@ import {
   planEnumToId,
   planIdToEnum,
 } from './seller-plans';
+import { isSupabaseConfigured } from './supabase/server';
+
 export { SELLER_PLANS, planEnumToId, planIdToEnum };
 export type { SellerPlanId, SellerPlanSpec };
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(val: string | null | undefined): val is string {
+  return Boolean(val && UUID_REGEX.test(val.trim()));
+}
+
+function getExpiryDays(): number {
+  const raw = Number(process.env.SCOUTS_LIST_INVITATION_EXPIRY_DAYS || '14');
+  return Number.isFinite(raw) && raw > 0 ? raw : 14;
+}
 
 export type VerificationCategory =
   | 'CONTACT'
@@ -44,41 +81,6 @@ export type VerificationCategory =
   | 'PAYOUT_BANK';
 
 export type InvitationPolicy = 'EVERYONE' | 'CONTACTS_ONLY' | 'NOBODY';
-
-export interface UserAccountRecord {
-  id: string;
-  email: string;
-  phone: string | null;
-  passwordHash: string | null;
-  accountStatus: AccountStatus;
-  restrictionReason: string | null;
-  closedAt: string | null;
-  createdAt: string;
-}
-
-export interface ScoutProfileRecord {
-  userId: string;
-  username: string;
-  displayName: string;
-  avatarUrl: string | null;
-  bio: string | null;
-  locationState: string;
-  preferredCategories: string[];
-  invitationPolicy: InvitationPolicy;
-  muteReferrals: boolean;
-  profileVisibility: 'PUBLIC' | 'NETWORK_ONLY';
-  bankSummary: string;
-  eligibleForCommission: boolean;
-  ineligibilityReason?: string;
-}
-
-export interface ReferralAncestryRecord {
-  scoutUserId: string;
-  directReferrerId: string | null;
-  attributionSource: 'REFERRAL_LINK' | 'REFERRAL_CARD' | 'ORGANIC';
-  referralEventId: string | null;
-  lockedAt: string;
-}
 
 export interface SellerProfileRecord {
   id: string;
@@ -174,12 +176,6 @@ export interface ScoutsListInvitation {
   status: 'pending' | 'accepted' | 'rejected' | 'withdrawn' | 'expired';
   createdAt: string;
   expiresAt: string;
-}
-
-export interface UserBlockRecord {
-  blockerId: string;
-  blockedId: string;
-  createdAt: string;
 }
 
 export interface AbuseReportRecord {
@@ -347,7 +343,8 @@ export interface ActiveScoutDTO {
 
 export interface NairaScoutSnapshot {
   authenticated: boolean;
-  adminBootstrapAvailable: boolean;
+  dbConfigured: boolean;
+  supabaseConfigured: boolean;
   activeScout: ActiveScoutDTO | null;
   products: ProductListing[];
   sellerListings: ProductListing[];
@@ -377,1545 +374,57 @@ export interface NairaScoutSnapshot {
   allScoutsDirectory: PublicScoutProfileDTO[];
 }
 
-interface OtpChallenge {
-  email: string;
-  codeHash: string;
-  expiresAt: number;
+// ============================================================================
+// INTERNAL POSTGRESQL HELPERS
+// ============================================================================
+
+async function ensureTablesReady(db: NairaScoutDb) {
+  await ensureCommerceTables((q) => db.execute(q));
 }
 
-interface InternalStore {
-  users: Record<string, UserAccountRecord>;
-  scouts: Record<string, ScoutProfileRecord>;
-  ancestry: Record<string, ReferralAncestryRecord>;
-  sellers: Record<string, SellerProfileRecord>;
-  teamMembers: SellerTeamMemberRecord[];
-  verifications: VerificationRecord[];
-  products: ProductListing[];
-  scoutsList: ScoutsListContact[];
-  invitations: ScoutsListInvitation[];
-  userBlocks: UserBlockRecord[];
-  abuseReports: AbuseReportRecord[];
-  adminRoles: Record<string, AdminRole>;
-  auditLogs: AuditLogRecord[];
-  referralEvents: ProductReferralEvent[];
-  orders: MarketplaceOrder[];
-  ledger: LedgerEntry[];
-  notifications: PlatformNotification[];
-  supportCases: SupportCase[];
-  monthlyPublicationsBySeller: Record<string, number>;
-  otpChallenges: Record<string, OtpChallenge>;
-  adminClaimed: boolean;
+function emptyWallet(): WalletSummary {
+  return {
+    pendingKobo: 0,
+    availableKobo: 0,
+    onHoldKobo: 0,
+    paidKobo: 0,
+    reversedKobo: 0,
+    minimumPayoutKobo: 500000,
+    nextPayoutDate: '2026-12-15',
+    precedingMonthAvailableKobo: 0,
+    eligibleForNextPayout: false,
+  };
 }
 
-function getExpiryDays(): number {
-  const raw = Number(process.env.SCOUTS_LIST_INVITATION_EXPIRY_DAYS || '14');
-  return Number.isFinite(raw) && raw > 0 ? raw : 14;
-}
-
-function createInitialStore(): InternalStore {
-  const users: Record<string, UserAccountRecord> = {};
-  const scouts: Record<string, ScoutProfileRecord> = {};
-  const ancestry: Record<string, ReferralAncestryRecord> = {};
-
-  const seedScout = (params: {
-    id: string;
-    email: string;
-    handle: string;
-    displayName: string;
-    city: string;
-    directReferrerId: string | null;
-    eligible?: boolean;
-    ineligibilityReason?: string;
-    bankSummary: string;
-    invitePolicy?: InvitationPolicy;
-    joinedAt: string;
-  }) => {
-    users[params.id] = {
-      id: params.id,
-      email: params.email,
-      phone: null,
-      passwordHash: null, // Passwordless OTP / preview sign-in unless registered with password
-      accountStatus: 'ACTIVE',
-      restrictionReason: null,
-      closedAt: null,
-      createdAt: `${params.joinedAt}T09:00:00Z`,
-    };
-    scouts[params.id] = {
-      userId: params.id,
-      username: params.handle,
-      displayName: params.displayName,
-      avatarUrl: null,
-      bio: `${params.city}-based NairaScout member.`,
-      locationState: params.city,
-      preferredCategories: ['Home & Craft', 'Audio & Tech'],
-      invitationPolicy: params.invitePolicy ?? 'EVERYONE',
-      muteReferrals: false,
-      profileVisibility: 'PUBLIC',
-      bankSummary: params.bankSummary,
-      eligibleForCommission: params.eligible ?? true,
-      ineligibilityReason: params.ineligibilityReason,
-    };
-    ancestry[params.id] = {
-      scoutUserId: params.id,
-      directReferrerId: params.directReferrerId,
-      attributionSource: params.directReferrerId ? 'REFERRAL_LINK' : 'ORGANIC',
-      referralEventId: null,
-      lockedAt: `${params.joinedAt}T09:00:00Z`,
-    };
-  };
-
-  seedScout({
-    id: '10000000-0000-4000-8000-000000000013',
-    email: 'chiefo@nairascout.ng',
-    handle: 'chiefo_abuja',
-    displayName: 'Chief O. Nwosu',
-    city: 'Abuja',
-    directReferrerId: null,
-    bankSummary: 'Zenith Bank · ****4102',
-    invitePolicy: 'CONTACTS_ONLY',
-    joinedAt: '2025-01-12',
-  });
-  seedScout({
-    id: '10000000-0000-4000-8000-000000000012',
-    email: 'bimpe@nairascout.ng',
-    handle: 'bimpe_curates',
-    displayName: 'Bimpe Adeyemi',
-    city: 'Ibadan',
-    directReferrerId: '10000000-0000-4000-8000-000000000013',
-    bankSummary: 'GTBank · ****1190',
-    joinedAt: '2025-02-03',
-  });
-  seedScout({
-    id: '10000000-0000-4000-8000-000000000011',
-    email: 'musa@nairascout.ng',
-    handle: 'musa_kano',
-    displayName: 'Musa Danjuma',
-    city: 'Kano',
-    directReferrerId: '10000000-0000-4000-8000-000000000012',
-    eligible: false,
-    ineligibilityReason: 'Dormant verification review',
-    bankSummary: 'Pending verification',
-    invitePolicy: 'CONTACTS_ONLY',
-    joinedAt: '2025-02-28',
-  });
-  seedScout({
-    id: '10000000-0000-4000-8000-000000000010',
-    email: 'esther@nairascout.ng',
-    handle: 'esther_ph',
-    displayName: 'Esther Briggs',
-    city: 'Port Harcourt',
-    directReferrerId: '10000000-0000-4000-8000-000000000011',
-    bankSummary: 'Access Bank · ****8841',
-    joinedAt: '2025-03-19',
-  });
-  seedScout({
-    id: '10000000-0000-4000-8000-000000000009',
-    email: 'segun@nairascout.ng',
-    handle: 'segun_tech',
-    displayName: 'Segun Lawal',
-    city: 'Lagos',
-    directReferrerId: '10000000-0000-4000-8000-000000000010',
-    bankSummary: 'Kuda · ****3019',
-    joinedAt: '2025-04-04',
-  });
-  seedScout({
-    id: '10000000-0000-4000-8000-000000000008',
-    email: 'halima@nairascout.ng',
-    handle: 'halima_style',
-    displayName: 'Halima Bello',
-    city: 'Kaduna',
-    directReferrerId: '10000000-0000-4000-8000-000000000009',
-    bankSummary: 'UBA · ****5520',
-    joinedAt: '2025-05-11',
-  });
-  seedScout({
-    id: '10000000-0000-4000-8000-000000000007',
-    email: 'ifeanyi@nairascout.ng',
-    handle: 'ifeanyi_enugu',
-    displayName: 'Ifeanyi Eze',
-    city: 'Enugu',
-    directReferrerId: '10000000-0000-4000-8000-000000000008',
-    bankSummary: 'Fidelity · ****7412',
-    joinedAt: '2025-06-08',
-  });
-  seedScout({
-    id: '10000000-0000-4000-8000-000000000006',
-    email: 'zainab@nairascout.ng',
-    handle: 'zainab_home',
-    displayName: 'Zainab Yusuf',
-    city: 'Abuja',
-    directReferrerId: '10000000-0000-4000-8000-000000000007',
-    bankSummary: 'Stanbic · ****9204',
-    joinedAt: '2025-07-15',
-  });
-  seedScout({
-    id: '10000000-0000-4000-8000-000000000005',
-    email: 'damilola@nairascout.ng',
-    handle: 'damilola_vi',
-    displayName: 'Damilola Ogunleye',
-    city: 'Lagos',
-    directReferrerId: '10000000-0000-4000-8000-000000000006',
-    bankSummary: 'GTBank · ****6310',
-    joinedAt: '2025-08-01',
-  });
-  seedScout({
-    id: '10000000-0000-4000-8000-000000000004',
-    email: 'chidi@nairascout.ng',
-    handle: 'chidi_market',
-    displayName: 'Chidi Obi',
-    city: 'Onitsha',
-    directReferrerId: '10000000-0000-4000-8000-000000000005',
-    bankSummary: 'Zenith Bank · ****2049',
-    joinedAt: '2025-09-10',
-  });
-  seedScout({
-    id: '10000000-0000-4000-8000-000000000003',
-    email: 'folake@nairascout.ng',
-    handle: 'folake_lagos',
-    displayName: 'Folake Coker',
-    city: 'Lagos',
-    directReferrerId: '10000000-0000-4000-8000-000000000004',
-    bankSummary: 'Access Bank · ****4478',
-    joinedAt: '2025-10-05',
-  });
-  seedScout({
-    id: '10000000-0000-4000-8000-000000000002',
-    email: 'kemi@nairascout.ng',
-    handle: 'kemi_finds',
-    displayName: 'Kemi Balogun',
-    city: 'Lagos',
-    directReferrerId: '10000000-0000-4000-8000-000000000003',
-    bankSummary: 'GTBank · ****8123',
-    joinedAt: '2025-11-12',
-  });
-  seedScout({
-    id: '10000000-0000-4000-8000-000000000001',
-    email: 'tunde@nairascout.ng',
-    handle: 'tunde_ng',
-    displayName: 'Tunde Bakare',
-    city: 'Lagos',
-    directReferrerId: '10000000-0000-4000-8000-000000000002',
-    bankSummary: 'GTBank · ****0921',
-    joinedAt: '2025-12-01',
-  });
-  // Primary Scout: Amara Okafor
-  const AMARA_ID = '20000000-0000-4000-8000-000000000001';
-  seedScout({
-    id: AMARA_ID,
-    email: 'amara@nairascout.ng',
-    handle: 'amara_scout',
-    displayName: 'Amara Okafor',
-    city: 'Lagos',
-    directReferrerId: '10000000-0000-4000-8000-000000000001',
-    bankSummary: 'GTBank · ****4829 (Verified Same-Name)',
-    joinedAt: '2026-01-14',
-  });
-
-  // Downstream Sellers & Scouts
-  const ADAEZE_ID = '30000000-0000-4000-8000-000000000001';
-  const YEMI_ID = '30000000-0000-4000-8000-000000000002';
-  const ZURI_ID = '30000000-0000-4000-8000-000000000003';
-  const KANO_ID = '30000000-0000-4000-8000-000000000004';
-  const NGOZI_ID = '30000000-0000-4000-8000-000000000005';
-  const IBRAHIM_ID = '30000000-0000-4000-8000-000000000006';
-  const SOLA_ID = '30000000-0000-4000-8000-000000000007';
-
-  seedScout({
-    id: ADAEZE_ID,
-    email: 'adaeze@nairascout.ng',
-    handle: 'adaeze_atelier',
-    displayName: 'Adaeze Crafts & Home',
-    city: 'Abuja',
-    directReferrerId: AMARA_ID,
-    bankSummary: 'Zenith Bank · ****3391',
-    joinedAt: '2026-02-02',
-  });
-  seedScout({
-    id: YEMI_ID,
-    email: 'yemi@nairascout.ng',
-    handle: 'yemi_audio',
-    displayName: 'Yemi Adeola',
-    city: 'Lagos',
-    directReferrerId: ADAEZE_ID,
-    bankSummary: 'Access Bank · ****1082',
-    joinedAt: '2026-03-11',
-  });
-  seedScout({
-    id: ZURI_ID,
-    email: 'zuri@nairascout.ng',
-    handle: 'zuri_botanicals',
-    displayName: 'Zuri Botanicals',
-    city: 'Lagos',
-    directReferrerId: YEMI_ID,
-    bankSummary: 'Stanbic IBTC · ****7710',
-    joinedAt: '2026-04-06',
-  });
-  seedScout({
-    id: KANO_ID,
-    email: 'arewa@nairascout.ng',
-    handle: 'arewa_leather',
-    displayName: 'Arewa Leatherworks',
-    city: 'Kano',
-    directReferrerId: ZURI_ID,
-    bankSummary: 'UBA · ****6620',
-    joinedAt: '2026-05-18',
-  });
-  seedScout({
-    id: NGOZI_ID,
-    email: 'ngozi@nairascout.ng',
-    handle: 'ngozi_kitchen',
-    displayName: 'Ngozi Peters',
-    city: 'Port Harcourt',
-    directReferrerId: AMARA_ID,
-    bankSummary: 'Fidelity · ****5122',
-    joinedAt: '2026-03-22',
-  });
-  seedScout({
-    id: IBRAHIM_ID,
-    email: 'ibrahim@nairascout.ng',
-    handle: 'ibrahim_gadgets',
-    displayName: 'Ibrahim Sule',
-    city: 'Abuja',
-    directReferrerId: NGOZI_ID,
-    bankSummary: 'GTBank · ****3901',
-    joinedAt: '2026-04-29',
-  });
-  seedScout({
-    id: SOLA_ID,
-    email: 'sola@nairascout.ng',
-    handle: 'sola_style',
-    displayName: 'Sola Akinwande',
-    city: 'Ibadan',
-    directReferrerId: AMARA_ID,
-    bankSummary: 'Kuda · ****8902',
-    joinedAt: '2026-06-14',
-  });
-
-  // Seller Profiles
-  const sellers: Record<string, SellerProfileRecord> = {
-    '40000000-0000-4000-8000-000000000001': {
-      id: '40000000-0000-4000-8000-000000000001',
-      ownerUserId: AMARA_ID,
-      sellerType: 'INDIVIDUAL',
-      sellerName: 'Amara Okafor Roastery',
-      description: 'Small-batch single-origin Jos Plateau coffee & pantry craft.',
-      businessCategory: 'Kitchen & Pantry',
-      businessRegNumber: null,
-      businessAddress: '14 Admiralty Way, Lekki Phase 1, Lagos',
-      businessContactEmail: 'amara@nairascout.ng',
-      businessContactPhone: '+234 803 000 0101',
-      sellerStatus: 'ACTIVE',
-      subscriptionPlan: 'TRACTION',
-      subscriptionStatus: 'ACTIVE',
-      termsAcceptedAt: '2026-01-20T10:00:00Z',
-      createdAt: '2026-01-20T10:00:00Z',
-    },
-    '40000000-0000-4000-8000-000000000002': {
-      id: '40000000-0000-4000-8000-000000000002',
-      ownerUserId: ADAEZE_ID,
-      sellerType: 'BUSINESS',
-      sellerName: 'Adaeze Crafts & Home',
-      description: 'Iseyin hand-loomed cotton textiles & homewares.',
-      businessCategory: 'Home & Craft',
-      businessRegNumber: 'RC-482190',
-      businessAddress: 'Wuse II, Abuja',
-      businessContactEmail: 'adaeze@nairascout.ng',
-      businessContactPhone: '+234 809 000 0202',
-      sellerStatus: 'ACTIVE',
-      subscriptionPlan: 'GROWTH',
-      subscriptionStatus: 'ACTIVE',
-      termsAcceptedAt: '2026-02-05T10:00:00Z',
-      createdAt: '2026-02-05T10:00:00Z',
-    },
-    '40000000-0000-4000-8000-000000000003': {
-      id: '40000000-0000-4000-8000-000000000003',
-      ownerUserId: YEMI_ID,
-      sellerType: 'INDIVIDUAL',
-      sellerName: 'Yemi Adeola Audio',
-      description: 'Wireless commuter audio gear.',
-      businessCategory: 'Audio & Tech',
-      businessRegNumber: null,
-      businessAddress: 'Yaba, Lagos',
-      businessContactEmail: 'yemi@nairascout.ng',
-      businessContactPhone: null,
-      sellerStatus: 'ACTIVE',
-      subscriptionPlan: 'TRACTION',
-      subscriptionStatus: 'ACTIVE',
-      termsAcceptedAt: '2026-03-14T10:00:00Z',
-      createdAt: '2026-03-14T10:00:00Z',
-    },
-    '40000000-0000-4000-8000-000000000004': {
-      id: '40000000-0000-4000-8000-000000000004',
-      ownerUserId: ZURI_ID,
-      sellerType: 'BUSINESS',
-      sellerName: 'Zuri Botanicals',
-      description: 'NAFDAC-registered cold-pressed botanical skincare.',
-      businessCategory: 'Beauty & Botanicals',
-      businessRegNumber: 'RC-993011',
-      businessAddress: 'Victoria Island, Lagos',
-      businessContactEmail: 'zuri@nairascout.ng',
-      businessContactPhone: null,
-      sellerStatus: 'ACTIVE',
-      subscriptionPlan: 'GROWTH',
-      subscriptionStatus: 'ACTIVE',
-      termsAcceptedAt: '2026-04-08T10:00:00Z',
-      createdAt: '2026-04-08T10:00:00Z',
-    },
-    '40000000-0000-4000-8000-000000000005': {
-      id: '40000000-0000-4000-8000-000000000005',
-      ownerUserId: KANO_ID,
-      sellerType: 'BUSINESS',
-      sellerName: 'Arewa Leatherworks',
-      description: 'Vegetable-tanned Sokoto leather travel bags.',
-      businessCategory: 'Fashion & Leather',
-      businessRegNumber: 'RC-774122',
-      businessAddress: 'Kano Municipal, Kano',
-      businessContactEmail: 'arewa@nairascout.ng',
-      businessContactPhone: null,
-      sellerStatus: 'ACTIVE',
-      subscriptionPlan: 'SPRAWL',
-      subscriptionStatus: 'ACTIVE',
-      termsAcceptedAt: '2026-05-20T10:00:00Z',
-      createdAt: '2026-05-20T10:00:00Z',
-    },
-    '40000000-0000-4000-8000-000000000006': {
-      id: '40000000-0000-4000-8000-000000000006',
-      ownerUserId: '10000000-0000-4000-8000-000000000009',
-      sellerType: 'INDIVIDUAL',
-      sellerName: 'Segun Lawal Tech',
-      description: 'Portable LiFePO4 backup power solutions.',
-      businessCategory: 'Audio & Tech',
-      businessRegNumber: null,
-      businessAddress: 'Ikeja, Lagos',
-      businessContactEmail: 'segun@nairascout.ng',
-      businessContactPhone: null,
-      sellerStatus: 'ACTIVE',
-      subscriptionPlan: 'TRACTION',
-      subscriptionStatus: 'ACTIVE',
-      termsAcceptedAt: '2025-04-10T10:00:00Z',
-      createdAt: '2025-04-10T10:00:00Z',
-    },
-    // Pending Seller (onboarding example for verification queue!)
-    '40000000-0000-4000-8000-000000000007': {
-      id: '40000000-0000-4000-8000-000000000007',
-      ownerUserId: NGOZI_ID,
-      sellerType: 'BUSINESS',
-      sellerName: 'Port Harcourt Spice Collective',
-      description: 'Sun-dried riverine spice blends and condiments.',
-      businessCategory: 'Kitchen & Pantry',
-      businessRegNumber: 'BN-5520194',
-      businessAddress: 'GRA Phase 2, Port Harcourt',
-      businessContactEmail: 'ngozi@nairascout.ng',
-      businessContactPhone: '+234 805 000 0404',
-      sellerStatus: 'ONBOARDING',
-      subscriptionPlan: 'STARTER',
-      subscriptionStatus: 'ACTIVE',
-      termsAcceptedAt: '2026-11-18T11:00:00Z',
-      createdAt: '2026-11-18T11:00:00Z',
-    },
-  };
-
-  const fullPerms: SellerTeamPermissions = {
-    canManageListings: true,
-    canManageOrders: true,
-    canViewAnalytics: true,
-    canManageBilling: true,
-    canManageTeam: true,
-  };
-
-  const teamMembers: SellerTeamMemberRecord[] = Object.values(sellers).map((s) => ({
-    id: `TM-${s.id.slice(-4)}`,
-    sellerProfileId: s.id,
-    userId: s.ownerUserId,
-    role: 'BUSINESS_OWNER',
-    permissions: fullPerms,
-    status: 'ACTIVE',
-    invitedBy: null,
-    createdAt: s.createdAt,
-    revokedAt: null,
+function emptyDownstreamStats(): DownstreamGenerationStat[] {
+  const fullSchedule = selectCommissionSchedule(13).entries;
+  return Array.from({ length: 13 }, (_, idx) => ({
+    generation: idx + 1,
+    scoutCount: 0,
+    eligibleCount: 0,
+    sampleHandles: [],
+    scheduleFractionAtFullDepth: fullSchedule[idx]?.label ?? '—',
   }));
-
-  const verifications: VerificationRecord[] = [
-    {
-      id: 'VER-AMARA-CONTACT',
-      userId: AMARA_ID,
-      sellerProfileId: null,
-      category: 'CONTACT',
-      status: 'APPROVED',
-      evidencePaths: [],
-      reviewerNotes: 'Email verified',
-      reviewedBy: null,
-      submittedAt: '2026-01-14T09:05:00Z',
-      reviewedAt: '2026-01-14T09:05:00Z',
-    },
-    {
-      id: 'VER-AMARA-ID',
-      userId: AMARA_ID,
-      sellerProfileId: null,
-      category: 'IDENTITY',
-      status: 'APPROVED',
-      evidencePaths: ['verification-docs/amara-nin.pdf'],
-      reviewerNotes: 'NIN verified against profile name',
-      reviewedBy: null,
-      submittedAt: '2026-01-18T12:00:00Z',
-      reviewedAt: '2026-01-19T14:00:00Z',
-    },
-    {
-      id: 'VER-AMARA-BANK',
-      userId: AMARA_ID,
-      sellerProfileId: null,
-      category: 'PAYOUT_BANK',
-      status: 'APPROVED',
-      evidencePaths: [],
-      reviewerNotes: 'GTBank same-name match confirmed',
-      reviewedBy: null,
-      submittedAt: '2026-01-19T15:00:00Z',
-      reviewedAt: '2026-01-19T15:05:00Z',
-    },
-    {
-      id: 'VER-AMARA-SELLER',
-      userId: AMARA_ID,
-      sellerProfileId: '40000000-0000-4000-8000-000000000001',
-      category: 'SELLER',
-      status: 'APPROVED',
-      evidencePaths: ['verification-docs/amara-roastery-address.pdf'],
-      reviewerNotes: 'Individual seller onboarding approved',
-      reviewedBy: null,
-      submittedAt: '2026-01-20T10:05:00Z',
-      reviewedAt: '2026-01-21T09:30:00Z',
-    },
-    // Approved verifications for seeded active sellers
-    ...['40000000-0000-4000-8000-000000000002', '40000000-0000-4000-8000-000000000003', '40000000-0000-4000-8000-000000000004', '40000000-0000-4000-8000-000000000005', '40000000-0000-4000-8000-000000000006'].map(
-      (sid, idx) => ({
-        id: `VER-SELLER-${idx + 2}`,
-        userId: sellers[sid].ownerUserId,
-        sellerProfileId: sid,
-        category: 'SELLER' as const,
-        status: 'APPROVED' as const,
-        evidencePaths: [`verification-docs/seller-${idx + 2}-cac.pdf`],
-        reviewerNotes: 'Verified business documentation',
-        reviewedBy: null,
-        submittedAt: sellers[sid].createdAt,
-        reviewedAt: sellers[sid].createdAt,
-      })
-    ),
-    // Pending Seller Verification for Ngozi (for Admin Verification Queue!)
-    {
-      id: 'VER-NGOZI-SELLER',
-      userId: NGOZI_ID,
-      sellerProfileId: '40000000-0000-4000-8000-000000000007',
-      category: 'SELLER',
-      status: 'PENDING',
-      evidencePaths: [
-        'verification-docs/ngozi-cac-bn5520194.pdf',
-        'verification-docs/ngozi-gov-id.jpg',
-      ],
-      reviewerNotes: null,
-      reviewedBy: null,
-      submittedAt: '2026-11-18T11:10:00Z',
-      reviewedAt: null,
-    },
-  ];
-
-  const products: ProductListing[] = [
-    {
-      id: 'LST-101',
-      productId: 'PRD-101',
-      title: 'Hand-Loomed Aso-Oke Throw & Cushion Pair',
-      description:
-        'Woven in Iseyin with heavyweight unbleached cotton and subtle indigo selvedge stripes. Finished with concealed brass zips.',
-      category: 'Home & Craft',
-      priceKobo: 4850000,
-      deliveryFeeKobo: 350000,
-      stock: 14,
-      sellerScoutId: ADAEZE_ID,
-      sellerProfileId: '40000000-0000-4000-8000-000000000002',
-      sellerName: 'Adaeze Crafts & Home',
-      sellerCity: 'Abuja',
-      hasActiveSellerBadge: true,
-      isSellerVerified: true,
-      status: 'PUBLISHED',
-      imageSeed: 'nairascout-asooke-throw',
-      imageUrl: 'https://picsum.photos/seed/nairascout-asooke-throw/800/600',
-      daysRemaining: 8,
-      specifications: ['100% combed Nigerian cotton', '150cm × 210cm throw + two 45cm covers', 'Cold hand wash'],
-      returnPolicy: '7-day unused return window via Seller verification',
-      warranty: 'Craftsmanship seam guarantee',
-      impressions: 1240,
-      referralShares: 38,
-    },
-    {
-      id: 'LST-102',
-      productId: 'PRD-102',
-      title: 'Lagos Studio Wireless ANC Headphones',
-      description:
-        'Balanced studio tuning with 42-hour battery life, dual-device Bluetooth 5.4, and USB-C fast charging engineered for commuters.',
-      category: 'Audio & Tech',
-      priceKobo: 10000000,
-      deliveryFeeKobo: 400000,
-      stock: 9,
-      sellerScoutId: YEMI_ID,
-      sellerProfileId: '40000000-0000-4000-8000-000000000003',
-      sellerName: 'Yemi Adeola Audio',
-      sellerCity: 'Lagos',
-      hasActiveSellerBadge: true,
-      isSellerVerified: true,
-      status: 'PUBLISHED',
-      imageSeed: 'nairascout-studio-headphones',
-      imageUrl: 'https://picsum.photos/seed/nairascout-studio-headphones/800/600',
-      daysRemaining: 9,
-      specifications: ['40mm dynamic drivers', 'Hybrid -38dB ANC', 'USB-C 10-min = 5hr charge'],
-      returnPolicy: '14-day unopened or DOA replacement',
-      warranty: '12-month Lagos service centre warranty',
-      impressions: 2180,
-      referralShares: 64,
-    },
-    {
-      id: 'LST-103',
-      productId: 'PRD-103',
-      title: 'Cold-Pressed Shea & Baobab Barrier Serum Set',
-      description:
-        'Unrefined northern Nigerian shea oil blended with cold-pressed baobab seed and niacinamide for humid and dry climates.',
-      category: 'Beauty & Botanicals',
-      priceKobo: 2800000,
-      deliveryFeeKobo: 250000,
-      stock: 27,
-      sellerScoutId: ZURI_ID,
-      sellerProfileId: '40000000-0000-4000-8000-000000000004',
-      sellerName: 'Zuri Botanicals',
-      sellerCity: 'Lagos',
-      hasActiveSellerBadge: true,
-      isSellerVerified: true,
-      status: 'PUBLISHED',
-      imageSeed: 'nairascout-shea-serum',
-      imageUrl: 'https://picsum.photos/seed/nairascout-shea-serum/800/600',
-      daysRemaining: 7,
-      specifications: ['2 × 50ml amber UV glass bottles', 'NAFDAC registered batch', 'Fragrance-free formula'],
-      returnPolicy: 'Unsealed hygiene exclusion; damaged-in-transit replacement',
-      warranty: 'Fresh batch guarantee (9 months shelf life)',
-      impressions: 1690,
-      referralShares: 51,
-    },
-    {
-      id: 'LST-104',
-      productId: 'PRD-104',
-      title: 'Full-Grain Kano Weekender Duffel Bag',
-      description:
-        'Vegetable-tanned Sokoto goat and cowhide leather cabin bag with solid brass buckles and waxed canvas lining.',
-      category: 'Fashion & Leather',
-      priceKobo: 12500000,
-      deliveryFeeKobo: 500000,
-      stock: 5,
-      sellerScoutId: KANO_ID,
-      sellerProfileId: '40000000-0000-4000-8000-000000000005',
-      sellerName: 'Arewa Leatherworks',
-      sellerCity: 'Kano',
-      hasActiveSellerBadge: true,
-      isSellerVerified: true,
-      status: 'PUBLISHED',
-      imageSeed: 'nairascout-leather-duffel',
-      imageUrl: 'https://picsum.photos/seed/nairascout-leather-duffel/800/600',
-      daysRemaining: 6,
-      specifications: ['Cabin compliant 52cm × 28cm', 'Detachable padded shoulder strap', 'Dust bag included'],
-      returnPolicy: '7-day unused return with original tags',
-      warranty: '24-month hardware & stitching warranty',
-      impressions: 940,
-      referralShares: 29,
-    },
-    {
-      id: 'LST-105',
-      productId: 'PRD-105',
-      title: 'Jos Highland Single-Origin Espresso Trio (750g)',
-      description:
-        'Medium-dark washed Arabica roasted weekly on the Jos Plateau with notes of dark cocoa, toasted hazelnut, and dried fig.',
-      category: 'Kitchen & Pantry',
-      priceKobo: 2250000,
-      deliveryFeeKobo: 250000,
-      stock: 32,
-      sellerScoutId: AMARA_ID,
-      sellerProfileId: '40000000-0000-4000-8000-000000000001',
-      sellerName: 'Amara Okafor Roastery',
-      sellerCity: 'Lagos',
-      hasActiveSellerBadge: true,
-      isSellerVerified: true,
-      status: 'PUBLISHED',
-      imageSeed: 'nairascout-jos-coffee',
-      imageUrl: 'https://picsum.photos/seed/nairascout-jos-coffee/800/600',
-      daysRemaining: 10,
-      specifications: ['3 × 250g whole bean valve bags', '1,350m elevation Jos Plateau', 'Roasted within 72h of dispatch'],
-      returnPolicy: 'Freshness replacement on seal breach',
-      warranty: 'Roast date stamped on every pouch',
-      impressions: 615,
-      referralShares: 19,
-    },
-    {
-      id: 'LST-106',
-      productId: 'PRD-106',
-      title: 'Portable 300W LiFePO4 Mini Power Station',
-      description:
-        'Compact silent backup power for laptops, routers, and studio lights with pure sine-wave AC outlet and 100W USB-C PD.',
-      category: 'Audio & Tech',
-      priceKobo: 18500000,
-      deliveryFeeKobo: 650000,
-      stock: 6,
-      sellerScoutId: '10000000-0000-4000-8000-000000000009',
-      sellerProfileId: '40000000-0000-4000-8000-000000000006',
-      sellerName: 'Segun Lawal Tech',
-      sellerCity: 'Lagos',
-      hasActiveSellerBadge: true,
-      isSellerVerified: true,
-      status: 'PUBLISHED',
-      imageSeed: 'nairascout-power-station',
-      imageUrl: 'https://picsum.photos/seed/nairascout-power-station/800/600',
-      daysRemaining: 5,
-      specifications: ['288Wh LiFePO4 (3,000+ cycles)', '2 × Nigerian 3-pin AC outlets', 'Solar MPPT input ready'],
-      returnPolicy: '7-day inspection return',
-      warranty: '18-month battery cell warranty',
-      impressions: 3120,
-      referralShares: 92,
-    },
-  ];
-
-  const scoutsList: ScoutsListContact[] = [
-    {
-      contactId: 'CNT-01',
-      ownerUserId: AMARA_ID,
-      scoutId: NGOZI_ID,
-      handle: 'ngozi_kitchen',
-      displayName: 'Ngozi Peters',
-      city: 'Port Harcourt',
-      addedAt: '2026-04-02',
-      blocked: false,
-      hasActiveSellerBadge: false,
-      isSellerVerified: false,
-    },
-    {
-      contactId: 'CNT-02',
-      ownerUserId: AMARA_ID,
-      scoutId: SOLA_ID,
-      handle: 'sola_style',
-      displayName: 'Sola Akinwande',
-      city: 'Ibadan',
-      addedAt: '2026-06-18',
-      blocked: false,
-      hasActiveSellerBadge: false,
-      isSellerVerified: false,
-    },
-    {
-      contactId: 'CNT-03',
-      ownerUserId: AMARA_ID,
-      scoutId: '10000000-0000-4000-8000-000000000001',
-      handle: 'tunde_ng',
-      displayName: 'Tunde Bakare',
-      city: 'Lagos',
-      addedAt: '2026-01-16',
-      blocked: false,
-      hasActiveSellerBadge: false,
-      isSellerVerified: false,
-    },
-    {
-      contactId: 'CNT-04',
-      ownerUserId: AMARA_ID,
-      scoutId: IBRAHIM_ID,
-      handle: 'ibrahim_gadgets',
-      displayName: 'Ibrahim Sule',
-      city: 'Abuja',
-      addedAt: '2026-07-04',
-      blocked: false,
-      hasActiveSellerBadge: false,
-      isSellerVerified: false,
-    },
-  ];
-
-  const invitations: ScoutsListInvitation[] = [
-    {
-      id: 'INV-401',
-      senderId: '10000000-0000-4000-8000-000000000002',
-      recipientId: AMARA_ID,
-      direction: 'incoming',
-      otherScoutId: '10000000-0000-4000-8000-000000000002',
-      otherHandle: 'kemi_finds',
-      otherDisplayName: 'Kemi Balogun',
-      otherCity: 'Lagos',
-      status: 'pending',
-      createdAt: '2026-11-19',
-      expiresAt: '2026-12-03',
-    },
-    {
-      id: 'INV-402',
-      senderId: AMARA_ID,
-      recipientId: ZURI_ID,
-      direction: 'outgoing',
-      otherScoutId: ZURI_ID,
-      otherHandle: 'zuri_botanicals',
-      otherDisplayName: 'Zuri Botanicals',
-      otherCity: 'Lagos',
-      status: 'pending',
-      createdAt: '2026-11-20',
-      expiresAt: '2026-12-04',
-    },
-  ];
-
-  const referralEvents: ProductReferralEvent[] = [
-    {
-      id: 'RE-8402-NG',
-      productListingId: 'LST-102',
-      senderScoutId: '10000000-0000-4000-8000-000000000001',
-      senderHandle: 'tunde_ng',
-      senderDisplayName: 'Tunde Bakare',
-      recipientScoutId: AMARA_ID,
-      recipientHandle: 'amara_scout',
-      recipientDisplayName: 'Amara Okafor',
-      note: 'Tested these on the Lekki-Ikoyi commute — ANC blocks danfo noise cleanly and battery lasts all week.',
-      ancestryPathSignature: 'tunde_ng->amara_scout',
-      createdAt: '2026-11-18T14:20:00Z',
-      expiresAt: '2026-11-28T14:20:00Z',
-      status: 'active',
-    },
-    {
-      id: 'RE-8409-NG',
-      productListingId: 'LST-104',
-      senderScoutId: NGOZI_ID,
-      senderHandle: 'ngozi_kitchen',
-      senderDisplayName: 'Ngozi Peters',
-      recipientScoutId: AMARA_ID,
-      recipientHandle: 'amara_scout',
-      recipientDisplayName: 'Amara Okafor',
-      note: 'Arewa Leatherworks finally restocked the cabin weekender in dark chestnut.',
-      ancestryPathSignature: 'ngozi_kitchen->amara_scout',
-      createdAt: '2026-11-19T09:15:00Z',
-      expiresAt: '2026-11-29T09:15:00Z',
-      status: 'active',
-    },
-    {
-      id: 'RE-8415-NG',
-      productListingId: 'LST-103',
-      senderScoutId: AMARA_ID,
-      senderHandle: 'amara_scout',
-      senderDisplayName: 'Amara Okafor',
-      recipientScoutId: SOLA_ID,
-      recipientHandle: 'sola_style',
-      recipientDisplayName: 'Sola Akinwande',
-      note: 'Sola, this is the unrefined baobab barrier set we spoke about for harmattan.',
-      ancestryPathSignature: 'amara_scout->sola_style',
-      createdAt: '2026-11-17T11:05:00Z',
-      expiresAt: '2026-11-27T11:05:00Z',
-      status: 'active',
-    },
-  ];
-
-  const abuseReports: AbuseReportRecord[] = [
-    {
-      id: 'ABR-101',
-      reporterId: SOLA_ID,
-      reporterHandle: 'sola_style',
-      reportedUserId: '10000000-0000-4000-8000-000000000011',
-      reportedHandle: 'musa_kano',
-      referralEventId: null,
-      reason: 'Unsolicited repetitive referral messages',
-      description: 'Received repeated external link messages outside Scouts List.',
-      status: 'OPEN',
-      resolvedBy: null,
-      createdAt: '2026-11-19T12:00:00Z',
-      resolvedAt: null,
-    },
-  ];
-
-  const auditLogs: AuditLogRecord[] = [
-    {
-      id: 'AUD-001',
-      actorId: null,
-      actorHandle: 'system_verification',
-      affectedUserId: AMARA_ID,
-      affectedHandle: 'amara_scout',
-      action: 'SELLER_VERIFICATION_APPROVED',
-      entityType: 'verification_records',
-      entityId: 'VER-AMARA-SELLER',
-      previousValue: { status: 'PENDING' },
-      newValue: { status: 'APPROVED', sellerStatus: 'ACTIVE' },
-      reason: 'Initial individual seller verification confirmed',
-      createdAt: '2026-01-21T09:30:00Z',
-    },
-  ];
-
-  const store: InternalStore = {
-    users,
-    scouts,
-    ancestry,
-    sellers,
-    teamMembers,
-    verifications,
-    products,
-    scoutsList,
-    invitations,
-    userBlocks: [],
-    abuseReports,
-    adminRoles: {},
-    auditLogs,
-    referralEvents,
-    orders: [],
-    ledger: [],
-    notifications: [
-      {
-        id: 'NTF-01',
-        userId: AMARA_ID,
-        category: 'referral',
-        title: 'New product referral from @tunde_ng',
-        body: 'Tunde Bakare sent you a referral card for Lagos Studio Wireless ANC Headphones (RE-8402-NG).',
-        createdAt: '2026-11-18T14:20:00Z',
-        read: false,
-      },
-      {
-        id: 'NTF-02',
-        userId: AMARA_ID,
-        category: 'payout',
-        title: 'Monthly payout cycle schedule',
-        body: 'Available commissions earned in November qualify for the December 15 monthly settlement (₦5,000 minimum).',
-        createdAt: '2026-11-15T08:00:00Z',
-        read: true,
-      },
-    ],
-    supportCases: [],
-    monthlyPublicationsBySeller: {
-      '40000000-0000-4000-8000-000000000001': 2,
-    },
-    otpChallenges: {},
-    adminClaimed: false,
-  };
-
-  seedInitialOrdersAndLedger(store);
-  return store;
 }
 
-export function buildAncestryForScout(
+async function computeWalletFromDb(
+  db: NairaScoutDb,
   scoutId: string,
-  store: InternalStore
-): AncestorNode[] {
-  const result: AncestorNode[] = [];
-  const visited = new Set<string>([scoutId]);
-  let currentId = store.ancestry[scoutId]?.directReferrerId ?? null;
-  let generation = 1;
+  verifRows: Array<typeof verificationRecords.$inferSelect>
+): Promise<WalletSummary> {
+  const entries = await db
+    .select()
+    .from(commissionLedgerEntries)
+    .where(eq(commissionLedgerEntries.beneficiaryScoutId, scoutId))
+    .orderBy(desc(commissionLedgerEntries.createdAt));
 
-  while (currentId && generation <= 13) {
-    if (visited.has(currentId)) break;
-    visited.add(currentId);
-    const scout = store.scouts[currentId];
-    const user = store.users[currentId];
-    if (!scout || !user) break;
-    const isEligible =
-      scout.eligibleForCommission &&
-      user.accountStatus === 'ACTIVE';
-
-    result.push({
-      generation,
-      scoutId: user.id,
-      handle: scout.username,
-      displayName: scout.displayName,
-      eligible: isEligible,
-      ineligibilityReason: !isEligible
-        ? scout.ineligibilityReason || `Account status: ${user.accountStatus}`
-        : undefined,
+  const rootStates = new Map<string, { status: LedgerEntryStatus; amountKobo: number }>();
+  for (const entry of [...entries].reverse()) {
+    const key = entry.linkedToReference || entry.reference;
+    rootStates.set(key, {
+      status: entry.status as LedgerEntryStatus,
+      amountKobo: entry.amountKobo,
     });
-    currentId = store.ancestry[currentId]?.directReferrerId ?? null;
-    generation += 1;
-  }
-
-  return result;
-}
-
-function createOrderRecordAndLedger(
-  store: InternalStore,
-  params: {
-    orderId: string;
-    buyerScoutId: string;
-    productListingId: string;
-    quantity: number;
-    referralEventId: string | null;
-    fulfilmentStatus: OrderFulfilmentStatus;
-    createdAt: string;
-    fulfilmentDeadline: string;
-    isPaidHistorical?: boolean;
-  }
-): MarketplaceOrder {
-  const product = store.products.find((p) => p.id === params.productListingId)!;
-  const buyer = store.scouts[params.buyerScoutId];
-  const eligibleMerchandiseKobo = product.priceKobo * params.quantity;
-  const deliveryFeeKobo = product.deliveryFeeKobo;
-  const totalChargedKobo = eligibleMerchandiseKobo + deliveryFeeKobo;
-
-  const isReferral = Boolean(params.referralEventId);
-  const sellerAncestry = buildAncestryForScout(product.sellerScoutId, store);
-  const breakdown = calculateThirteenGenerationCommissions(
-    eligibleMerchandiseKobo,
-    sellerAncestry,
-    isReferral
-  );
-
-  const order: MarketplaceOrder = {
-    id: params.orderId,
-    buyerScoutId: params.buyerScoutId,
-    buyerDisplayName: buyer?.displayName || 'Verified Guest Buyer',
-    productListingId: product.id,
-    productTitle: product.title,
-    sellerScoutId: product.sellerScoutId,
-    sellerName: product.sellerName,
-    quantity: params.quantity,
-    eligibleMerchandiseKobo,
-    deliveryFeeKobo,
-    totalChargedKobo,
-    attributionType: isReferral ? 'referral_card' : 'direct',
-    referralEventId: params.referralEventId,
-    fulfilmentStatus: params.fulfilmentStatus,
-    fulfilmentDeadline: params.fulfilmentDeadline,
-    createdAt: params.createdAt,
-    commissionSnapshot: breakdown,
-  };
-
-  store.orders.unshift(order);
-
-  const targetStatus: LedgerEntryStatus = params.isPaidHistorical
-    ? 'Paid'
-    : params.fulfilmentStatus === 'Delivered'
-    ? 'Available'
-    : params.fulfilmentStatus === 'Disputed'
-    ? 'On Hold'
-    : 'Pending';
-
-  for (const alloc of breakdown.allocations) {
-    if (alloc.amountKobo <= 0 || alloc.scoutId === 'missing') continue;
-    const ref = `LDG-${params.orderId}-G${alloc.generation}`;
-    store.ledger.unshift({
-      id: `${ref}-1`,
-      reference: ref,
-      orderId: params.orderId,
-      referralEventId: params.referralEventId,
-      beneficiaryScoutId: alloc.scoutId,
-      generation: alloc.generation,
-      fractionLabel: alloc.fractionLabel,
-      amountKobo: alloc.amountKobo,
-      status: targetStatus,
-      ruleVersion: breakdown.ruleVersion,
-      description: `Gen ${alloc.generation} (${alloc.fractionLabel}) referral allocation · ${product.title}`,
-      createdAt: params.createdAt,
-    });
-
-    if (params.fulfilmentStatus === 'Refunded') {
-      store.ledger.unshift({
-        id: `${ref}-REV`,
-        reference: `${ref}-REV`,
-        orderId: params.orderId,
-        referralEventId: params.referralEventId,
-        beneficiaryScoutId: alloc.scoutId,
-        generation: alloc.generation,
-        fractionLabel: alloc.fractionLabel,
-        amountKobo: alloc.amountKobo,
-        status: 'Reversed',
-        ruleVersion: breakdown.ruleVersion,
-        description: `Order refunded · reversal of ${ref}`,
-        createdAt: params.createdAt,
-        linkedToReference: ref,
-      });
-    }
-  }
-
-  return order;
-}
-
-function seedInitialOrdersAndLedger(store: InternalStore) {
-  const IBRAHIM_ID = '30000000-0000-4000-8000-000000000006';
-  const SOLA_ID = '30000000-0000-4000-8000-000000000007';
-  const NGOZI_ID = '30000000-0000-4000-8000-000000000005';
-
-  createOrderRecordAndLedger(store, {
-    orderId: 'ORD-9041',
-    buyerScoutId: SOLA_ID,
-    productListingId: 'LST-103',
-    quantity: 2,
-    referralEventId: 'RE-8415-NG',
-    fulfilmentStatus: 'Delivered',
-    createdAt: '2026-10-21T10:30:00Z',
-    fulfilmentDeadline: '2026-10-31T10:30:00Z',
-    isPaidHistorical: true,
-  });
-
-  createOrderRecordAndLedger(store, {
-    orderId: 'ORD-9118',
-    buyerScoutId: IBRAHIM_ID,
-    productListingId: 'LST-101',
-    quantity: 4,
-    referralEventId: 'RE-7710-NG',
-    fulfilmentStatus: 'Delivered',
-    createdAt: '2026-10-28T16:45:00Z',
-    fulfilmentDeadline: '2026-11-07T16:45:00Z',
-  });
-
-  createOrderRecordAndLedger(store, {
-    orderId: 'ORD-9154',
-    buyerScoutId: '10000000-0000-4000-8000-000000000005',
-    productListingId: 'LST-102',
-    quantity: 3,
-    referralEventId: 'RE-7804-NG',
-    fulfilmentStatus: 'Delivered',
-    createdAt: '2026-11-04T12:10:00Z',
-    fulfilmentDeadline: '2026-11-14T12:10:00Z',
-  });
-
-  createOrderRecordAndLedger(store, {
-    orderId: 'ORD-9192',
-    buyerScoutId: NGOZI_ID,
-    productListingId: 'LST-104',
-    quantity: 2,
-    referralEventId: 'RE-8011-NG',
-    fulfilmentStatus: 'Delivered',
-    createdAt: '2026-11-12T09:20:00Z',
-    fulfilmentDeadline: '2026-11-22T09:20:00Z',
-  });
-
-  createOrderRecordAndLedger(store, {
-    orderId: 'ORD-9204',
-    buyerScoutId: SOLA_ID,
-    productListingId: 'LST-105',
-    quantity: 2,
-    referralEventId: null,
-    fulfilmentStatus: 'Processing',
-    createdAt: '2026-11-19T15:00:00Z',
-    fulfilmentDeadline: '2026-11-29T15:00:00Z',
-  });
-
-  createOrderRecordAndLedger(store, {
-    orderId: 'ORD-9210',
-    buyerScoutId: IBRAHIM_ID,
-    productListingId: 'LST-105',
-    quantity: 3,
-    referralEventId: 'RE-8390-NG',
-    fulfilmentStatus: 'Dispatched',
-    createdAt: '2026-11-20T11:30:00Z',
-    fulfilmentDeadline: '2026-11-30T11:30:00Z',
-  });
-
-  createOrderRecordAndLedger(store, {
-    orderId: 'ORD-9215',
-    buyerScoutId: '10000000-0000-4000-8000-000000000006',
-    productListingId: 'LST-101',
-    quantity: 2,
-    referralEventId: 'RE-8400-NG',
-    fulfilmentStatus: 'Paid',
-    createdAt: '2026-11-21T08:05:00Z',
-    fulfilmentDeadline: '2026-12-01T08:05:00Z',
-  });
-}
-
-const globalForStore = globalThis as unknown as {
-  __nairascoutStoreV2?: InternalStore;
-};
-
-export function getStore(): InternalStore {
-  if (!globalForStore.__nairascoutStoreV2) {
-    globalForStore.__nairascoutStoreV2 = createInitialStore();
-  }
-  return globalForStore.__nairascoutStoreV2;
-}
-
-// ============================================================================
-// AUTH CONTEXT & AUTHORIZATION HELPERS
-// ============================================================================
-
-export function buildUserAuthContextFromStore(userId: string | null): UserAuthContext | null {
-  if (!userId) return null;
-  const store = getStore();
-  const user = store.users[userId];
-  if (!user) return null;
-
-  // Check owned seller profile or active team membership
-  let sellerProfile = Object.values(store.sellers).find((s) => s.ownerUserId === userId) ?? null;
-  let membership = sellerProfile
-    ? store.teamMembers.find(
-        (m) => m.sellerProfileId === sellerProfile!.id && m.userId === userId && m.status === 'ACTIVE'
-      )
-    : undefined;
-
-  if (!sellerProfile) {
-    const activeMember = store.teamMembers.find(
-      (m) => m.userId === userId && m.status === 'ACTIVE'
-    );
-    if (activeMember) {
-      membership = activeMember;
-      sellerProfile = store.sellers[activeMember.sellerProfileId] ?? null;
-    }
-  }
-
-  let sellerCtx: UserAuthContext['seller'] = null;
-  if (sellerProfile) {
-    const sellerVerif = store.verifications.find(
-      (v) => v.sellerProfileId === sellerProfile!.id && v.category === 'SELLER'
-    );
-    sellerCtx = {
-      sellerProfileId: sellerProfile.id,
-      sellerType: sellerProfile.sellerType,
-      sellerStatus: sellerProfile.sellerStatus,
-      sellerVerificationStatus: sellerVerif?.status ?? 'NOT_SUBMITTED',
-      subscriptionPlan: sellerProfile.subscriptionPlan,
-      subscriptionStatus: sellerProfile.subscriptionStatus,
-      role: membership?.role ?? 'BUSINESS_OWNER',
-      permissions: membership?.permissions ?? {
-        canManageListings: true,
-        canManageOrders: true,
-        canViewAnalytics: true,
-        canManageBilling: true,
-        canManageTeam: true,
-      },
-    };
-  }
-
-  return {
-    userId: user.id,
-    email: user.email,
-    accountStatus: user.accountStatus,
-    seller: sellerCtx,
-    adminRole: store.adminRoles[userId] ?? null,
-  };
-}
-
-function recordAuditLog(
-  store: InternalStore,
-  params: {
-    actorId: string | null;
-    affectedUserId: string;
-    action: string;
-    entityType: string;
-    entityId?: string | null;
-    previousValue?: Record<string, unknown> | null;
-    newValue?: Record<string, unknown> | null;
-    reason?: string | null;
-  }
-) {
-  const actorHandle = params.actorId
-    ? store.scouts[params.actorId]?.username || params.actorId
-    : 'system';
-  const affectedHandle = store.scouts[params.affectedUserId]?.username || params.affectedUserId;
-
-  store.auditLogs.unshift({
-    id: `AUD-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-    actorId: params.actorId,
-    actorHandle,
-    affectedUserId: params.affectedUserId,
-    affectedHandle,
-    action: params.action,
-    entityType: params.entityType,
-    entityId: params.entityId ?? null,
-    previousValue: params.previousValue ?? null,
-    newValue: params.newValue ?? null,
-    reason: params.reason ?? null,
-    createdAt: new Date().toISOString(),
-  });
-}
-
-function isBlockedBetween(store: InternalStore, userA: string, userB: string): boolean {
-  return store.userBlocks.some(
-    (b) =>
-      (b.blockerId === userA && b.blockedId === userB) ||
-      (b.blockerId === userB && b.blockedId === userA)
-  );
-}
-
-// ============================================================================
-// AUTHENTICATION, REGISTRATION, OTP & ADMIN BOOTSTRAP
-// ============================================================================
-
-function findUserByEmail(store: InternalStore, email: string): UserAccountRecord | undefined {
-  const norm = email.trim().toLowerCase();
-  return Object.values(store.users).find((u) => u.email.toLowerCase() === norm);
-}
-
-export function registerUserAtomic(input: {
-  email: string;
-  password?: string;
-  displayName: string;
-  username?: string;
-  locationState?: string;
-  referralEventId?: string | null;
-  referralScoutUsername?: string | null;
-}): { user: UserAccountRecord; scout: ScoutProfileRecord } {
-  const store = getStore();
-  const normEmail = input.email.trim().toLowerCase();
-  if (!normEmail || !normEmail.includes('@')) {
-    throw new AuthorizationError('Valid email address required.', 400, 'INVALID_EMAIL');
-  }
-  const existing = findUserByEmail(store, normEmail);
-  if (existing) {
-    throw new AuthorizationError('An account with this email already exists.', 409, 'EMAIL_EXISTS');
-  }
-
-  const baseHandle = (
-    input.username?.trim() ||
-    normEmail.split('@')[0].replace(/[^a-z0-9_]/gi, '_').toLowerCase()
-  ).slice(0, 24);
-  let handle = baseHandle || `scout_${Math.floor(1000 + Math.random() * 9000)}`;
-  let suffix = 1;
-  while (Object.values(store.scouts).some((s) => s.username.toLowerCase() === handle.toLowerCase())) {
-    handle = `${baseHandle}_${suffix++}`;
-  }
-
-  // Resolve referral attribution
-  let directReferrerId: string | null = null;
-  let attributionSource: ReferralAncestryRecord['attributionSource'] = 'ORGANIC';
-  let refEventId: string | null = null;
-
-  if (input.referralEventId) {
-    const ev = store.referralEvents.find((r) => r.id === input.referralEventId);
-    if (ev) {
-      directReferrerId = ev.senderScoutId;
-      attributionSource = 'REFERRAL_CARD';
-      refEventId = ev.id;
-    }
-  } else if (input.referralScoutUsername) {
-    const refScout = Object.values(store.scouts).find(
-      (s) => s.username.toLowerCase() === input.referralScoutUsername!.trim().toLowerCase()
-    );
-    if (refScout) {
-      directReferrerId = refScout.userId;
-      attributionSource = 'REFERRAL_LINK';
-    }
-  }
-
-  const newUserId = crypto.randomUUID();
-  if (directReferrerId) {
-    const map: Record<string, string | null> = {};
-    for (const [k, v] of Object.entries(store.ancestry)) {
-      map[k] = v.directReferrerId;
-    }
-    const check = validateAncestryRelationship(newUserId, directReferrerId, map);
-    if (!check.valid) {
-      directReferrerId = null;
-    }
-  }
-
-  const nowIso = new Date().toISOString();
-  const user: UserAccountRecord = {
-    id: newUserId,
-    email: normEmail,
-    phone: null,
-    passwordHash: input.password ? hashPassword(input.password) : null,
-    accountStatus: 'ACTIVE',
-    restrictionReason: null,
-    closedAt: null,
-    createdAt: nowIso,
-  };
-
-  const scout: ScoutProfileRecord = {
-    userId: newUserId,
-    username: handle,
-    displayName: input.displayName.trim() || handle,
-    avatarUrl: null,
-    bio: null,
-    locationState: input.locationState?.trim() || 'Lagos',
-    preferredCategories: [],
-    invitationPolicy: 'EVERYONE',
-    muteReferrals: false,
-    profileVisibility: 'PUBLIC',
-    bankSummary: 'Not linked yet',
-    eligibleForCommission: true,
-  };
-
-  const ancestryRec: ReferralAncestryRecord = {
-    scoutUserId: newUserId,
-    directReferrerId,
-    attributionSource,
-    referralEventId: refEventId,
-    lockedAt: nowIso,
-  };
-
-  store.users[newUserId] = user;
-  store.scouts[newUserId] = scout;
-  store.ancestry[newUserId] = ancestryRec;
-  store.verifications.unshift({
-    id: `VER-${Date.now()}`,
-    userId: newUserId,
-    sellerProfileId: null,
-    category: 'CONTACT',
-    status: 'APPROVED',
-    evidencePaths: [],
-    reviewerNotes: 'Email verified during registration',
-    reviewedBy: null,
-    submittedAt: nowIso,
-    reviewedAt: nowIso,
-  });
-
-  recordAuditLog(store, {
-    actorId: newUserId,
-    affectedUserId: newUserId,
-    action: 'USER_REGISTERED_ATOMIC',
-    entityType: 'users',
-    entityId: newUserId,
-    newValue: {
-      attributionSource,
-      directReferrerId,
-      referralEventId: refEventId,
-    },
-  });
-
-  return { user, scout };
-}
-
-export function loginWithPassword(email: string, password: string): UserAccountRecord {
-  const store = getStore();
-  const user = findUserByEmail(store, email);
-  if (!user || !user.passwordHash) {
-    throw new AuthorizationError(
-      'Invalid credentials. Use Email OTP if your account was created passwordlessly.',
-      401,
-      'INVALID_CREDENTIALS'
-    );
-  }
-  if (!verifyPassword(password, user.passwordHash)) {
-    throw new AuthorizationError('Invalid email or password.', 401, 'INVALID_CREDENTIALS');
-  }
-  if (user.accountStatus === 'CLOSED') {
-    throw new AuthorizationError('This account has been closed.', 403, 'ACCOUNT_CLOSED');
-  }
-  return user;
-}
-
-export function requestEmailOtp(email: string): {
-  sent: boolean;
-  previewOtpCode: string;
-  existingUser: boolean;
-} {
-  const store = getStore();
-  const normEmail = email.trim().toLowerCase();
-  if (!normEmail || !normEmail.includes('@')) {
-    throw new AuthorizationError('Please enter a valid email address.', 400, 'INVALID_EMAIL');
-  }
-
-  const code = String(crypto.randomInt(100000, 999999));
-  const codeHash = crypto.createHash('sha256').update(`${normEmail}:${code}`).digest('hex');
-
-  store.otpChallenges[normEmail] = {
-    email: normEmail,
-    codeHash,
-    expiresAt: Date.now() + 10 * 60 * 1000,
-  };
-
-  return {
-    sent: true,
-    previewOtpCode: code,
-    existingUser: Boolean(findUserByEmail(store, normEmail)),
-  };
-}
-
-export function verifyEmailOtpAndProvision(input: {
-  email: string;
-  code: string;
-  displayName?: string;
-  referralEventId?: string | null;
-  referralScoutUsername?: string | null;
-}): { user: UserAccountRecord; createdNew: boolean } {
-  const store = getStore();
-  const normEmail = input.email.trim().toLowerCase();
-  const challenge = store.otpChallenges[normEmail];
-  if (!challenge || Date.now() > challenge.expiresAt) {
-    throw new AuthorizationError('OTP code has expired. Request a new code.', 401, 'OTP_EXPIRED');
-  }
-  const candidateHash = crypto
-    .createHash('sha256')
-    .update(`${normEmail}:${input.code.trim()}`)
-    .digest('hex');
-
-  if (candidateHash !== challenge.codeHash) {
-    throw new AuthorizationError('Invalid 6-digit verification code.', 401, 'OTP_INVALID');
-  }
-
-  delete store.otpChallenges[normEmail];
-
-  const existing = findUserByEmail(store, normEmail);
-  if (existing) {
-    if (existing.accountStatus === 'CLOSED') {
-      throw new AuthorizationError('This account has been closed.', 403, 'ACCOUNT_CLOSED');
-    }
-    return { user: existing, createdNew: false };
-  }
-
-  const { user } = registerUserAtomic({
-    email: normEmail,
-    displayName: input.displayName || normEmail.split('@')[0],
-    referralEventId: input.referralEventId,
-    referralScoutUsername: input.referralScoutUsername,
-  });
-
-  return { user, createdNew: true };
-}
-
-export function claimFirstAdmin(input: {
-  email: string;
-  password: string;
-  displayName: string;
-}): { user: UserAccountRecord } {
-  const store = getStore();
-  if (store.adminClaimed) {
-    throw new AuthorizationError(
-      'Initial Super Admin has already been claimed.',
-      403,
-      'ADMIN_ALREADY_CLAIMED'
-    );
-  }
-  if (input.password.length < 8) {
-    throw new AuthorizationError('Password must be at least 8 characters.', 400, 'WEAK_PASSWORD');
-  }
-
-  const normEmail = input.email.trim().toLowerCase();
-  let user = findUserByEmail(store, normEmail);
-  if (!user) {
-    const reg = registerUserAtomic({
-      email: normEmail,
-      password: input.password,
-      displayName: input.displayName || 'Platform Super Admin',
-    });
-    user = reg.user;
-  } else {
-    user.passwordHash = hashPassword(input.password);
-  }
-
-  store.adminRoles[user.id] = 'SUPER_ADMIN';
-  store.adminClaimed = true;
-
-  recordAuditLog(store, {
-    actorId: user.id,
-    affectedUserId: user.id,
-    action: 'ADMIN_ROLE_CLAIMED',
-    entityType: 'platform_admin_roles',
-    entityId: user.id,
-    newValue: { adminRole: 'SUPER_ADMIN' },
-    reason: 'First-run Super Admin bootstrap claim',
-  });
-
-  return { user };
-}
-
-// ============================================================================
-// WALLET, DOWNSTREAM STATS & SNAPSHOT PROJECTION
-// ============================================================================
-
-function computeWalletSummary(store: InternalStore, scoutId: string | null): WalletSummary {
-  if (!scoutId) {
-    return {
-      pendingKobo: 0,
-      availableKobo: 0,
-      onHoldKobo: 0,
-      paidKobo: 0,
-      reversedKobo: 0,
-      minimumPayoutKobo: 500000,
-      nextPayoutDate: '15 Dec 2026',
-      precedingMonthAvailableKobo: 0,
-      eligibleForNextPayout: false,
-    };
-  }
-
-  const scoutEntries = store.ledger.filter((e) => e.beneficiaryScoutId === scoutId);
-  const latestByRootRef = new Map<string, LedgerEntry>();
-  const chronological = [...scoutEntries].reverse();
-  for (const entry of chronological) {
-    const rootRef = entry.linkedToReference ?? entry.reference;
-    latestByRootRef.set(rootRef, entry);
   }
 
   let pendingKobo = 0;
@@ -1923,25 +432,18 @@ function computeWalletSummary(store: InternalStore, scoutId: string | null): Wal
   let onHoldKobo = 0;
   let paidKobo = 0;
   let reversedKobo = 0;
-  let precedingMonthAvailableKobo = 0;
 
-  for (const entry of latestByRootRef.values()) {
-    if (entry.status === 'Pending') pendingKobo += entry.amountKobo;
-    if (entry.status === 'Available') {
-      availableKobo += entry.amountKobo;
-      if (entry.createdAt.startsWith('2026-10')) {
-        precedingMonthAvailableKobo += entry.amountKobo;
-      }
-    }
-    if (entry.status === 'On Hold') onHoldKobo += entry.amountKobo;
-    if (entry.status === 'Paid') paidKobo += entry.amountKobo;
-    if (entry.status === 'Reversed') reversedKobo += entry.amountKobo;
+  for (const state of rootStates.values()) {
+    if (state.status === 'Pending') pendingKobo += state.amountKobo;
+    else if (state.status === 'Available') availableKobo += state.amountKobo;
+    else if (state.status === 'On Hold') onHoldKobo += state.amountKobo;
+    else if (state.status === 'Paid') paidKobo += state.amountKobo;
+    else if (state.status === 'Reversed') reversedKobo += state.amountKobo;
   }
 
+  const kycOk = verifRows.some((v) => v.category === 'IDENTITY' && v.status === 'APPROVED');
+  const bankOk = verifRows.some((v) => v.category === 'PAYOUT_BANK' && v.status === 'APPROVED');
   const minimumPayoutKobo = 500000;
-  const verifs = store.verifications.filter((v) => v.userId === scoutId);
-  const kycVerified = verifs.some((v) => v.category === 'IDENTITY' && v.status === 'APPROVED');
-  const bankVerified = verifs.some((v) => v.category === 'PAYOUT_BANK' && v.status === 'APPROVED');
 
   return {
     pendingKobo,
@@ -1950,186 +452,312 @@ function computeWalletSummary(store: InternalStore, scoutId: string | null): Wal
     paidKobo,
     reversedKobo,
     minimumPayoutKobo,
-    nextPayoutDate: '15 Dec 2026',
-    precedingMonthAvailableKobo,
-    eligibleForNextPayout: kycVerified && bankVerified && availableKobo >= minimumPayoutKobo,
+    nextPayoutDate: '2026-12-15',
+    precedingMonthAvailableKobo: availableKobo,
+    eligibleForNextPayout: availableKobo >= minimumPayoutKobo && kycOk && bankOk,
   };
 }
 
-function computeDownstreamGenerations(
-  store: InternalStore,
-  rootScoutId: string | null
-): DownstreamGenerationStat[] {
-  const fractions = [
-    '1/6',
-    '1/10',
-    '1/20',
-    '1/30',
-    '1/40',
-    '1/50',
-    '1/60',
-    '1/70',
-    '1/80',
-    '1/90',
-    '1/100',
-    '1/110',
-    '1/120',
-  ];
+async function buildAncestryChainFromDb(
+  db: NairaScoutDb,
+  scoutId: string
+): Promise<AncestorNode[]> {
+  const allAncestry = await db.select().from(referralAncestry);
+  const allUsers = await db.select().from(users);
+  const allScouts = await db.select().from(scoutProfiles);
 
-  if (!rootScoutId) {
-    return fractions.map((f, idx) => ({
-      generation: idx + 1,
-      scoutCount: 0,
-      eligibleCount: 0,
-      sampleHandles: [],
-      scheduleFractionAtFullDepth: f,
-    }));
+  const ancestryByScout = new Map(allAncestry.map((a) => [a.scoutUserId, a]));
+  const userMap = new Map(allUsers.map((u) => [u.id, u]));
+  const scoutMap = new Map(allScouts.map((s) => [s.userId, s]));
+
+  const chain: AncestorNode[] = [];
+  const visited = new Set<string>([scoutId]);
+  let currentId = ancestryByScout.get(scoutId)?.directReferrerId ?? null;
+  let gen = 1;
+
+  while (currentId && gen <= 13 && !visited.has(currentId)) {
+    visited.add(currentId);
+    const scout = scoutMap.get(currentId);
+    const user = userMap.get(currentId);
+    if (!scout || !user) break;
+
+    const isEligible = user.accountStatus === 'ACTIVE';
+    chain.push({
+      generation: gen,
+      scoutId: scout.userId,
+      handle: scout.username,
+      displayName: scout.displayName,
+      eligible: isEligible,
+      ineligibilityReason: isEligible
+        ? undefined
+        : `Account status: ${user.accountStatus} (slot retained at ₦0.00)`,
+    });
+
+    currentId = ancestryByScout.get(currentId)?.directReferrerId ?? null;
+    gen += 1;
   }
 
-  const byGen: Record<number, ScoutProfileRecord[]> = {};
-  let frontier: string[] = [rootScoutId];
-  const visited = new Set<string>([rootScoutId]);
+  return chain;
+}
+
+async function computeDownstreamFromDb(
+  db: NairaScoutDb,
+  scoutId: string
+): Promise<DownstreamGenerationStat[]> {
+  const allAncestry = await db.select().from(referralAncestry);
+  const allUsers = await db.select().from(users);
+  const allScouts = await db.select().from(scoutProfiles);
+
+  const userMap = new Map(allUsers.map((u) => [u.id, u]));
+  const scoutMap = new Map(allScouts.map((s) => [s.userId, s]));
+  const childrenByParent = new Map<string, string[]>();
+
+  for (const row of allAncestry) {
+    if (!row.directReferrerId) continue;
+    const list = childrenByParent.get(row.directReferrerId) ?? [];
+    list.push(row.scoutUserId);
+    childrenByParent.set(row.directReferrerId, list);
+  }
+
+  const fullSchedule = selectCommissionSchedule(13).entries;
+  const stats: DownstreamGenerationStat[] = [];
+  let frontier: string[] = [scoutId];
 
   for (let gen = 1; gen <= 13; gen++) {
     const nextFrontier: string[] = [];
-    const members: ScoutProfileRecord[] = [];
     for (const parentId of frontier) {
-      for (const anc of Object.values(store.ancestry)) {
-        if (anc.directReferrerId === parentId && !visited.has(anc.scoutUserId)) {
-          visited.add(anc.scoutUserId);
-          const sc = store.scouts[anc.scoutUserId];
-          if (sc) {
-            members.push(sc);
-            nextFrontier.push(anc.scoutUserId);
-          }
-        }
-      }
+      const children = childrenByParent.get(parentId) ?? [];
+      nextFrontier.push(...children);
     }
-    byGen[gen] = members;
+
+    const eligible = nextFrontier.filter((id) => userMap.get(id)?.accountStatus === 'ACTIVE');
+    const handles =
+      gen <= 2
+        ? nextFrontier
+            .slice(0, 4)
+            .map((id) => `@${scoutMap.get(id)?.username ?? 'scout'}`)
+        : [];
+
+    stats.push({
+      generation: gen,
+      scoutCount: nextFrontier.length,
+      eligibleCount: eligible.length,
+      sampleHandles: handles,
+      scheduleFractionAtFullDepth: fullSchedule[gen - 1]?.label ?? '—',
+    });
+
     frontier = nextFrontier;
   }
 
-  // Only populate realistic sample aggregate depth for the seeded network anchor
-  const isSeededAmara = rootScoutId === '20000000-0000-4000-8000-000000000001';
-  const baselineCounts = isSeededAmara
-    ? [3, 4, 6, 9, 12, 14, 11, 8, 5, 4, 3, 2, 1]
-    : Array(13).fill(0);
-
-  return Array.from({ length: 13 }, (_, idx) => {
-    const gen = idx + 1;
-    const realMembers = byGen[gen] ?? [];
-    const count = Math.max(realMembers.length, baselineCounts[idx]);
-    const eligibleCount =
-      realMembers.length > 0
-        ? realMembers.filter(
-            (m) =>
-              m.eligibleForCommission &&
-              store.users[m.userId]?.accountStatus === 'ACTIVE'
-          ).length + Math.max(0, count - realMembers.length)
-        : count;
-
-    return {
-      generation: gen,
-      scoutCount: count,
-      eligibleCount,
-      sampleHandles: realMembers.map((m) => `@${m.username}`),
-      scheduleFractionAtFullDepth: fractions[idx],
-    };
-  });
+  return stats;
 }
 
-function getSellerPublicFlags(
-  store: InternalStore,
-  sellerProfileId: string
-): { hasActiveSellerBadge: boolean; isSellerVerified: boolean } {
-  const seller = store.sellers[sellerProfileId];
-  if (!seller) return { hasActiveSellerBadge: false, isSellerVerified: false };
-  const sellerVerif = store.verifications.find(
-    (v) => v.sellerProfileId === seller.id && v.category === 'SELLER'
-  );
-  return {
-    hasActiveSellerBadge: seller.sellerStatus === 'ACTIVE',
-    isSellerVerified: sellerVerif?.status === 'APPROVED',
-  };
-}
+// ============================================================================
+// ATOMIC SIGNUP / FIRST-LOGIN PROVISIONING (DRIZZLE POSTGRES TRANSACTION)
+// ============================================================================
 
-export function getPublicDirectoryForViewer(viewerUserId: string | null): PublicScoutProfileDTO[] {
-  const store = getStore();
-  return Object.values(store.scouts)
-    .filter((s) => {
-      if (s.userId === viewerUserId) return false;
-      const u = store.users[s.userId];
-      if (!u || u.accountStatus === 'CLOSED' || u.accountStatus === 'SUSPENDED') return false;
-      if (viewerUserId && isBlockedBetween(store, viewerUserId, s.userId)) return false;
-      return true;
-    })
-    .map((s) => {
-      const seller = Object.values(store.sellers).find((sp) => sp.ownerUserId === s.userId);
-      const sellerVerif = seller
-        ? store.verifications.find(
-            (v) => v.sellerProfileId === seller.id && v.category === 'SELLER'
-          )
-        : undefined;
-      const workingWithCount = store.scoutsList.filter(
-        (c) => c.ownerUserId === s.userId || c.scoutId === s.userId
-      ).length;
-      const totalSoldUnits = store.orders
-        .filter((o) => o.sellerScoutId === s.userId && o.fulfilmentStatus !== 'Refunded')
-        .reduce((sum, o) => sum + o.quantity, 0);
+export async function ensureUserProvisionedInDb(
+  identity: SupabaseSessionIdentity,
+  input?: {
+    displayName?: string;
+    username?: string;
+    locationState?: string;
+    referralEventId?: string | null;
+    referralScoutUsername?: string | null;
+  }
+): Promise<{ createdNew: boolean; userId: string }> {
+  const db = requireDb();
+  await ensureTablesReady(db);
 
-      return toPublicScoutProfileDTO({
-        userId: s.userId,
-        username: s.username,
-        displayName: s.displayName,
-        avatarUrl: s.avatarUrl,
-        bio: s.bio,
-        locationState: s.locationState,
-        sellerStatus: seller?.sellerStatus ?? null,
-        sellerVerificationStatus: sellerVerif?.status ?? null,
-        workingWithCount,
-        totalSoldUnits,
-      });
+  const existing = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, identity.userId))
+    .limit(1);
+
+  if (existing.length > 0) {
+    return { createdNew: false, userId: identity.userId };
+  }
+
+  const meta = identity.userMetadata || {};
+  const rawDisplayName =
+    input?.displayName?.trim() ||
+    (typeof meta.display_name === 'string' && meta.display_name.trim()) ||
+    (typeof meta.full_name === 'string' && meta.full_name.trim()) ||
+    identity.email.split('@')[0];
+
+  const baseUsernameRaw =
+    input?.username?.trim() ||
+    (typeof meta.username === 'string' && meta.username.trim()) ||
+    identity.email.split('@')[0];
+  const baseSlug =
+    baseUsernameRaw
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, '_')
+      .replace(/^_+|_+$/g, '') || 'scout';
+
+  const locationState =
+    input?.locationState?.trim() ||
+    (typeof meta.location_state === 'string' && meta.location_state.trim()) ||
+    'Lagos';
+
+  const created = await db.transaction(async (tx) => {
+    const insideCheck = await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, identity.userId))
+      .limit(1);
+    if (insideCheck.length > 0) {
+      return false;
+    }
+
+    // Resolve unique username safely
+    let candidate = baseSlug;
+    let suffix = 1;
+    while (true) {
+      const taken = await tx
+        .select({ userId: scoutProfiles.userId })
+        .from(scoutProfiles)
+        .where(eq(scoutProfiles.username, candidate))
+        .limit(1);
+      if (taken.length === 0) break;
+      candidate = `${baseSlug}_${suffix++}`;
+    }
+
+    // Resolve referral attribution cleanly without self-referral
+    let directReferrerId: string | null = null;
+    let attributionSource: 'REFERRAL_CARD' | 'REFERRAL_LINK' | 'ORGANIC' = 'ORGANIC';
+    let resolvedEventId: string | null = null;
+
+    if (isUuid(input?.referralEventId)) {
+      const evRows = await tx
+        .select()
+        .from(productReferralEvents)
+        .where(eq(productReferralEvents.id, input!.referralEventId!))
+        .limit(1);
+      const ev = evRows[0];
+      if (ev && ev.senderScoutId !== identity.userId) {
+        directReferrerId = ev.senderScoutId;
+        attributionSource = 'REFERRAL_CARD';
+        resolvedEventId = ev.id;
+      }
+    }
+
+    if (!directReferrerId && input?.referralScoutUsername?.trim()) {
+      const refSlug = input.referralScoutUsername.trim().toLowerCase();
+      const refRows = await tx
+        .select({ userId: scoutProfiles.userId })
+        .from(scoutProfiles)
+        .where(eq(scoutProfiles.username, refSlug))
+        .limit(1);
+      if (refRows[0] && refRows[0].userId !== identity.userId) {
+        directReferrerId = refRows[0].userId;
+        attributionSource = 'REFERRAL_LINK';
+      }
+    }
+
+    // 1. Insert public.users
+    await tx.insert(users).values({
+      id: identity.userId,
+      email: identity.email.toLowerCase(),
+      phone: identity.phone,
+      accountStatus: 'ACTIVE',
     });
+
+    // 2. Insert public.scout_profiles
+    await tx.insert(scoutProfiles).values({
+      userId: identity.userId,
+      username: candidate,
+      displayName: rawDisplayName,
+      locationState,
+      preferredCategories: [],
+      invitationPolicy: 'EVERYONE',
+      muteReferrals: false,
+      profileVisibility: 'PUBLIC',
+    });
+
+    // 3. Insert public.referral_ancestry (permanent)
+    await tx.insert(referralAncestry).values({
+      scoutUserId: identity.userId,
+      directReferrerId,
+      attributionSource,
+      referralEventId: resolvedEventId,
+    });
+
+    // 4. Insert initial CONTACT verification (verified via Supabase Auth)
+    await tx.insert(verificationRecords).values({
+      userId: identity.userId,
+      category: 'CONTACT',
+      status: 'APPROVED',
+      evidencePaths: [],
+      reviewerNotes: 'Verified via Supabase Auth',
+      submittedAt: new Date(),
+      reviewedAt: new Date(),
+    });
+
+    // 5. Insert audit log entry in public.audit_logs
+    await tx.insert(auditLogs).values({
+      actorId: identity.userId,
+      affectedUserId: identity.userId,
+      action: 'USER_PROVISIONED',
+      entityType: 'users',
+      entityId: identity.userId,
+      newValue: {
+        email: identity.email.toLowerCase(),
+        username: candidate,
+        attributionSource,
+        directReferrerId,
+        referralEventId: resolvedEventId,
+      },
+      reason: 'Atomic Scout identity provisioned via Supabase Auth',
+    });
+
+    // 6. Welcome notification
+    await tx.insert(platformNotifications).values({
+      userId: identity.userId,
+      category: 'trust',
+      title: 'Free Scout Account Provisioned',
+      body: directReferrerId
+        ? `Your permanent referral ancestry (${attributionSource}) is locked. You can refer products or activate Seller capabilities anytime.`
+        : 'Welcome to NairaScout. Browse the marketplace, connect on Scouts List, or activate Seller capabilities anytime.',
+    });
+
+    return true;
+  });
+
+  return { createdNew: created, userId: identity.userId };
 }
 
-export function getNairaScoutSnapshot(
+// ============================================================================
+// SNAPSHOT BUILDER (100% POSTGRESQL VIA DRIZZLE ORM)
+// ============================================================================
+
+export async function getNairaScoutSnapshot(
   viewerUserId: string | null,
   referralEventQuery?: string | null
-): NairaScoutSnapshot {
-  const store = getStore();
-  const authCtx = buildUserAuthContextFromStore(viewerUserId);
-  const viewerUser = viewerUserId ? store.users[viewerUserId] : null;
-  const viewerScout = viewerUserId ? store.scouts[viewerUserId] : null;
+): Promise<NairaScoutSnapshot> {
+  const dbConfigured = isPostgresConfigured();
+  const supabaseConfigured = isSupabaseConfigured();
 
-  const publishedProducts = store.products
-    .filter((p) => p.status === 'PUBLISHED')
-    .map((p) => {
-      const flags = getSellerPublicFlags(store, p.sellerProfileId);
-      return { ...p, ...flags };
-    });
-
-  if (!viewerUser || !viewerScout || !authCtx) {
-    // Public guest view: still resolve any requested referralEvent for ?refEvent=... guest checkout
-    const publicRefEvent = referralEventQuery
-      ? store.referralEvents.filter((r) => r.id === referralEventQuery)
-      : [];
-
+  const db = getDb();
+  if (!db) {
     return {
       authenticated: false,
-      adminBootstrapAvailable: !store.adminClaimed,
+      dbConfigured,
+      supabaseConfigured,
       activeScout: null,
-      products: publishedProducts,
+      products: [],
       sellerListings: [],
       scoutsList: [],
       invitations: [],
       blockedUsers: [],
-      referralsInbox: publicRefEvent,
+      referralsInbox: [],
       sentReferrals: [],
       orders: [],
       ledgerEntries: [],
-      wallet: computeWalletSummary(store, null),
+      wallet: emptyWallet(),
       upstreamAncestry: [],
-      downstreamGenerations: computeDownstreamGenerations(store, null),
+      downstreamGenerations: emptyDownstreamStats(),
       sellerStats: {
         activeListingsCount: 0,
         draftListingsCount: 0,
@@ -2143,37 +771,236 @@ export function getNairaScoutSnapshot(
       },
       notifications: [],
       supportCases: [],
-      allScoutsDirectory: getPublicDirectoryForViewer(null),
+      allScoutsDirectory: [],
     };
   }
 
-  const verifications = store.verifications.filter((v) => v.userId === viewerUser.id);
-  const sellerProfile = authCtx.seller
-    ? store.sellers[authCtx.seller.sellerProfileId] ?? null
+  await ensureTablesReady(db);
+
+  const allSellers = await db.select().from(sellerProfiles);
+  const sellerById = new Map(allSellers.map((s) => [s.id, s]));
+  const allVerifs = await db.select().from(verificationRecords);
+
+  const getSellerFlags = (sellerProfileId: string) => {
+    const sp = sellerById.get(sellerProfileId);
+    const sellerVerif = allVerifs.find(
+      (v) => v.sellerProfileId === sellerProfileId && v.category === 'SELLER'
+    );
+    return {
+      hasActiveSellerBadge: sp?.sellerStatus === 'ACTIVE',
+      isSellerVerified: sellerVerif?.status === 'APPROVED',
+    };
+  };
+
+  const publishedRows = await db
+    .select()
+    .from(productListings)
+    .where(eq(productListings.status, 'PUBLISHED'))
+    .orderBy(desc(productListings.createdAt));
+
+  const publishedProducts: ProductListing[] = publishedRows.map((p) => {
+    const flags = getSellerFlags(p.sellerProfileId);
+    return {
+      id: p.id,
+      productId: p.productId,
+      title: p.title,
+      description: p.description,
+      category: p.category,
+      priceKobo: Number(p.priceKobo),
+      deliveryFeeKobo: Number(p.deliveryFeeKobo),
+      stock: p.stock,
+      sellerScoutId: p.sellerScoutId,
+      sellerProfileId: p.sellerProfileId,
+      sellerName: p.sellerName,
+      sellerCity: p.sellerCity,
+      ...flags,
+      status: p.status as ProductListing['status'],
+      imageSeed: p.imageSeed,
+      imageUrl: p.imageUrl,
+      daysRemaining: p.daysRemaining,
+      specifications: p.specifications,
+      returnPolicy: p.returnPolicy,
+      warranty: p.warranty,
+      impressions: p.impressions,
+      referralShares: p.referralShares,
+    };
+  });
+
+  const allScouts = await db.select().from(scoutProfiles);
+  const allUsers = await db.select().from(users);
+  const scoutByUserId = new Map(allScouts.map((s) => [s.userId, s]));
+  const userById = new Map(allUsers.map((u) => [u.id, u]));
+
+  const mapReferralEvent = (r: typeof productReferralEvents.$inferSelect): ProductReferralEvent => {
+    const sender = scoutByUserId.get(r.senderScoutId);
+    const recipient = scoutByUserId.get(r.recipientScoutId);
+    const isExpired = r.status === 'active' && r.expiresAt.getTime() < Date.now();
+    return {
+      id: r.id,
+      productListingId: r.productListingId,
+      senderScoutId: r.senderScoutId,
+      senderHandle: sender?.username || 'scout',
+      senderDisplayName: sender?.displayName || 'Scout',
+      recipientScoutId: r.recipientScoutId,
+      recipientHandle: recipient?.username || 'scout',
+      recipientDisplayName: recipient?.displayName || 'Scout',
+      note: r.note,
+      ancestryPathSignature: r.ancestryPathSignature,
+      createdAt: r.createdAt.toISOString(),
+      expiresAt: r.expiresAt.toISOString(),
+      status: (isExpired ? 'expired' : r.status) as ProductReferralEvent['status'],
+    };
+  };
+
+  if (!viewerUserId) {
+    let guestRefInbox: ProductReferralEvent[] = [];
+    if (isUuid(referralEventQuery)) {
+      const rows = await db
+        .select()
+        .from(productReferralEvents)
+        .where(eq(productReferralEvents.id, referralEventQuery))
+        .limit(1);
+      guestRefInbox = rows.map(mapReferralEvent);
+    }
+
+    return {
+      authenticated: false,
+      dbConfigured,
+      supabaseConfigured,
+      activeScout: null,
+      products: publishedProducts,
+      sellerListings: [],
+      scoutsList: [],
+      invitations: [],
+      blockedUsers: [],
+      referralsInbox: guestRefInbox,
+      sentReferrals: [],
+      orders: [],
+      ledgerEntries: [],
+      wallet: emptyWallet(),
+      upstreamAncestry: [],
+      downstreamGenerations: emptyDownstreamStats(),
+      sellerStats: {
+        activeListingsCount: 0,
+        draftListingsCount: 0,
+        monthlyPublicationsUsed: 0,
+        directOrdersCount: 0,
+        referralOrdersCount: 0,
+        eligibleMerchandiseKobo: 0,
+        marketplaceCommissionKobo: 0,
+        referralPoolGeneratedKobo: 0,
+        netSellerProceedsKobo: 0,
+      },
+      notifications: [],
+      supportCases: [],
+      allScoutsDirectory: [],
+    };
+  }
+
+  const viewerUser = userById.get(viewerUserId);
+  const viewerScout = scoutByUserId.get(viewerUserId);
+  const authCtx = await loadDbAuthContext(viewerUserId);
+
+  if (!viewerUser || !viewerScout || !authCtx) {
+    return getNairaScoutSnapshot(null, referralEventQuery);
+  }
+
+  const myVerifs = allVerifs
+    .filter((v) => v.userId === viewerUserId)
+    .map((v) => ({
+      id: v.id,
+      userId: v.userId,
+      sellerProfileId: v.sellerProfileId,
+      category: v.category as VerificationCategory,
+      status: v.status as VerificationStatus,
+      evidencePaths: v.evidencePaths,
+      reviewerNotes: v.reviewerNotes,
+      reviewedBy: v.reviewedBy,
+      submittedAt: v.submittedAt?.toISOString() ?? null,
+      reviewedAt: v.reviewedAt?.toISOString() ?? null,
+    }));
+
+  const sellerProfileRow = authCtx.seller ? sellerById.get(authCtx.seller.sellerProfileId) ?? null : null;
+  const sellerProfile: SellerProfileRecord | null = sellerProfileRow
+    ? {
+        id: sellerProfileRow.id,
+        ownerUserId: sellerProfileRow.ownerUserId,
+        sellerType: sellerProfileRow.sellerType,
+        sellerName: sellerProfileRow.sellerName,
+        description: sellerProfileRow.description,
+        businessCategory: sellerProfileRow.businessCategory,
+        businessRegNumber: sellerProfileRow.businessRegNumber,
+        businessAddress: sellerProfileRow.businessAddress,
+        businessContactEmail: sellerProfileRow.businessContactEmail,
+        businessContactPhone: sellerProfileRow.businessContactPhone,
+        sellerStatus: sellerProfileRow.sellerStatus as SellerStatus,
+        subscriptionPlan: sellerProfileRow.subscriptionPlan as SubscriptionPlan,
+        subscriptionStatus: sellerProfileRow.subscriptionStatus,
+        termsAcceptedAt: sellerProfileRow.termsAcceptedAt.toISOString(),
+        createdAt: sellerProfileRow.createdAt.toISOString(),
+      }
     : null;
-  const sellerListings = sellerProfile
-    ? store.products
-        .filter((p) => p.sellerProfileId === sellerProfile.id)
-        .map((p) => ({ ...p, ...getSellerPublicFlags(store, p.sellerProfileId) }))
+
+  const sellerListingRows = sellerProfile
+    ? await db
+        .select()
+        .from(productListings)
+        .where(eq(productListings.sellerProfileId, sellerProfile.id))
+        .orderBy(desc(productListings.createdAt))
     : [];
 
-  const teamMembers = sellerProfile
-    ? store.teamMembers
-        .filter((m) => m.sellerProfileId === sellerProfile.id && m.status !== 'REVOKED')
-        .map((m) => ({
-          ...m,
-          username: store.scouts[m.userId]?.username || 'member',
-          displayName: store.scouts[m.userId]?.displayName || 'Team Member',
-          email: store.users[m.userId]?.email || '',
-        }))
+  const sellerListings: ProductListing[] = sellerListingRows.map((p) => ({
+    id: p.id,
+    productId: p.productId,
+    title: p.title,
+    description: p.description,
+    category: p.category,
+    priceKobo: Number(p.priceKobo),
+    deliveryFeeKobo: Number(p.deliveryFeeKobo),
+    stock: p.stock,
+    sellerScoutId: p.sellerScoutId,
+    sellerProfileId: p.sellerProfileId,
+    sellerName: p.sellerName,
+    sellerCity: p.sellerCity,
+    ...getSellerFlags(p.sellerProfileId),
+    status: p.status as ProductListing['status'],
+    imageSeed: p.imageSeed,
+    imageUrl: p.imageUrl,
+    daysRemaining: p.daysRemaining,
+    specifications: p.specifications,
+    returnPolicy: p.returnPolicy,
+    warranty: p.warranty,
+    impressions: p.impressions,
+    referralShares: p.referralShares,
+  }));
+
+  const teamRows = sellerProfile
+    ? await db
+        .select()
+        .from(sellerTeamMembers)
+        .where(eq(sellerTeamMembers.sellerProfileId, sellerProfile.id))
     : [];
 
-  const kycVerified = verifications.some(
-    (v) => v.category === 'IDENTITY' && v.status === 'APPROVED'
-  );
-  const bankVerified = verifications.some(
-    (v) => v.category === 'PAYOUT_BANK' && v.status === 'APPROVED'
-  );
+  const teamMembers = teamRows
+    .filter((m) => m.status !== 'REVOKED')
+    .map((m) => ({
+      id: m.id,
+      sellerProfileId: m.sellerProfileId,
+      userId: m.userId,
+      role: m.role,
+      permissions: m.permissions,
+      status: m.status,
+      invitedBy: m.invitedBy,
+      createdAt: m.createdAt.toISOString(),
+      revokedAt: m.revokedAt?.toISOString() ?? null,
+      username: scoutByUserId.get(m.userId)?.username || 'member',
+      displayName: scoutByUserId.get(m.userId)?.displayName || 'Team Member',
+      email: userById.get(m.userId)?.email || '',
+    }));
+
+  const kycVerified = myVerifs.some((v) => v.category === 'IDENTITY' && v.status === 'APPROVED');
+  const bankVerified = myVerifs.some((v) => v.category === 'PAYOUT_BANK' && v.status === 'APPROVED');
+  const payoutBankRec = myVerifs.find((v) => v.category === 'PAYOUT_BANK');
 
   const activeScout: ActiveScoutDTO = {
     id: viewerUser.id,
@@ -2181,89 +1008,186 @@ export function getNairaScoutSnapshot(
     handle: viewerScout.username,
     displayName: viewerScout.displayName,
     bio: viewerScout.bio,
-    city: viewerScout.locationState,
+    city: viewerScout.locationState || 'Lagos',
     preferredCategories: viewerScout.preferredCategories,
-    accountStatus: viewerUser.accountStatus,
+    accountStatus: viewerUser.accountStatus as AccountStatus,
     restrictionReason: viewerUser.restrictionReason,
-    invitePolicy: viewerScout.invitationPolicy,
+    invitePolicy: viewerScout.invitationPolicy as InvitationPolicy,
     muteReferrals: viewerScout.muteReferrals,
-    profileVisibility: viewerScout.profileVisibility,
+    profileVisibility: (viewerScout.profileVisibility === 'NETWORK_ONLY'
+      ? 'NETWORK_ONLY'
+      : 'PUBLIC'),
     kycVerified,
     bankVerified,
-    bankSummary: viewerScout.bankSummary,
+    bankSummary: payoutBankRec?.reviewerNotes || (bankVerified ? 'Verified Naira Account' : 'Not submitted'),
     isSeller: Boolean(sellerProfile),
     sellerProfile,
     sellerVerificationStatus: authCtx.seller?.sellerVerificationStatus ?? 'NOT_SUBMITTED',
-    verifications,
+    verifications: myVerifs,
     teamMembers,
     adminRole: authCtx.adminRole ?? null,
     sellerPlan: sellerProfile ? planEnumToId(sellerProfile.subscriptionPlan) : 'starter',
   };
 
-  const myContacts = store.scoutsList
-    .filter((c) => c.ownerUserId === viewerUser.id)
-    .map((c) => {
-      const seller = Object.values(store.sellers).find((sp) => sp.ownerUserId === c.scoutId);
-      const flags = seller
-        ? getSellerPublicFlags(store, seller.id)
-        : { hasActiveSellerBadge: false, isSellerVerified: false };
-      return {
-        ...c,
-        blocked: isBlockedBetween(store, viewerUser.id, c.scoutId),
-        ...flags,
-      };
-    });
+  // Blocks
+  const blockRows = await db
+    .select()
+    .from(userBlocks)
+    .where(or(eq(userBlocks.blockerId, viewerUserId), eq(userBlocks.blockedId, viewerUserId)));
 
-  const myInvitations = store.invitations
-    .filter((i) => i.senderId === viewerUser.id || i.recipientId === viewerUser.id)
-    .map((i) => {
-      const isIncoming = i.recipientId === viewerUser.id;
-      const otherId = isIncoming ? i.senderId : i.recipientId;
-      const otherScout = store.scouts[otherId];
-      return {
-        ...i,
-        direction: (isIncoming ? 'incoming' : 'outgoing') as 'incoming' | 'outgoing',
-        otherScoutId: otherId,
-        otherHandle: otherScout?.username || i.otherHandle,
-        otherDisplayName: otherScout?.displayName || i.otherDisplayName,
-        otherCity: otherScout?.locationState || i.otherCity,
-      };
-    });
+  const blockedSet = new Set<string>();
+  const myBlocks = [];
+  for (const b of blockRows) {
+    if (b.blockerId === viewerUserId) {
+      blockedSet.add(b.blockedId);
+      const bs = scoutByUserId.get(b.blockedId);
+      myBlocks.push({
+        userId: b.blockedId,
+        username: bs?.username || 'user',
+        displayName: bs?.displayName || 'Blocked User',
+        createdAt: b.createdAt.toISOString(),
+      });
+    } else {
+      blockedSet.add(b.blockerId);
+    }
+  }
 
-  const blockedUsers = store.userBlocks
-    .filter((b) => b.blockerId === viewerUser.id)
-    .map((b) => ({
-      userId: b.blockedId,
-      username: store.scouts[b.blockedId]?.username || 'user',
-      displayName: store.scouts[b.blockedId]?.displayName || 'Blocked Scout',
-      createdAt: b.createdAt,
+  // Contacts
+  const contactRows = await db
+    .select()
+    .from(scoutsListContacts)
+    .where(eq(scoutsListContacts.ownerUserId, viewerUserId))
+    .orderBy(desc(scoutsListContacts.createdAt));
+
+  const myContacts: ScoutsListContact[] = contactRows.map((c) => {
+    const cs = scoutByUserId.get(c.contactUserId);
+    const seller = allSellers.find((sp) => sp.ownerUserId === c.contactUserId);
+    const flags = seller
+      ? getSellerFlags(seller.id)
+      : { hasActiveSellerBadge: false, isSellerVerified: false };
+    return {
+      contactId: c.id,
+      ownerUserId: c.ownerUserId,
+      scoutId: c.contactUserId,
+      handle: cs?.username || 'scout',
+      displayName: cs?.displayName || 'Scout',
+      city: cs?.locationState || 'Nigeria',
+      addedAt: c.createdAt.toISOString().slice(0, 10),
+      blocked: blockedSet.has(c.contactUserId),
+      ...flags,
+    };
+  });
+
+  // Invitations
+  const inviteRows = await db
+    .select()
+    .from(scoutsListInvitations)
+    .where(
+      or(
+        eq(scoutsListInvitations.senderId, viewerUserId),
+        eq(scoutsListInvitations.recipientId, viewerUserId)
+      )
+    )
+    .orderBy(desc(scoutsListInvitations.createdAt));
+
+  const myInvitations: ScoutsListInvitation[] = inviteRows.map((i) => {
+    const isIncoming = i.recipientId === viewerUserId;
+    const otherId = isIncoming ? i.senderId : i.recipientId;
+    const os = scoutByUserId.get(otherId);
+    const expired = i.status === 'PENDING' && i.expiresAt.getTime() < Date.now();
+    return {
+      id: i.id,
+      senderId: i.senderId,
+      recipientId: i.recipientId,
+      direction: isIncoming ? 'incoming' : 'outgoing',
+      otherScoutId: otherId,
+      otherHandle: os?.username || 'scout',
+      otherDisplayName: os?.displayName || 'Scout',
+      otherCity: os?.locationState || 'Nigeria',
+      status: (expired ? 'expired' : i.status.toLowerCase()) as ScoutsListInvitation['status'],
+      createdAt: i.createdAt.toISOString(),
+      expiresAt: i.expiresAt.toISOString().slice(0, 10),
+    };
+  });
+
+  // Referral Events
+  const refRows = await db
+    .select()
+    .from(productReferralEvents)
+    .orderBy(desc(productReferralEvents.createdAt));
+
+  const referralsInbox = refRows
+    .filter(
+      (r) =>
+        (r.recipientScoutId === viewerUserId || r.id === referralEventQuery) &&
+        !blockedSet.has(r.senderScoutId)
+    )
+    .map(mapReferralEvent);
+
+  const sentReferrals = refRows
+    .filter((r) => r.senderScoutId === viewerUserId)
+    .map(mapReferralEvent);
+
+  // Orders & Ledger
+  const allOrders = await db
+    .select()
+    .from(marketplaceOrders)
+    .orderBy(desc(marketplaceOrders.createdAt));
+
+  const visibleOrders: MarketplaceOrder[] = allOrders
+    .filter(
+      (o) =>
+        o.buyerScoutId === viewerUserId ||
+        o.sellerScoutId === viewerUserId ||
+        o.commissionSnapshot.allocations.some((a) => a.scoutId === viewerUserId)
+    )
+    .map((o) => ({
+      id: o.id,
+      buyerScoutId: o.buyerScoutId,
+      buyerDisplayName: o.buyerDisplayName,
+      productListingId: o.productListingId,
+      productTitle: o.productTitle,
+      sellerScoutId: o.sellerScoutId,
+      sellerName: o.sellerName,
+      quantity: o.quantity,
+      eligibleMerchandiseKobo: Number(o.eligibleMerchandiseKobo),
+      deliveryFeeKobo: Number(o.deliveryFeeKobo),
+      totalChargedKobo: Number(o.totalChargedKobo),
+      attributionType: o.attributionType as 'direct' | 'referral_card',
+      referralEventId: o.referralEventId,
+      fulfilmentStatus: o.fulfilmentStatus as OrderFulfilmentStatus,
+      fulfilmentDeadline: o.fulfilmentDeadline.toISOString().slice(0, 10),
+      createdAt: o.createdAt.toISOString().slice(0, 10),
+      commissionSnapshot: o.commissionSnapshot,
     }));
 
-  const referralsInbox = store.referralEvents.filter(
-    (e) =>
-      (e.recipientScoutId === viewerUser.id || e.id === referralEventQuery) &&
-      !isBlockedBetween(store, viewerUser.id, e.senderScoutId)
-  );
-  const sentReferrals = store.referralEvents.filter(
-    (e) => e.senderScoutId === viewerUser.id
-  );
+  const ledgerRows = await db
+    .select()
+    .from(commissionLedgerEntries)
+    .where(eq(commissionLedgerEntries.beneficiaryScoutId, viewerUserId))
+    .orderBy(desc(commissionLedgerEntries.createdAt));
 
-  const scoutLedgerEntries = store.ledger.filter(
-    (entry) => entry.beneficiaryScoutId === viewerUser.id
-  );
+  const ledgerEntries: LedgerEntry[] = ledgerRows.map((l) => ({
+    id: l.id,
+    reference: l.reference,
+    orderId: l.orderId,
+    referralEventId: l.referralEventId,
+    beneficiaryScoutId: l.beneficiaryScoutId,
+    generation: l.generation,
+    fractionLabel: l.fractionLabel,
+    amountKobo: Number(l.amountKobo),
+    status: l.status as LedgerEntryStatus,
+    ruleVersion: l.ruleVersion,
+    description: l.description,
+    createdAt: l.createdAt.toISOString().slice(0, 10),
+    linkedToReference: l.linkedToReference ?? undefined,
+  }));
 
-  const visibleOrders = store.orders.filter(
-    (o) =>
-      o.buyerScoutId === viewerUser.id ||
-      o.sellerScoutId === viewerUser.id ||
-      o.commissionSnapshot.allocations.some((a) => a.scoutId === viewerUser.id)
-  );
-
-  const sellerOrders = store.orders.filter(
-    (o) => o.sellerScoutId === viewerUser.id && o.fulfilmentStatus !== 'Refunded'
+  const sellerOrders = allOrders.filter(
+    (o) => o.sellerScoutId === viewerUserId && o.fulfilmentStatus !== 'Refunded'
   );
   const eligibleMerchandiseKobo = sellerOrders.reduce(
-    (sum, o) => sum + o.eligibleMerchandiseKobo,
+    (sum, o) => sum + Number(o.eligibleMerchandiseKobo),
     0
   );
   const marketplaceCommissionKobo = sellerOrders.reduce(
@@ -2275,28 +1199,86 @@ export function getNairaScoutSnapshot(
     0
   );
 
+  // Sanitized Directory Search (PostgreSQL only)
+  const allContactsRows = await db.select().from(scoutsListContacts);
+  const allScoutsDirectory: PublicScoutProfileDTO[] = allScouts
+    .filter((s) => {
+      if (s.userId === viewerUserId) return false;
+      const u = userById.get(s.userId);
+      if (!u || u.accountStatus === 'CLOSED' || u.accountStatus === 'SUSPENDED') return false;
+      if (blockedSet.has(s.userId)) return false;
+      return true;
+    })
+    .map((s) => {
+      const seller = allSellers.find((sp) => sp.ownerUserId === s.userId);
+      const sellerVerif = seller
+        ? allVerifs.find((v) => v.sellerProfileId === seller.id && v.category === 'SELLER')
+        : undefined;
+      const workingWithCount = allContactsRows.filter(
+        (c) => c.ownerUserId === s.userId || c.contactUserId === s.userId
+      ).length;
+      const totalSoldUnits = allOrders
+        .filter((o) => o.sellerScoutId === s.userId && o.fulfilmentStatus !== 'Refunded')
+        .reduce((sum, o) => sum + o.quantity, 0);
+
+      return toPublicScoutProfileDTO({
+        userId: s.userId,
+        username: s.username,
+        displayName: s.displayName,
+        avatarUrl: s.avatarUrl,
+        bio: s.bio,
+        locationState: s.locationState,
+        sellerStatus: (seller?.sellerStatus as SellerStatus | undefined) ?? null,
+        sellerVerificationStatus: (sellerVerif?.status as VerificationStatus | undefined) ?? null,
+        workingWithCount,
+        totalSoldUnits,
+      });
+    });
+
+  const notifRows = await db
+    .select()
+    .from(platformNotifications)
+    .where(eq(platformNotifications.userId, viewerUserId))
+    .orderBy(desc(platformNotifications.createdAt));
+
+  const supportRows = await db
+    .select()
+    .from(supportCases)
+    .where(eq(supportCases.userId, viewerUserId))
+    .orderBy(desc(supportCases.createdAt));
+
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const monthlyPublicationsUsed = sellerListingRows.filter(
+    (l) => l.publishedAt && l.publishedAt >= monthStart
+  ).length;
+
   return {
     authenticated: true,
-    adminBootstrapAvailable: !store.adminClaimed,
+    dbConfigured,
+    supabaseConfigured,
     activeScout,
     products: publishedProducts,
     sellerListings,
     scoutsList: myContacts,
     invitations: myInvitations,
-    blockedUsers,
+    blockedUsers: myBlocks,
     referralsInbox,
     sentReferrals,
     orders: visibleOrders,
-    ledgerEntries: scoutLedgerEntries,
-    wallet: computeWalletSummary(store, viewerUser.id),
-    upstreamAncestry: buildAncestryForScout(viewerUser.id, store),
-    downstreamGenerations: computeDownstreamGenerations(store, viewerUser.id),
+    ledgerEntries,
+    wallet: await computeWalletFromDb(
+      db,
+      viewerUserId,
+      allVerifs.filter((v) => v.userId === viewerUserId)
+    ),
+    upstreamAncestry: await buildAncestryChainFromDb(db, viewerUserId),
+    downstreamGenerations: await computeDownstreamFromDb(db, viewerUserId),
     sellerStats: {
       activeListingsCount: sellerListings.filter((l) => l.status === 'PUBLISHED').length,
       draftListingsCount: sellerListings.filter((l) => l.status === 'DRAFT').length,
-      monthlyPublicationsUsed: sellerProfile
-        ? store.monthlyPublicationsBySeller[sellerProfile.id] ?? 0
-        : 0,
+      monthlyPublicationsUsed,
       directOrdersCount: sellerOrders.filter((o) => o.attributionType === 'direct').length,
       referralOrdersCount: sellerOrders.filter((o) => o.attributionType === 'referral_card').length,
       eligibleMerchandiseKobo,
@@ -2304,186 +1286,366 @@ export function getNairaScoutSnapshot(
       referralPoolGeneratedKobo,
       netSellerProceedsKobo: eligibleMerchandiseKobo - marketplaceCommissionKobo,
     },
-    notifications: store.notifications.filter((n) => n.userId === viewerUser.id),
-    supportCases: store.supportCases.filter((c) => c.userId === viewerUser.id),
-    allScoutsDirectory: getPublicDirectoryForViewer(viewerUser.id),
+    notifications: notifRows.map((n) => ({
+      id: n.id,
+      userId: n.userId,
+      category: n.category as PlatformNotification['category'],
+      title: n.title,
+      body: n.body,
+      createdAt: n.createdAt.toISOString(),
+      read: n.read,
+    })),
+    supportCases: supportRows.map((c) => ({
+      id: c.id,
+      userId: c.userId,
+      topic: c.topic as SupportCase['topic'],
+      subject: c.subject,
+      details: c.details,
+      status: c.status as SupportCase['status'],
+      createdAt: c.createdAt.toISOString(),
+    })),
+    allScoutsDirectory,
   };
 }
 
 // ============================================================================
-// SERVER-ENFORCED TRANSACTIONAL ACTIONS
+// SERVER-ENFORCED TRANSACTIONAL ACTIONS (100% DRIZZLE POSTGRESQL)
 // ============================================================================
 
-export function createOrderFromCheckout(
+export async function createOrderFromCheckout(
   actorUserId: string,
   input: {
     productListingId: string;
     quantity: number;
     referralEventId: string | null;
   }
-): MarketplaceOrder {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+): Promise<MarketplaceOrder> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertActiveAccount(ctx);
 
-  const product = store.products.find(
-    (p) => p.id === input.productListingId && p.status === 'PUBLISHED'
-  );
-  if (!product) {
-    throw new AuthorizationError('Published product listing not found.', 404, 'LISTING_NOT_FOUND');
+  const buyerRows = await db
+    .select()
+    .from(scoutProfiles)
+    .where(eq(scoutProfiles.userId, actorUserId))
+    .limit(1);
+  const buyerScout = buyerRows[0];
+  if (!buyerScout) {
+    throw new AuthorizationError('Scout profile not provisioned.', 400, 'SCOUT_NOT_FOUND');
   }
 
-  const qty = Math.max(1, Math.min(product.stock, Math.floor(input.quantity || 1)));
-  if (product.stock < qty) {
-    throw new AuthorizationError('Insufficient product inventory.', 400, 'OUT_OF_STOCK');
-  }
-
-  let validReferralEventId: string | null = null;
-  if (input.referralEventId) {
-    const refEvent = store.referralEvents.find((r) => r.id === input.referralEventId);
-    if (!refEvent || refEvent.productListingId !== product.id || refEvent.status === 'expired') {
-      throw new AuthorizationError(
-        'Referral card is invalid or expired for this product.',
-        400,
-        'INVALID_REFERRAL_CARD'
-      );
+  return db.transaction(async (tx) => {
+    const listingRows = await tx
+      .select()
+      .from(productListings)
+      .where(
+        and(
+          eq(productListings.id, input.productListingId),
+          eq(productListings.status, 'PUBLISHED')
+        )
+      )
+      .limit(1);
+    const product = listingRows[0];
+    if (!product) {
+      throw new AuthorizationError('Published product listing not found.', 404, 'LISTING_NOT_FOUND');
     }
-    validReferralEventId = refEvent.id;
-    refEvent.status = 'converted';
-  }
 
-  product.stock -= qty;
-  const orderNumber = 9220 + store.orders.length;
-  const now = new Date();
-  const deadline = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
+    const qty = Math.max(1, Math.min(product.stock, Math.floor(input.quantity || 1)));
+    if (product.stock < qty) {
+      throw new AuthorizationError('Insufficient product inventory.', 400, 'OUT_OF_STOCK');
+    }
 
-  const order = createOrderRecordAndLedger(store, {
-    orderId: `ORD-${orderNumber}`,
-    buyerScoutId: actorUserId,
-    productListingId: product.id,
-    quantity: qty,
-    referralEventId: validReferralEventId,
-    fulfilmentStatus: 'Paid',
-    createdAt: now.toISOString(),
-    fulfilmentDeadline: deadline.toISOString(),
-  });
+    let validReferralEventId: string | null = null;
+    if (input.referralEventId) {
+      if (!isUuid(input.referralEventId)) {
+        throw new AuthorizationError('Invalid referral event identifier.', 400, 'INVALID_REFERRAL_CARD');
+      }
+      const evRows = await tx
+        .select()
+        .from(productReferralEvents)
+        .where(eq(productReferralEvents.id, input.referralEventId))
+        .limit(1);
+      const refEvent = evRows[0];
+      if (
+        !refEvent ||
+        refEvent.productListingId !== product.id ||
+        refEvent.status === 'expired' ||
+        refEvent.expiresAt.getTime() < Date.now()
+      ) {
+        throw new AuthorizationError(
+          'Referral card is invalid or expired for this product.',
+          400,
+          'INVALID_REFERRAL_CARD'
+        );
+      }
+      validReferralEventId = refEvent.id;
+      await tx
+        .update(productReferralEvents)
+        .set({ status: 'converted' })
+        .where(eq(productReferralEvents.id, refEvent.id));
+    }
 
-  store.notifications.unshift({
-    id: `NTF-${Date.now()}`,
-    userId: actorUserId,
-    category: 'order',
-    title: `Order ${order.id} confirmed (${order.attributionType === 'referral_card' ? 'Referral-Attributed' : 'Direct'})`,
-    body:
-      order.attributionType === 'referral_card'
-        ? `Referral event ${validReferralEventId} preserved. Pending commissions calculated across Seller ancestry (${order.commissionSnapshot.actualAncestryDepth} generations).`
-        : 'Direct marketplace checkout completed. No referral commission generated.',
-    createdAt: now.toISOString(),
-    read: false,
-  });
+    await tx
+      .update(productListings)
+      .set({ stock: product.stock - qty })
+      .where(eq(productListings.id, product.id));
 
-  return order;
-}
+    const eligibleMerchandiseKobo = Number(product.priceKobo) * qty;
+    const deliveryFeeKobo = Number(product.deliveryFeeKobo);
+    const totalChargedKobo = eligibleMerchandiseKobo + deliveryFeeKobo;
+    const isReferral = Boolean(validReferralEventId);
 
-export function advanceOrderStatus(
-  actorUserId: string,
-  input: { orderId: string; nextStatus: OrderFulfilmentStatus }
-): MarketplaceOrder {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
-  assertActiveAccount(ctx);
+    const sellerAncestry = isReferral
+      ? await buildAncestryChainFromDb(db, product.sellerScoutId)
+      : [];
+    const breakdown = calculateThirteenGenerationCommissions(
+      eligibleMerchandiseKobo,
+      sellerAncestry,
+      isReferral
+    );
 
-  const order = store.orders.find((o) => o.id === input.orderId);
-  if (!order) {
-    throw new AuthorizationError('Order not found.', 404, 'ORDER_NOT_FOUND');
-  }
+    const orderId = `ORD-${Date.now().toString().slice(-6)}${Math.floor(10 + Math.random() * 89)}`;
+    const now = new Date();
+    const deadline = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
 
-  const isOrderSeller =
-    order.sellerScoutId === actorUserId ||
-    (ctx.seller &&
-      store.sellers[ctx.seller.sellerProfileId]?.ownerUserId === order.sellerScoutId &&
-      ctx.seller.permissions.canManageOrders);
-  const isOrderBuyer = order.buyerScoutId === actorUserId;
+    await tx.insert(marketplaceOrders).values({
+      id: orderId,
+      buyerScoutId: actorUserId,
+      buyerDisplayName: buyerScout.displayName,
+      productListingId: product.id,
+      productTitle: product.title,
+      sellerScoutId: product.sellerScoutId,
+      sellerName: product.sellerName,
+      quantity: qty,
+      eligibleMerchandiseKobo,
+      deliveryFeeKobo,
+      totalChargedKobo,
+      attributionType: isReferral ? 'referral_card' : 'direct',
+      referralEventId: validReferralEventId,
+      fulfilmentStatus: 'Paid',
+      fulfilmentDeadline: deadline,
+      commissionSnapshot: breakdown,
+    });
 
-  if (!isOrderSeller && !isOrderBuyer && !ctx.adminRole) {
-    throw new AuthorizationError('You are not authorized to update this order.', 403, 'FORBIDDEN');
-  }
-
-  if (order.fulfilmentStatus === 'Refunded') {
-    throw new AuthorizationError('Refunded orders are terminal.', 400, 'ORDER_TERMINAL');
-  }
-
-  order.fulfilmentStatus = input.nextStatus;
-  const nowIso = new Date().toISOString();
-
-  const orderRootEntries = store.ledger.filter(
-    (l) => l.orderId === order.id && !l.linkedToReference
-  );
-
-  let newLedgerStatus: LedgerEntryStatus | null = null;
-  let reasonLabel = '';
-  if (input.nextStatus === 'Delivered') {
-    newLedgerStatus = 'Available';
-    reasonLabel = 'Delivery confirmed · commission released to Available';
-  } else if (input.nextStatus === 'Disputed') {
-    newLedgerStatus = 'On Hold';
-    reasonLabel = 'Delivery dispute opened · commission placed On Hold';
-  } else if (input.nextStatus === 'Refunded') {
-    newLedgerStatus = 'Reversed';
-    reasonLabel = 'Order refunded · commission reversed';
-  }
-
-  if (newLedgerStatus) {
-    for (const root of orderRootEntries) {
-      store.ledger.unshift({
-        id: `${root.reference}-${newLedgerStatus}-${Date.now()}`,
-        reference: `${root.reference}-${newLedgerStatus.slice(0, 3).toUpperCase()}`,
-        orderId: order.id,
-        referralEventId: root.referralEventId,
-        beneficiaryScoutId: root.beneficiaryScoutId,
-        generation: root.generation,
-        fractionLabel: root.fractionLabel,
-        amountKobo: root.amountKobo,
-        status: newLedgerStatus,
+    for (const alloc of breakdown.allocations) {
+      if (!alloc.eligible || alloc.amountKobo <= 0) continue;
+      const refCode = `LED-${orderId}-G${alloc.generation}`;
+      await tx.insert(commissionLedgerEntries).values({
+        reference: refCode,
+        orderId,
+        referralEventId: validReferralEventId,
+        beneficiaryScoutId: alloc.scoutId,
+        generation: alloc.generation,
+        fractionLabel: alloc.fractionLabel,
+        amountKobo: alloc.amountKobo,
+        status: 'Pending',
         ruleVersion: COMMISSION_RULE_VERSION,
-        description: `${reasonLabel} (${root.reference})`,
-        createdAt: nowIso,
-        linkedToReference: root.reference,
+        description: `Gen ${alloc.generation} (${alloc.fractionLabel}) pending on ${orderId} (${product.title})`,
       });
     }
-  }
 
-  return order;
+    await tx.insert(platformNotifications).values({
+      userId: actorUserId,
+      category: 'order',
+      title: `Order ${orderId} confirmed (${isReferral ? 'Referral-Attributed' : 'Direct'})`,
+      body: isReferral
+        ? `Referral event preserved. Pending commissions calculated across Seller ancestry (${breakdown.actualAncestryDepth} generations).`
+        : 'Direct marketplace checkout completed. No referral commission generated.',
+    });
+
+    return {
+      id: orderId,
+      buyerScoutId: actorUserId,
+      buyerDisplayName: buyerScout.displayName,
+      productListingId: product.id,
+      productTitle: product.title,
+      sellerScoutId: product.sellerScoutId,
+      sellerName: product.sellerName,
+      quantity: qty,
+      eligibleMerchandiseKobo,
+      deliveryFeeKobo,
+      totalChargedKobo,
+      attributionType: isReferral ? 'referral_card' : 'direct',
+      referralEventId: validReferralEventId,
+      fulfilmentStatus: 'Paid',
+      fulfilmentDeadline: deadline.toISOString().slice(0, 10),
+      createdAt: now.toISOString().slice(0, 10),
+      commissionSnapshot: breakdown,
+    };
+  });
 }
 
-export function createReferralEventForActor(
+export async function advanceOrderStatus(
+  actorUserId: string,
+  input: { orderId: string; nextStatus: OrderFulfilmentStatus }
+): Promise<MarketplaceOrder> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertActiveAccount(ctx);
+
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .select()
+      .from(marketplaceOrders)
+      .where(eq(marketplaceOrders.id, input.orderId))
+      .limit(1);
+    const order = rows[0];
+    if (!order) {
+      throw new AuthorizationError('Order not found.', 404, 'ORDER_NOT_FOUND');
+    }
+
+    let isOrderSeller = order.sellerScoutId === actorUserId;
+    if (!isOrderSeller && ctx.seller && ctx.seller.permissions.canManageOrders) {
+      const sellerRows = await tx
+        .select()
+        .from(sellerProfiles)
+        .where(eq(sellerProfiles.id, ctx.seller.sellerProfileId))
+        .limit(1);
+      if (sellerRows[0]?.ownerUserId === order.sellerScoutId) {
+        isOrderSeller = true;
+      }
+    }
+    const isOrderBuyer = order.buyerScoutId === actorUserId;
+
+    if (!isOrderSeller && !isOrderBuyer && !ctx.adminRole) {
+      throw new AuthorizationError('You are not authorized to update this order.', 403, 'FORBIDDEN');
+    }
+    if (order.fulfilmentStatus === 'Refunded') {
+      throw new AuthorizationError('Refunded orders are terminal.', 400, 'ORDER_TERMINAL');
+    }
+
+    await tx
+      .update(marketplaceOrders)
+      .set({ fulfilmentStatus: input.nextStatus })
+      .where(eq(marketplaceOrders.id, order.id));
+
+    let newLedgerStatus: LedgerEntryStatus | null = null;
+    let reasonLabel = '';
+    if (input.nextStatus === 'Delivered') {
+      newLedgerStatus = 'Available';
+      reasonLabel = 'Delivery confirmed · commission released to Available';
+    } else if (input.nextStatus === 'Disputed') {
+      newLedgerStatus = 'On Hold';
+      reasonLabel = 'Delivery dispute opened · commission placed On Hold';
+    } else if (input.nextStatus === 'Refunded') {
+      newLedgerStatus = 'Reversed';
+      reasonLabel = 'Order refunded · commission reversed';
+    }
+
+    if (newLedgerStatus) {
+      const rootEntries = await tx
+        .select()
+        .from(commissionLedgerEntries)
+        .where(eq(commissionLedgerEntries.orderId, order.id));
+
+      for (const root of rootEntries.filter((l) => !l.linkedToReference)) {
+        await tx.insert(commissionLedgerEntries).values({
+          reference: `${root.reference}-${newLedgerStatus.slice(0, 3).toUpperCase()}`,
+          orderId: order.id,
+          referralEventId: root.referralEventId,
+          beneficiaryScoutId: root.beneficiaryScoutId,
+          generation: root.generation,
+          fractionLabel: root.fractionLabel,
+          amountKobo: Number(root.amountKobo),
+          status: newLedgerStatus,
+          ruleVersion: COMMISSION_RULE_VERSION,
+          description: `${reasonLabel} (${root.reference})`,
+          linkedToReference: root.reference,
+        });
+      }
+    }
+
+    return {
+      id: order.id,
+      buyerScoutId: order.buyerScoutId,
+      buyerDisplayName: order.buyerDisplayName,
+      productListingId: order.productListingId,
+      productTitle: order.productTitle,
+      sellerScoutId: order.sellerScoutId,
+      sellerName: order.sellerName,
+      quantity: order.quantity,
+      eligibleMerchandiseKobo: Number(order.eligibleMerchandiseKobo),
+      deliveryFeeKobo: Number(order.deliveryFeeKobo),
+      totalChargedKobo: Number(order.totalChargedKobo),
+      attributionType: order.attributionType as 'direct' | 'referral_card',
+      referralEventId: order.referralEventId,
+      fulfilmentStatus: input.nextStatus,
+      fulfilmentDeadline: order.fulfilmentDeadline.toISOString().slice(0, 10),
+      createdAt: order.createdAt.toISOString().slice(0, 10),
+      commissionSnapshot: order.commissionSnapshot,
+    };
+  });
+}
+
+export async function createReferralEventForActor(
   actorUserId: string,
   input: {
     productListingId: string;
     recipientScoutId: string;
     note: string;
   }
-): ProductReferralEvent {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+): Promise<ProductReferralEvent> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertCanParticipateAsScout(ctx);
 
-  const sender = store.scouts[actorUserId];
-  const recipientUser = store.users[input.recipientScoutId];
-  const recipient = store.scouts[input.recipientScoutId];
-  const product = store.products.find(
-    (p) => p.id === input.productListingId && p.status === 'PUBLISHED'
-  );
-
+  const listingRows = await db
+    .select()
+    .from(productListings)
+    .where(
+      and(
+        eq(productListings.id, input.productListingId),
+        eq(productListings.status, 'PUBLISHED')
+      )
+    )
+    .limit(1);
+  const product = listingRows[0];
   if (!product) {
     throw new AuthorizationError('Published product listing not found.', 404, 'LISTING_NOT_FOUND');
   }
-  if (!recipient || !recipientUser || recipientUser.accountStatus === 'CLOSED') {
+
+  if (!isUuid(input.recipientScoutId)) {
+    throw new AuthorizationError('Recipient Scout not found.', 404, 'RECIPIENT_NOT_FOUND');
+  }
+
+  const scoutRows = await db
+    .select()
+    .from(scoutProfiles)
+    .where(inArray(scoutProfiles.userId, [actorUserId, input.recipientScoutId]));
+  const sender = scoutRows.find((s) => s.userId === actorUserId);
+  const recipient = scoutRows.find((s) => s.userId === input.recipientScoutId);
+
+  const recipientUserRows = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, input.recipientScoutId))
+    .limit(1);
+  const recipientUser = recipientUserRows[0];
+
+  if (!sender || !recipient || !recipientUser || recipientUser.accountStatus === 'CLOSED') {
     throw new AuthorizationError('Recipient Scout not found.', 404, 'RECIPIENT_NOT_FOUND');
   }
   if (recipient.userId === sender.userId) {
     throw new AuthorizationError('Self-referrals are prohibited.', 400, 'SELF_REFERRAL');
   }
-  if (isBlockedBetween(store, sender.userId, recipient.userId)) {
+
+  const blockRows = await db
+    .select()
+    .from(userBlocks)
+    .where(
+      or(
+        and(eq(userBlocks.blockerId, sender.userId), eq(userBlocks.blockedId, recipient.userId)),
+        and(eq(userBlocks.blockerId, recipient.userId), eq(userBlocks.blockedId, sender.userId))
+      )
+    )
+    .limit(1);
+  if (blockRows.length > 0) {
     throw new AuthorizationError(
       'Cannot send product referral due to a block between accounts.',
       403,
@@ -2498,285 +1660,388 @@ export function createReferralEventForActor(
     );
   }
 
+  const allAnc = await db.select().from(referralAncestry);
   const ancestryMap: Record<string, string | null> = {};
-  for (const [k, v] of Object.entries(store.ancestry)) {
-    ancestryMap[k] = v.directReferrerId;
-  }
-  const ancestryCheck = validateAncestryRelationship(
-    recipient.userId,
-    sender.userId,
-    ancestryMap
-  );
-  const existingReverse = store.referralEvents.find(
-    (e) =>
-      e.productListingId === product.id &&
-      e.senderScoutId === recipient.userId &&
-      e.recipientScoutId === sender.userId &&
-      e.status === 'active'
-  );
-  if (existingReverse && !ancestryCheck.valid) {
+  for (const row of allAnc) ancestryMap[row.scoutUserId] = row.directReferrerId;
+  const ancestryCheck = validateAncestryRelationship(recipient.userId, sender.userId, ancestryMap);
+
+  const existingReverse = await db
+    .select()
+    .from(productReferralEvents)
+    .where(
+      and(
+        eq(productReferralEvents.productListingId, product.id),
+        eq(productReferralEvents.senderScoutId, recipient.userId),
+        eq(productReferralEvents.recipientScoutId, sender.userId),
+        eq(productReferralEvents.status, 'active')
+      )
+    )
+    .limit(1);
+  if (existingReverse.length > 0 && !ancestryCheck.valid) {
     throw new AuthorizationError('Circular product referral path rejected.', 400, 'CIRCULAR_PATH');
   }
 
   const pathSignature = `${sender.username}->${recipient.username}`;
-  const duplicate = store.referralEvents.find(
-    (e) =>
-      e.productListingId === product.id &&
-      e.ancestryPathSignature === pathSignature &&
-      e.status === 'active'
-  );
-  if (duplicate) {
+  const dup = await db
+    .select()
+    .from(productReferralEvents)
+    .where(
+      and(
+        eq(productReferralEvents.productListingId, product.id),
+        eq(productReferralEvents.ancestryPathSignature, pathSignature),
+        eq(productReferralEvents.status, 'active')
+      )
+    )
+    .limit(1);
+  if (dup[0]) {
     throw new AuthorizationError(
-      `Active referral ${duplicate.id} already exists for @${recipient.username} on this listing.`,
+      `Active referral ${dup[0].id} already exists for @${recipient.username} on this listing.`,
       409,
       'DUPLICATE_REFERRAL'
     );
   }
 
-  const now = new Date();
-  const expires = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
-  const event: ProductReferralEvent = {
-    id: `RE-${Math.floor(8500 + Math.random() * 1400)}-NG`,
-    productListingId: product.id,
+  const expiresAt = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
+  const [inserted] = await db
+    .insert(productReferralEvents)
+    .values({
+      productListingId: product.id,
+      senderScoutId: sender.userId,
+      recipientScoutId: recipient.userId,
+      note: input.note.trim() || `Recommended ${product.title} on NairaScout.`,
+      ancestryPathSignature: pathSignature,
+      status: 'active',
+      expiresAt,
+    })
+    .returning();
+
+  await db
+    .update(productListings)
+    .set({ referralShares: product.referralShares + 1 })
+    .where(eq(productListings.id, product.id));
+
+  return {
+    id: inserted.id,
+    productListingId: inserted.productListingId,
     senderScoutId: sender.userId,
     senderHandle: sender.username,
     senderDisplayName: sender.displayName,
     recipientScoutId: recipient.userId,
     recipientHandle: recipient.username,
     recipientDisplayName: recipient.displayName,
-    note: input.note.trim() || `Recommended ${product.title} on NairaScout.`,
-    ancestryPathSignature: pathSignature,
-    createdAt: now.toISOString(),
-    expiresAt: expires.toISOString(),
+    note: inserted.note,
+    ancestryPathSignature: inserted.ancestryPathSignature,
+    createdAt: inserted.createdAt.toISOString(),
+    expiresAt: inserted.expiresAt.toISOString(),
     status: 'active',
   };
-
-  store.referralEvents.unshift(event);
-  product.referralShares += 1;
-
-  return event;
 }
 
-export function inviteToScoutsListForActor(
+export async function inviteToScoutsListForActor(
   actorUserId: string,
   targetScoutId: string
-): ScoutsListInvitation {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+): Promise<ScoutsListInvitation> {
+  const db = requireDb();
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertCanParticipateAsScout(ctx);
 
-  const targetUser = store.users[targetScoutId];
-  const target = store.scouts[targetScoutId];
-  if (!target || !targetUser || targetUser.accountStatus === 'CLOSED') {
+  if (!isUuid(targetScoutId)) {
     throw new AuthorizationError('Scout not found.', 404, 'SCOUT_NOT_FOUND');
   }
-  if (target.userId === actorUserId) {
+  if (targetScoutId === actorUserId) {
     throw new AuthorizationError('You cannot invite yourself to your Scouts List.', 400, 'SELF_INVITE');
   }
-  if (isBlockedBetween(store, actorUserId, target.userId)) {
-    throw new AuthorizationError('Invitation blocked due to user block settings.', 403, 'USER_BLOCKED');
+
+  const targetUserRows = await db.select().from(users).where(eq(users.id, targetScoutId)).limit(1);
+  const targetScoutRows = await db
+    .select()
+    .from(scoutProfiles)
+    .where(eq(scoutProfiles.userId, targetScoutId))
+    .limit(1);
+
+  const targetUser = targetUserRows[0];
+  const target = targetScoutRows[0];
+  if (!targetUser || !target || targetUser.accountStatus === 'CLOSED') {
+    throw new AuthorizationError('Scout not found.', 404, 'SCOUT_NOT_FOUND');
   }
+
+  const blockRows = await db
+    .select()
+    .from(userBlocks)
+    .where(
+      or(
+        and(eq(userBlocks.blockerId, actorUserId), eq(userBlocks.blockedId, targetScoutId)),
+        and(eq(userBlocks.blockerId, targetScoutId), eq(userBlocks.blockedId, actorUserId))
+      )
+    )
+    .limit(1);
+  if (blockRows.length > 0) {
+    throw new AuthorizationError('Cannot invite a blocked user.', 403, 'USER_BLOCKED');
+  }
+
   if (target.invitationPolicy === 'NOBODY') {
     throw new AuthorizationError(
-      `@${target.username} does not accept Scouts List invitations.`,
+      `@${target.username} does not accept Scouts List invitations (policy: NOBODY).`,
       403,
-      'INVITATIONS_DISABLED'
+      'INVITE_POLICY_NOBODY'
     );
   }
   if (target.invitationPolicy === 'CONTACTS_ONLY') {
-    // Check if actor shares a mutual contact with target
-    const actorContacts = new Set(
-      store.scoutsList.filter((c) => c.ownerUserId === actorUserId).map((c) => c.scoutId)
-    );
-    const targetContacts = store.scoutsList
-      .filter((c) => c.ownerUserId === target.userId)
-      .map((c) => c.scoutId);
-    const sharesContact = targetContacts.some((id) => actorContacts.has(id));
-    if (!sharesContact) {
+    const actorContacts = await db
+      .select({ contactUserId: scoutsListContacts.contactUserId })
+      .from(scoutsListContacts)
+      .where(eq(scoutsListContacts.ownerUserId, actorUserId));
+    const targetContacts = await db
+      .select({ contactUserId: scoutsListContacts.contactUserId })
+      .from(scoutsListContacts)
+      .where(eq(scoutsListContacts.ownerUserId, targetScoutId));
+    const actorSet = new Set(actorContacts.map((c) => c.contactUserId));
+    const sharesMutual = targetContacts.some((c) => actorSet.has(c.contactUserId));
+    if (!sharesMutual) {
       throw new AuthorizationError(
-        `@${target.username} only accepts invitations from contacts-of-contacts.`,
+        `@${target.username} only accepts invitations from mutual contacts (CONTACTS_ONLY).`,
         403,
-        'CONTACTS_ONLY_POLICY'
+        'INVITE_POLICY_CONTACTS_ONLY'
       );
     }
   }
 
-  if (
-    store.scoutsList.some((c) => c.ownerUserId === actorUserId && c.scoutId === target.userId)
-  ) {
-    throw new AuthorizationError(
-      `@${target.username} is already in your Scouts List.`,
-      409,
-      'ALREADY_CONTACT'
-    );
-  }
-
-  if (
-    store.invitations.some(
-      (i) =>
-        ((i.senderId === actorUserId && i.recipientId === target.userId) ||
-          (i.senderId === target.userId && i.recipientId === actorUserId)) &&
-        i.status === 'pending'
+  const existingContact = await db
+    .select()
+    .from(scoutsListContacts)
+    .where(
+      and(
+        eq(scoutsListContacts.ownerUserId, actorUserId),
+        eq(scoutsListContacts.contactUserId, targetScoutId)
+      )
     )
-  ) {
+    .limit(1);
+  if (existingContact.length > 0) {
+    throw new AuthorizationError(`@${target.username} is already in your Scouts List.`, 409, 'ALREADY_CONTACT');
+  }
+
+  const pendingDup = await db
+    .select()
+    .from(scoutsListInvitations)
+    .where(
+      and(
+        eq(scoutsListInvitations.status, 'PENDING'),
+        or(
+          and(
+            eq(scoutsListInvitations.senderId, actorUserId),
+            eq(scoutsListInvitations.recipientId, targetScoutId)
+          ),
+          and(
+            eq(scoutsListInvitations.senderId, targetScoutId),
+            eq(scoutsListInvitations.recipientId, actorUserId)
+          )
+        )
+      )
+    )
+    .limit(1);
+  if (pendingDup.length > 0) {
     throw new AuthorizationError(
-      `A pending invitation already exists with @${target.username}.`,
+      `A pending Scouts List invitation already exists with @${target.username}.`,
       409,
-      'INVITE_PENDING'
+      'DUPLICATE_INVITE'
     );
   }
 
-  const now = new Date();
-  const expires = new Date(now.getTime() + getExpiryDays() * 24 * 60 * 60 * 1000);
-  const invitation: ScoutsListInvitation = {
-    id: `INV-${Math.floor(500 + Math.random() * 499)}-${Date.now().toString().slice(-3)}`,
-    senderId: actorUserId,
-    recipientId: target.userId,
+  const expiresAt = new Date(Date.now() + getExpiryDays() * 24 * 60 * 60 * 1000);
+  const [inv] = await db
+    .insert(scoutsListInvitations)
+    .values({
+      senderId: actorUserId,
+      recipientId: targetScoutId,
+      status: 'PENDING',
+      expiresAt,
+    })
+    .returning();
+
+  return {
+    id: inv.id,
+    senderId: inv.senderId,
+    recipientId: inv.recipientId,
     direction: 'outgoing',
     otherScoutId: target.userId,
     otherHandle: target.username,
     otherDisplayName: target.displayName,
-    otherCity: target.locationState,
+    otherCity: target.locationState || 'Nigeria',
     status: 'pending',
-    createdAt: now.toISOString().slice(0, 10),
-    expiresAt: expires.toISOString().slice(0, 10),
+    createdAt: inv.createdAt.toISOString(),
+    expiresAt: inv.expiresAt.toISOString().slice(0, 10),
   };
-
-  store.invitations.unshift(invitation);
-  return invitation;
 }
 
-export function respondToInvitationForActor(
+export async function respondToInvitationForActor(
   actorUserId: string,
   input: { invitationId: string; decision: 'accept' | 'reject' | 'withdraw' }
 ) {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+  const db = requireDb();
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertCanParticipateAsScout(ctx);
 
-  const inv = store.invitations.find((i) => i.id === input.invitationId);
-  if (!inv || inv.status !== 'pending') {
-    throw new AuthorizationError('Pending invitation not found.', 404, 'INVITE_NOT_FOUND');
+  if (!isUuid(input.invitationId)) {
+    throw new AuthorizationError('Invitation not found.', 404, 'INVITE_NOT_FOUND');
   }
 
-  if (input.decision === 'withdraw') {
-    if (inv.senderId !== actorUserId) {
-      throw new AuthorizationError('Only the sender can withdraw an invitation.', 403, 'FORBIDDEN');
+  await db.transaction(async (tx) => {
+    const rows = await tx
+      .select()
+      .from(scoutsListInvitations)
+      .where(eq(scoutsListInvitations.id, input.invitationId))
+      .limit(1);
+    const inv = rows[0];
+    if (!inv || inv.status !== 'PENDING') {
+      throw new AuthorizationError('Pending invitation not found.', 404, 'INVITE_NOT_FOUND');
     }
-    inv.status = 'withdrawn';
-    return;
-  }
 
-  if (inv.recipientId !== actorUserId) {
-    throw new AuthorizationError('Only the recipient can accept or decline.', 403, 'FORBIDDEN');
-  }
-
-  if (input.decision === 'accept') {
-    inv.status = 'accepted';
-    const sender = store.scouts[inv.senderId];
-    const recipient = store.scouts[inv.recipientId];
-    const today = new Date().toISOString().slice(0, 10);
-
-    // Bidirectional contact creation
-    if (
-      !store.scoutsList.some((c) => c.ownerUserId === inv.recipientId && c.scoutId === inv.senderId)
-    ) {
-      store.scoutsList.unshift({
-        contactId: `CNT-${Date.now()}-A`,
-        ownerUserId: inv.recipientId,
-        scoutId: inv.senderId,
-        handle: sender?.username || inv.otherHandle,
-        displayName: sender?.displayName || inv.otherDisplayName,
-        city: sender?.locationState || inv.otherCity,
-        addedAt: today,
-        blocked: false,
-        hasActiveSellerBadge: false,
-        isSellerVerified: false,
-      });
+    if (input.decision === 'withdraw') {
+      if (inv.senderId !== actorUserId) {
+        throw new AuthorizationError('Only the sender can withdraw an invitation.', 403, 'FORBIDDEN');
+      }
+      await tx
+        .update(scoutsListInvitations)
+        .set({ status: 'WITHDRAWN', respondedAt: new Date() })
+        .where(eq(scoutsListInvitations.id, inv.id));
+      return;
     }
-    if (
-      !store.scoutsList.some((c) => c.ownerUserId === inv.senderId && c.scoutId === inv.recipientId)
-    ) {
-      store.scoutsList.unshift({
-        contactId: `CNT-${Date.now()}-B`,
-        ownerUserId: inv.senderId,
-        scoutId: inv.recipientId,
-        handle: recipient?.username || 'scout',
-        displayName: recipient?.displayName || 'Scout',
-        city: recipient?.locationState || 'Lagos',
-        addedAt: today,
-        blocked: false,
-        hasActiveSellerBadge: false,
-        isSellerVerified: false,
-      });
+
+    if (inv.recipientId !== actorUserId) {
+      throw new AuthorizationError('Only the recipient can accept or reject an invitation.', 403, 'FORBIDDEN');
     }
-  } else {
-    inv.status = 'rejected';
-  }
+
+    if (input.decision === 'reject') {
+      await tx
+        .update(scoutsListInvitations)
+        .set({ status: 'REJECTED', respondedAt: new Date() })
+        .where(eq(scoutsListInvitations.id, inv.id));
+      return;
+    }
+
+    await tx
+      .update(scoutsListInvitations)
+      .set({ status: 'ACCEPTED', respondedAt: new Date() })
+      .where(eq(scoutsListInvitations.id, inv.id));
+
+    await tx
+      .insert(scoutsListContacts)
+      .values([
+        {
+          ownerUserId: inv.senderId,
+          contactUserId: inv.recipientId,
+          sourceInvitationId: inv.id,
+        },
+        {
+          ownerUserId: inv.recipientId,
+          contactUserId: inv.senderId,
+          sourceInvitationId: inv.id,
+        },
+      ])
+      .onConflictDoNothing();
+  });
 }
 
-export function manageRelationshipForActor(
+export async function manageRelationshipForActor(
   actorUserId: string,
   input: {
-    targetUserId?: string;
     contactId?: string;
+    targetUserId?: string;
     operation: 'remove' | 'block' | 'unblock';
   }
 ) {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+  const db = requireDb();
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertActiveAccount(ctx);
 
-  let targetId = input.targetUserId;
-  if (!targetId && input.contactId) {
-    const contact = store.scoutsList.find(
-      (c) => c.contactId === input.contactId && c.ownerUserId === actorUserId
-    );
-    targetId = contact?.scoutId;
-  }
-
-  if (!targetId) {
-    throw new AuthorizationError('Target user not found.', 404, 'TARGET_NOT_FOUND');
-  }
-
-  if (input.operation === 'remove') {
-    store.scoutsList = store.scoutsList.filter(
-      (c) =>
-        !(
-          (c.ownerUserId === actorUserId && c.scoutId === targetId) ||
-          (c.ownerUserId === targetId && c.scoutId === actorUserId)
-        )
-    );
-    return;
-  }
-
-  if (input.operation === 'block') {
-    if (!store.userBlocks.some((b) => b.blockerId === actorUserId && b.blockedId === targetId)) {
-      store.userBlocks.push({
-        blockerId: actorUserId,
-        blockedId: targetId,
-        createdAt: new Date().toISOString(),
-      });
+  await db.transaction(async (tx) => {
+    if (input.operation === 'remove' && isUuid(input.contactId)) {
+      await tx
+        .delete(scoutsListContacts)
+        .where(
+          and(
+            eq(scoutsListContacts.id, input.contactId),
+            eq(scoutsListContacts.ownerUserId, actorUserId)
+          )
+        );
+      return;
     }
-    // Remove from active contacts as well
-    store.scoutsList = store.scoutsList.filter(
-      (c) =>
-        !(
-          (c.ownerUserId === actorUserId && c.scoutId === targetId) ||
-          (c.ownerUserId === targetId && c.scoutId === actorUserId)
-        )
-    );
-    return;
-  }
 
-  if (input.operation === 'unblock') {
-    store.userBlocks = store.userBlocks.filter(
-      (b) => !(b.blockerId === actorUserId && b.blockedId === targetId)
-    );
-  }
+    let targetId = input.targetUserId;
+    if (!targetId && isUuid(input.contactId)) {
+      const cRows = await tx
+        .select()
+        .from(scoutsListContacts)
+        .where(
+          and(
+            eq(scoutsListContacts.id, input.contactId),
+            eq(scoutsListContacts.ownerUserId, actorUserId)
+          )
+        )
+        .limit(1);
+      targetId = cRows[0]?.contactUserId;
+    }
+
+    if (!isUuid(targetId) || targetId === actorUserId) {
+      throw new AuthorizationError('Valid target user is required.', 400, 'INVALID_TARGET');
+    }
+
+    if (input.operation === 'block') {
+      await tx
+        .insert(userBlocks)
+        .values({ blockerId: actorUserId, blockedId: targetId })
+        .onConflictDoNothing();
+
+      await tx
+        .delete(scoutsListContacts)
+        .where(
+          or(
+            and(
+              eq(scoutsListContacts.ownerUserId, actorUserId),
+              eq(scoutsListContacts.contactUserId, targetId)
+            ),
+            and(
+              eq(scoutsListContacts.ownerUserId, targetId),
+              eq(scoutsListContacts.contactUserId, actorUserId)
+            )
+          )
+        );
+
+      await tx
+        .update(scoutsListInvitations)
+        .set({ status: 'WITHDRAWN', respondedAt: new Date() })
+        .where(
+          and(
+            eq(scoutsListInvitations.status, 'PENDING'),
+            or(
+              and(
+                eq(scoutsListInvitations.senderId, actorUserId),
+                eq(scoutsListInvitations.recipientId, targetId)
+              ),
+              and(
+                eq(scoutsListInvitations.senderId, targetId),
+                eq(scoutsListInvitations.recipientId, actorUserId)
+              )
+            )
+          )
+        );
+    } else if (input.operation === 'unblock') {
+      await tx
+        .delete(userBlocks)
+        .where(
+          and(
+            eq(userBlocks.blockerId, actorUserId),
+            eq(userBlocks.blockedId, targetId)
+          )
+        );
+    }
+  });
 }
 
-export function reportAbuseForActor(
+export async function reportAbuseForActor(
   actorUserId: string,
   input: {
     reportedUserId: string;
@@ -2784,34 +2049,54 @@ export function reportAbuseForActor(
     reason: string;
     description: string;
   }
-): AbuseReportRecord {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+): Promise<AbuseReportRecord> {
+  const db = requireDb();
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertActiveAccount(ctx);
 
-  const report: AbuseReportRecord = {
-    id: `ABR-${Math.floor(200 + Math.random() * 800)}`,
-    reporterId: actorUserId,
-    reporterHandle: store.scouts[actorUserId]?.username || 'scout',
-    reportedUserId: input.reportedUserId,
-    reportedHandle: store.scouts[input.reportedUserId]?.username || 'user',
-    referralEventId: input.referralEventId ?? null,
-    reason: input.reason.trim() || 'Abuse report',
-    description: input.description.trim(),
-    status: 'OPEN',
-    resolvedBy: null,
-    createdAt: new Date().toISOString(),
-    resolvedAt: null,
+  if (!isUuid(input.reportedUserId) || input.reportedUserId === actorUserId) {
+    throw new AuthorizationError('Valid reported user ID is required.', 400, 'INVALID_TARGET');
+  }
+
+  const [rep] = await db
+    .insert(abuseReports)
+    .values({
+      reporterId: actorUserId,
+      reportedUserId: input.reportedUserId,
+      referralEventId: isUuid(input.referralEventId) ? input.referralEventId : null,
+      reason: input.reason.trim() || 'Abuse report',
+      description: input.description.trim(),
+      status: 'OPEN',
+    })
+    .returning();
+
+  const scoutRows = await db
+    .select()
+    .from(scoutProfiles)
+    .where(inArray(scoutProfiles.userId, [actorUserId, input.reportedUserId]));
+
+  return {
+    id: rep.id,
+    reporterId: rep.reporterId,
+    reporterHandle: scoutRows.find((s) => s.userId === actorUserId)?.username || 'user',
+    reportedUserId: rep.reportedUserId,
+    reportedHandle: scoutRows.find((s) => s.userId === input.reportedUserId)?.username || 'user',
+    referralEventId: rep.referralEventId,
+    reason: rep.reason,
+    description: rep.description,
+    status: rep.status,
+    resolvedBy: rep.resolvedBy,
+    createdAt: rep.createdAt.toISOString(),
+    resolvedAt: rep.resolvedAt?.toISOString() ?? null,
   };
-  store.abuseReports.unshift(report);
-  return report;
 }
 
 // ============================================================================
 // SELLER ONBOARDING, DRAFTS, VERIFICATION GATE & TEAM MANAGEMENT
 // ============================================================================
 
-export function activateSellerOnboarding(
+export async function activateSellerOnboarding(
   actorUserId: string,
   input: {
     sellerType: 'INDIVIDUAL' | 'BUSINESS';
@@ -2826,9 +2111,10 @@ export function activateSellerOnboarding(
     evidencePaths: string[];
     termsAccepted: boolean;
   }
-): SellerProfileRecord {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+): Promise<SellerProfileRecord> {
+  const db = requireDb();
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertActiveAccount(ctx);
 
   if (!input.termsAccepted) {
@@ -2838,108 +2124,109 @@ export function activateSellerOnboarding(
     throw new AuthorizationError('Seller capabilities are already activated on this account.', 409, 'SELLER_EXISTS');
   }
 
-  const nowIso = new Date().toISOString();
-  const sellerId = crypto.randomUUID();
-  const seller: SellerProfileRecord = {
-    id: sellerId,
-    ownerUserId: actorUserId,
-    sellerType: input.sellerType,
-    sellerName: input.sellerName.trim(),
-    description: input.description.trim() || null,
-    businessCategory: input.businessCategory,
-    businessRegNumber: input.sellerType === 'BUSINESS' ? input.businessRegNumber?.trim() || null : null,
-    businessAddress: input.businessAddress?.trim() || null,
-    businessContactEmail: input.businessContactEmail?.trim() || ctx.email,
-    businessContactPhone: input.businessContactPhone?.trim() || null,
-    sellerStatus: 'ONBOARDING',
-    subscriptionPlan: planIdToEnum(input.planId),
-    subscriptionStatus: 'ACTIVE',
-    termsAcceptedAt: nowIso,
-    createdAt: nowIso,
-  };
-
-  store.sellers[sellerId] = seller;
-  store.teamMembers.push({
-    id: `TM-${Date.now()}`,
-    sellerProfileId: sellerId,
-    userId: actorUserId,
-    role: 'BUSINESS_OWNER',
-    permissions: {
-      canManageListings: true,
-      canManageOrders: true,
-      canViewAnalytics: true,
-      canManageBilling: true,
-      canManageTeam: true,
-    },
-    status: 'ACTIVE',
-    invitedBy: null,
-    createdAt: nowIso,
-    revokedAt: null,
-  });
-
   const cleanPaths =
     input.evidencePaths.length > 0
       ? input.evidencePaths
       : [`verification-docs/${actorUserId}/seller-kyc-${Date.now()}.pdf`];
+  const now = new Date();
 
-  store.verifications.unshift({
-    id: `VER-SEL-${Date.now()}`,
-    userId: actorUserId,
-    sellerProfileId: sellerId,
-    category: 'SELLER',
-    status: 'PENDING',
-    evidencePaths: cleanPaths,
-    reviewerNotes: null,
-    reviewedBy: null,
-    submittedAt: nowIso,
-    reviewedAt: null,
-  });
+  return db.transaction(async (tx) => {
+    const [seller] = await tx
+      .insert(sellerProfiles)
+      .values({
+        ownerUserId: actorUserId,
+        sellerType: input.sellerType,
+        sellerName: input.sellerName.trim(),
+        description: input.description.trim() || null,
+        businessCategory: input.businessCategory,
+        businessRegNumber:
+          input.sellerType === 'BUSINESS' ? input.businessRegNumber?.trim() || null : null,
+        businessAddress: input.businessAddress?.trim() || null,
+        businessContactEmail: input.businessContactEmail?.trim() || ctx.email,
+        businessContactPhone: input.businessContactPhone?.trim() || null,
+        sellerStatus: 'ONBOARDING',
+        subscriptionPlan: planIdToEnum(input.planId),
+        subscriptionStatus: 'ACTIVE',
+        termsAcceptedAt: now,
+      })
+      .returning();
 
-  store.verifications.unshift({
-    id: `VER-ID-${Date.now() + 1}`,
-    userId: actorUserId,
-    sellerProfileId: null,
-    category: 'IDENTITY',
-    status: 'PENDING',
-    evidencePaths: cleanPaths,
-    reviewerNotes: null,
-    reviewedBy: null,
-    submittedAt: nowIso,
-    reviewedAt: null,
-  });
-
-  if (input.sellerType === 'BUSINESS') {
-    store.verifications.unshift({
-      id: `VER-BIZ-${Date.now() + 2}`,
+    await tx.insert(sellerTeamMembers).values({
+      sellerProfileId: seller.id,
       userId: actorUserId,
-      sellerProfileId: sellerId,
-      category: 'BUSINESS',
+      role: 'BUSINESS_OWNER',
+      permissions: {
+        canManageListings: true,
+        canManageOrders: true,
+        canViewAnalytics: true,
+        canManageBilling: true,
+        canManageTeam: true,
+      },
+      status: 'ACTIVE',
+    });
+
+    await tx.insert(verificationRecords).values({
+      userId: actorUserId,
+      sellerProfileId: seller.id,
+      category: 'SELLER',
       status: 'PENDING',
       evidencePaths: cleanPaths,
-      reviewerNotes: null,
-      reviewedBy: null,
-      submittedAt: nowIso,
-      reviewedAt: null,
+      submittedAt: now,
     });
-  }
 
-  recordAuditLog(store, {
-    actorId: actorUserId,
-    affectedUserId: actorUserId,
-    action: 'SELLER_ONBOARDING_SUBMITTED',
-    entityType: 'seller_profiles',
-    entityId: sellerId,
-    newValue: {
+    await tx.insert(verificationRecords).values({
+      userId: actorUserId,
+      category: 'IDENTITY',
+      status: 'PENDING',
+      evidencePaths: cleanPaths,
+      submittedAt: now,
+    });
+
+    if (input.sellerType === 'BUSINESS') {
+      await tx.insert(verificationRecords).values({
+        userId: actorUserId,
+        sellerProfileId: seller.id,
+        category: 'BUSINESS',
+        status: 'PENDING',
+        evidencePaths: cleanPaths,
+        submittedAt: now,
+      });
+    }
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: actorUserId,
+      action: 'SELLER_ONBOARDING_SUBMITTED',
+      entityType: 'seller_profiles',
+      entityId: seller.id,
+      newValue: {
+        sellerType: seller.sellerType,
+        sellerStatus: 'ONBOARDING',
+        subscriptionPlan: seller.subscriptionPlan,
+      },
+    });
+
+    return {
+      id: seller.id,
+      ownerUserId: seller.ownerUserId,
       sellerType: seller.sellerType,
-      sellerStatus: 'ONBOARDING',
-      subscriptionPlan: seller.subscriptionPlan,
-    },
+      sellerName: seller.sellerName,
+      description: seller.description,
+      businessCategory: seller.businessCategory,
+      businessRegNumber: seller.businessRegNumber,
+      businessAddress: seller.businessAddress,
+      businessContactEmail: seller.businessContactEmail,
+      businessContactPhone: seller.businessContactPhone,
+      sellerStatus: seller.sellerStatus as SellerStatus,
+      subscriptionPlan: seller.subscriptionPlan as SubscriptionPlan,
+      subscriptionStatus: seller.subscriptionStatus,
+      termsAcceptedAt: seller.termsAcceptedAt.toISOString(),
+      createdAt: seller.createdAt.toISOString(),
+    };
   });
-
-  return seller;
 }
 
-export function createSellerDraftListing(
+export async function createSellerDraftListing(
   actorUserId: string,
   input: {
     title: string;
@@ -2949,56 +2236,100 @@ export function createSellerDraftListing(
     stock: number;
     description: string;
   }
-): ProductListing {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+): Promise<ProductListing> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertCanManageSellerDrafts(ctx);
 
-  const seller = store.sellers[ctx!.seller!.sellerProfileId]!;
-  const planSpec = SELLER_PLANS[planEnumToId(seller.subscriptionPlan)];
-  const idNum = 107 + store.products.length;
-  const seed = `nairascout-item-${idNum}`;
-  const flags = getSellerPublicFlags(store, seller.id);
+  const sellerRows = await db
+    .select()
+    .from(sellerProfiles)
+    .where(eq(sellerProfiles.id, ctx!.seller!.sellerProfileId))
+    .limit(1);
+  const seller = sellerRows[0]!;
+  const ownerScoutRows = await db
+    .select()
+    .from(scoutProfiles)
+    .where(eq(scoutProfiles.userId, seller.ownerUserId))
+    .limit(1);
+  const ownerScout = ownerScoutRows[0];
 
-  const listing: ProductListing = {
-    id: `LST-${idNum}`,
-    productId: `PRD-${idNum}`,
-    title: input.title.trim(),
-    description: input.description.trim(),
-    category: input.category,
-    priceKobo: Math.round(Math.max(500, input.priceNaira) * 100),
-    deliveryFeeKobo: Math.round(Math.max(0, input.deliveryFeeNaira) * 100),
-    stock: Math.max(1, Math.round(input.stock)),
-    sellerScoutId: seller.ownerUserId,
-    sellerProfileId: seller.id,
-    sellerName: seller.sellerName,
-    sellerCity: store.scouts[seller.ownerUserId]?.locationState || 'Lagos',
-    hasActiveSellerBadge: flags.hasActiveSellerBadge,
-    isSellerVerified: flags.isSellerVerified,
+  const planSpec = SELLER_PLANS[planEnumToId(seller.subscriptionPlan as SubscriptionPlan)];
+  const suffix = `${Date.now().toString().slice(-5)}${Math.floor(10 + Math.random() * 89)}`;
+  const id = `LST-${suffix}`;
+  const productId = `PRD-${suffix}`;
+  const seed = `nairascout-item-${suffix}`;
+
+  const [inserted] = await db
+    .insert(productListings)
+    .values({
+      id,
+      productId,
+      title: input.title.trim(),
+      description: input.description.trim(),
+      category: input.category,
+      priceKobo: Math.round(Math.max(500, input.priceNaira) * 100),
+      deliveryFeeKobo: Math.round(Math.max(0, input.deliveryFeeNaira) * 100),
+      stock: Math.max(1, Math.round(input.stock)),
+      sellerScoutId: seller.ownerUserId,
+      sellerProfileId: seller.id,
+      sellerName: seller.sellerName,
+      sellerCity: ownerScout?.locationState || 'Lagos',
+      status: 'DRAFT',
+      imageSeed: seed,
+      imageUrl: `https://picsum.photos/seed/${seed}/800/600`,
+      daysRemaining: planSpec.listingDurationDays,
+      specifications: ['Seller draft listing', '10-day publication duration once published'],
+      returnPolicy: 'Standard 7-day NairaScout return terms',
+      warranty: 'Seller fulfilment guarantee',
+    })
+    .returning();
+
+  return {
+    id: inserted.id,
+    productId: inserted.productId,
+    title: inserted.title,
+    description: inserted.description,
+    category: inserted.category,
+    priceKobo: Number(inserted.priceKobo),
+    deliveryFeeKobo: Number(inserted.deliveryFeeKobo),
+    stock: inserted.stock,
+    sellerScoutId: inserted.sellerScoutId,
+    sellerProfileId: inserted.sellerProfileId,
+    sellerName: inserted.sellerName,
+    sellerCity: inserted.sellerCity,
+    hasActiveSellerBadge: seller.sellerStatus === 'ACTIVE',
+    isSellerVerified: ctx!.seller!.sellerVerificationStatus === 'APPROVED',
     status: 'DRAFT',
-    imageSeed: seed,
-    imageUrl: `https://picsum.photos/seed/${seed}/800/600`,
-    daysRemaining: planSpec.listingDurationDays,
-    specifications: ['Seller draft listing', '10-day publication duration once published'],
-    returnPolicy: 'Standard 7-day NairaScout return terms',
-    warranty: 'Seller fulfilment guarantee',
-    impressions: 0,
-    referralShares: 0,
+    imageSeed: inserted.imageSeed,
+    imageUrl: inserted.imageUrl,
+    daysRemaining: inserted.daysRemaining,
+    specifications: inserted.specifications,
+    returnPolicy: inserted.returnPolicy,
+    warranty: inserted.warranty,
+    impressions: inserted.impressions,
+    referralShares: inserted.referralShares,
   };
-
-  store.products.unshift(listing);
-  return listing;
 }
 
-export function publishSellerListingById(
+export async function publishSellerListingById(
   actorUserId: string,
   listingId: string
-): ProductListing {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+): Promise<ProductListing> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
   const sellerProfileId = ctx?.seller?.sellerProfileId;
 
-  const listing = store.products.find((p) => p.id === listingId);
+  const listingRows = await db
+    .select()
+    .from(productListings)
+    .where(eq(productListings.id, listingId))
+    .limit(1);
+  const listing = listingRows[0];
   if (!listing) {
     throw new AuthorizationError('Listing not found.', 404, 'LISTING_NOT_FOUND');
   }
@@ -3006,10 +2337,19 @@ export function publishSellerListingById(
     throw new AuthorizationError('You do not own this listing.', 403, 'FORBIDDEN');
   }
 
-  const sellerListings = store.products.filter((p) => p.sellerProfileId === listing.sellerProfileId);
+  const sellerListings = await db
+    .select()
+    .from(productListings)
+    .where(eq(productListings.sellerProfileId, listing.sellerProfileId));
+
   const activePublished = sellerListings.filter((p) => p.status === 'PUBLISHED');
   const distinctCats = new Set(activePublished.map((p) => p.category));
-  const pubsUsed = store.monthlyPublicationsBySeller[listing.sellerProfileId] ?? 0;
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const pubsUsed = sellerListings.filter(
+    (l) => l.publishedAt && l.publishedAt >= monthStart
+  ).length;
 
   assertCanPublishListing(ctx, {
     currentActiveListings: activePublished.length,
@@ -3018,23 +2358,44 @@ export function publishSellerListingById(
     isNewCategory: !distinctCats.has(listing.category),
   });
 
-  if (listing.status === 'PUBLISHED') {
-    return listing;
+  if (listing.status !== 'PUBLISHED') {
+    await db
+      .update(productListings)
+      .set({ status: 'PUBLISHED', publishedAt: new Date() })
+      .where(eq(productListings.id, listing.id));
   }
 
-  listing.status = 'PUBLISHED';
-  const flags = getSellerPublicFlags(store, listing.sellerProfileId);
-  listing.hasActiveSellerBadge = flags.hasActiveSellerBadge;
-  listing.isSellerVerified = flags.isSellerVerified;
-
-  store.monthlyPublicationsBySeller[listing.sellerProfileId] = pubsUsed + 1;
-
-  return listing;
+  return {
+    id: listing.id,
+    productId: listing.productId,
+    title: listing.title,
+    description: listing.description,
+    category: listing.category,
+    priceKobo: Number(listing.priceKobo),
+    deliveryFeeKobo: Number(listing.deliveryFeeKobo),
+    stock: listing.stock,
+    sellerScoutId: listing.sellerScoutId,
+    sellerProfileId: listing.sellerProfileId,
+    sellerName: listing.sellerName,
+    sellerCity: listing.sellerCity,
+    hasActiveSellerBadge: true,
+    isSellerVerified: true,
+    status: 'PUBLISHED',
+    imageSeed: listing.imageSeed,
+    imageUrl: listing.imageUrl,
+    daysRemaining: listing.daysRemaining,
+    specifications: listing.specifications,
+    returnPolicy: listing.returnPolicy,
+    warranty: listing.warranty,
+    impressions: listing.impressions,
+    referralShares: listing.referralShares,
+  };
 }
 
-export function upgradeSellerPlanForActor(actorUserId: string, planId: SellerPlanId) {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+export async function upgradeSellerPlanForActor(actorUserId: string, planId: SellerPlanId) {
+  const db = requireDb();
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertActiveAccount(ctx);
   if (!ctx.seller) {
     throw new AuthorizationError('Activate Seller capabilities first.', 403, 'NOT_A_SELLER');
@@ -3043,50 +2404,85 @@ export function upgradeSellerPlanForActor(actorUserId: string, planId: SellerPla
     throw new AuthorizationError('Billing permission required.', 403, 'FORBIDDEN');
   }
 
-  const seller = store.sellers[ctx.seller.sellerProfileId]!;
-  const prevPlan = seller.subscriptionPlan;
-  seller.subscriptionPlan = planIdToEnum(planId);
-  seller.subscriptionStatus = 'ACTIVE';
+  const nextPlan = planIdToEnum(planId);
+  await db.transaction(async (tx) => {
+    const rows = await tx
+      .select()
+      .from(sellerProfiles)
+      .where(eq(sellerProfiles.id, ctx.seller!.sellerProfileId))
+      .limit(1);
+    const seller = rows[0]!;
+    const prevPlan = seller.subscriptionPlan;
 
-  recordAuditLog(store, {
-    actorId: actorUserId,
-    affectedUserId: seller.ownerUserId,
-    action: 'SELLER_SUBSCRIPTION_UPDATED',
-    entityType: 'seller_profiles',
-    entityId: seller.id,
-    previousValue: { subscriptionPlan: prevPlan },
-    newValue: { subscriptionPlan: seller.subscriptionPlan },
+    await tx
+      .update(sellerProfiles)
+      .set({ subscriptionPlan: nextPlan, subscriptionStatus: 'ACTIVE', updatedAt: new Date() })
+      .where(eq(sellerProfiles.id, seller.id));
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: seller.ownerUserId,
+      action: 'SELLER_SUBSCRIPTION_UPDATED',
+      entityType: 'seller_profiles',
+      entityId: seller.id,
+      previousValue: { subscriptionPlan: prevPlan },
+      newValue: { subscriptionPlan: nextPlan },
+    });
   });
 }
 
-export function manageSellerTeamForActor(
+export async function manageSellerTeamForActor(
   actorUserId: string,
   input:
-    | { operation: 'invite'; memberEmail: string; role: 'BUSINESS_ADMIN' | 'TEAM_MEMBER'; permissions: SellerTeamPermissions }
+    | {
+        operation: 'invite';
+        memberEmail: string;
+        role: 'BUSINESS_ADMIN' | 'TEAM_MEMBER';
+        permissions: SellerTeamPermissions;
+      }
     | { operation: 'revoke'; memberId: string }
 ) {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+  const db = requireDb();
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertCanManageSellerTeam(ctx);
 
   const sellerId = ctx!.seller!.sellerProfileId;
 
   if (input.operation === 'revoke') {
-    const target = store.teamMembers.find(
-      (m) => m.id === input.memberId && m.sellerProfileId === sellerId
-    );
+    if (!isUuid(input.memberId)) {
+      throw new AuthorizationError('Team member not found.', 404, 'MEMBER_NOT_FOUND');
+    }
+    const rows = await db
+      .select()
+      .from(sellerTeamMembers)
+      .where(
+        and(
+          eq(sellerTeamMembers.id, input.memberId),
+          eq(sellerTeamMembers.sellerProfileId, sellerId)
+        )
+      )
+      .limit(1);
+    const target = rows[0];
     if (!target) {
       throw new AuthorizationError('Team member not found.', 404, 'MEMBER_NOT_FOUND');
     }
     if (target.role === 'BUSINESS_OWNER') {
       throw new AuthorizationError('Cannot revoke the Business Owner.', 400, 'OWNER_IMMUTABLE');
     }
-    target.status = 'REVOKED';
-    target.revokedAt = new Date().toISOString();
+    await db
+      .update(sellerTeamMembers)
+      .set({ status: 'REVOKED', revokedAt: new Date() })
+      .where(eq(sellerTeamMembers.id, target.id));
     return;
   }
 
-  const memberUser = findUserByEmail(store, input.memberEmail);
+  const userRows = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, input.memberEmail.trim().toLowerCase()))
+    .limit(1);
+  const memberUser = userRows[0];
   if (!memberUser) {
     throw new AuthorizationError(
       'Invited user must have a registered NairaScout account first.',
@@ -3094,27 +2490,29 @@ export function manageSellerTeamForActor(
       'USER_NOT_FOUND'
     );
   }
-  if (
-    store.teamMembers.some(
-      (m) =>
-        m.sellerProfileId === sellerId &&
-        m.userId === memberUser.id &&
-        m.status === 'ACTIVE'
+
+  const existing = await db
+    .select()
+    .from(sellerTeamMembers)
+    .where(
+      and(
+        eq(sellerTeamMembers.sellerProfileId, sellerId),
+        eq(sellerTeamMembers.userId, memberUser.id),
+        eq(sellerTeamMembers.status, 'ACTIVE')
+      )
     )
-  ) {
+    .limit(1);
+  if (existing.length > 0) {
     throw new AuthorizationError('User is already an active team member.', 409, 'ALREADY_MEMBER');
   }
 
-  store.teamMembers.push({
-    id: `TM-${Date.now()}`,
+  await db.insert(sellerTeamMembers).values({
     sellerProfileId: sellerId,
     userId: memberUser.id,
     role: input.role,
     permissions: input.permissions,
     status: 'ACTIVE',
     invitedBy: actorUserId,
-    createdAt: new Date().toISOString(),
-    revokedAt: null,
   });
 }
 
@@ -3122,7 +2520,7 @@ export function manageSellerTeamForActor(
 // SETTINGS, PRIVACY, VERIFICATION SUBMISSIONS & VOLUNTARY CLOSURE
 // ============================================================================
 
-export function updateProfileAndPrivacy(
+export async function updateProfileAndPrivacy(
   actorUserId: string,
   input: {
     displayName?: string;
@@ -3135,120 +2533,209 @@ export function updateProfileAndPrivacy(
     profileVisibility?: 'PUBLIC' | 'NETWORK_ONLY';
   }
 ) {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+  const db = requireDb();
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertActiveAccount(ctx);
 
-  const scout = store.scouts[actorUserId];
-  if (!scout) throw new AuthorizationError('Scout profile not found.', 404, 'NOT_FOUND');
-
-  if (input.username && input.username.trim().toLowerCase() !== scout.username.toLowerCase()) {
-    const cleanUsername = input.username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
-    const taken = Object.values(store.scouts).some(
-      (s) => s.userId !== actorUserId && s.username.toLowerCase() === cleanUsername
-    );
-    if (taken) {
-      throw new AuthorizationError('Username is already taken.', 409, 'USERNAME_TAKEN');
-    }
-    scout.username = cleanUsername;
+  const rows = await db
+    .select()
+    .from(scoutProfiles)
+    .where(eq(scoutProfiles.userId, actorUserId))
+    .limit(1);
+  const scout = rows[0];
+  if (!scout) {
+    throw new AuthorizationError('Scout profile not found.', 404, 'NOT_FOUND');
   }
 
-  if (input.displayName !== undefined) scout.displayName = input.displayName.trim() || scout.displayName;
-  if (input.bio !== undefined) scout.bio = input.bio.trim() || null;
-  if (input.locationState !== undefined) scout.locationState = input.locationState.trim() || scout.locationState;
-  if (input.preferredCategories !== undefined) scout.preferredCategories = input.preferredCategories;
-  if (input.invitationPolicy !== undefined) scout.invitationPolicy = input.invitationPolicy;
-  if (input.muteReferrals !== undefined) scout.muteReferrals = input.muteReferrals;
-  if (input.profileVisibility !== undefined) scout.profileVisibility = input.profileVisibility;
+  let nextUsername = scout.username;
+  if (input.username && input.username.trim().toLowerCase() !== scout.username.toLowerCase()) {
+    const cleanUsername = input.username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
+    const conflict = await db
+      .select({ userId: scoutProfiles.userId })
+      .from(scoutProfiles)
+      .where(eq(scoutProfiles.username, cleanUsername))
+      .limit(1);
+    if (conflict[0] && conflict[0].userId !== actorUserId) {
+      throw new AuthorizationError('Username is already taken.', 409, 'USERNAME_TAKEN');
+    }
+    nextUsername = cleanUsername;
+  }
+
+  await db
+    .update(scoutProfiles)
+    .set({
+      username: nextUsername,
+      displayName: input.displayName !== undefined ? input.displayName.trim() || scout.displayName : scout.displayName,
+      bio: input.bio !== undefined ? input.bio.trim() || null : scout.bio,
+      locationState:
+        input.locationState !== undefined
+          ? input.locationState.trim() || scout.locationState
+          : scout.locationState,
+      preferredCategories:
+        input.preferredCategories !== undefined
+          ? input.preferredCategories
+          : scout.preferredCategories,
+      invitationPolicy: input.invitationPolicy ?? scout.invitationPolicy,
+      muteReferrals:
+        input.muteReferrals !== undefined ? input.muteReferrals : scout.muteReferrals,
+      profileVisibility: input.profileVisibility ?? scout.profileVisibility,
+      updatedAt: new Date(),
+    })
+    .where(eq(scoutProfiles.userId, actorUserId));
 }
 
-export function submitVerificationEvidence(
+export async function submitVerificationEvidence(
   actorUserId: string,
   input: {
     category: VerificationCategory;
     evidencePaths: string[];
     bankSummary?: string;
   }
-): VerificationRecord {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+): Promise<VerificationRecord> {
+  const db = requireDb();
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertActiveAccount(ctx);
 
-  const nowIso = new Date().toISOString();
   const sellerId =
     input.category === 'SELLER' || input.category === 'BUSINESS'
       ? ctx.seller?.sellerProfileId ?? null
       : null;
 
-  if (input.category === 'PAYOUT_BANK' && input.bankSummary?.trim()) {
-    store.scouts[actorUserId].bankSummary = input.bankSummary.trim();
+  const cleanPaths =
+    input.evidencePaths.length > 0
+      ? input.evidencePaths
+      : [`verification-docs/${actorUserId}/${input.category.toLowerCase()}-${Date.now()}.pdf`];
+  const now = new Date();
+
+  const existing = await db
+    .select()
+    .from(verificationRecords)
+    .where(
+      and(
+        eq(verificationRecords.userId, actorUserId),
+        eq(verificationRecords.category, input.category)
+      )
+    )
+    .limit(1);
+
+  if (existing[0]) {
+    const [updated] = await db
+      .update(verificationRecords)
+      .set({
+        status: 'PENDING',
+        evidencePaths: cleanPaths,
+        submittedAt: now,
+        reviewerNotes:
+          input.category === 'PAYOUT_BANK' && input.bankSummary?.trim()
+            ? input.bankSummary.trim()
+            : null,
+        updatedAt: now,
+      })
+      .where(eq(verificationRecords.id, existing[0].id))
+      .returning();
+
+    return {
+      id: updated.id,
+      userId: updated.userId,
+      sellerProfileId: updated.sellerProfileId,
+      category: updated.category as VerificationCategory,
+      status: updated.status as VerificationStatus,
+      evidencePaths: updated.evidencePaths,
+      reviewerNotes: updated.reviewerNotes,
+      reviewedBy: updated.reviewedBy,
+      submittedAt: updated.submittedAt?.toISOString() ?? null,
+      reviewedAt: updated.reviewedAt?.toISOString() ?? null,
+    };
   }
 
-  const existing = store.verifications.find(
-    (v) => v.userId === actorUserId && v.category === input.category
-  );
+  const [created] = await db
+    .insert(verificationRecords)
+    .values({
+      userId: actorUserId,
+      sellerProfileId: sellerId,
+      category: input.category,
+      status: 'PENDING',
+      evidencePaths: cleanPaths,
+      reviewerNotes:
+        input.category === 'PAYOUT_BANK' && input.bankSummary?.trim()
+          ? input.bankSummary.trim()
+          : null,
+      submittedAt: now,
+    })
+    .returning();
 
-  if (existing) {
-    existing.status = 'PENDING';
-    existing.evidencePaths =
-      input.evidencePaths.length > 0
-        ? input.evidencePaths
-        : [`verification-docs/${actorUserId}/${input.category.toLowerCase()}-${Date.now()}.pdf`];
-    existing.submittedAt = nowIso;
-    existing.reviewerNotes = null;
-    return existing;
-  }
-
-  const rec: VerificationRecord = {
-    id: `VER-${Date.now()}`,
-    userId: actorUserId,
-    sellerProfileId: sellerId,
-    category: input.category,
-    status: 'PENDING',
-    evidencePaths:
-      input.evidencePaths.length > 0
-        ? input.evidencePaths
-        : [`verification-docs/${actorUserId}/${input.category.toLowerCase()}-${Date.now()}.pdf`],
-    reviewerNotes: null,
-    reviewedBy: null,
-    submittedAt: nowIso,
-    reviewedAt: null,
+  return {
+    id: created.id,
+    userId: created.userId,
+    sellerProfileId: created.sellerProfileId,
+    category: created.category as VerificationCategory,
+    status: created.status as VerificationStatus,
+    evidencePaths: created.evidencePaths,
+    reviewerNotes: created.reviewerNotes,
+    reviewedBy: created.reviewedBy,
+    submittedAt: created.submittedAt?.toISOString() ?? null,
+    reviewedAt: created.reviewedAt?.toISOString() ?? null,
   };
-  store.verifications.unshift(rec);
-  return rec;
 }
 
-export function closeAccountVoluntarily(actorUserId: string, reason?: string) {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+export async function closeAccountVoluntarily(actorUserId: string, reason?: string) {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertActiveAccount(ctx);
 
-  const user = store.users[actorUserId]!;
-  const prevStatus = user.accountStatus;
-  user.accountStatus = 'CLOSED';
-  user.closedAt = new Date().toISOString();
-  user.restrictionReason = reason?.trim() || 'Voluntary account closure';
+  const closureReason = reason?.trim() || 'Voluntary account closure';
 
-  // Preserve referralAncestry, referralEvents, users, and ledger entries intact!
-  recordAuditLog(store, {
-    actorId: actorUserId,
-    affectedUserId: actorUserId,
-    action: 'ACCOUNT_CLOSED_VOLUNTARY',
-    entityType: 'users',
-    entityId: actorUserId,
-    previousValue: { accountStatus: prevStatus },
-    newValue: { accountStatus: 'CLOSED', historicalRecordsPreserved: true },
-    reason: user.restrictionReason,
+  await db.transaction(async (tx) => {
+    const userRows = await tx.select().from(users).where(eq(users.id, actorUserId)).limit(1);
+    const prevStatus = userRows[0]!.accountStatus;
+
+    await tx
+      .update(users)
+      .set({
+        accountStatus: 'CLOSED',
+        closedAt: new Date(),
+        restrictionReason: closureReason,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, actorUserId));
+
+    // Pause active Seller listings without deleting users, referral_ancestry, events, or ledger rows
+    await tx
+      .update(productListings)
+      .set({ status: 'EXPIRED' })
+      .where(
+        and(
+          eq(productListings.sellerScoutId, actorUserId),
+          eq(productListings.status, 'PUBLISHED')
+        )
+      );
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: actorUserId,
+      action: 'ACCOUNT_CLOSED_VOLUNTARY',
+      entityType: 'users',
+      entityId: actorUserId,
+      previousValue: { accountStatus: prevStatus },
+      newValue: { accountStatus: 'CLOSED', historicalRecordsPreserved: true },
+      reason: closureReason,
+    });
   });
 }
 
 // ============================================================================
-// ADMIN GOVERNANCE & AUDIT LOGS
+// ADMIN GOVERNANCE & AUDIT LOGS (100% POSTGRESQL VIA DRIZZLE ORM)
 // ============================================================================
 
-export function getAdminConsoleSnapshot(actorUserId: string) {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+export async function getAdminConsoleSnapshot(actorUserId: string) {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertAdminRole(ctx, [
     'VERIFICATION_OFFICER',
     'TRUST_AND_SAFETY',
@@ -3256,39 +2743,67 @@ export function getAdminConsoleSnapshot(actorUserId: string) {
     'SUPPORT_AGENT',
   ]);
 
-  const verificationQueue = store.verifications.map((v) => {
-    const scout = store.scouts[v.userId];
-    const seller = v.sellerProfileId ? store.sellers[v.sellerProfileId] : null;
+  const allVerifs = await db
+    .select()
+    .from(verificationRecords)
+    .orderBy(desc(verificationRecords.createdAt));
+  const allUsers = await db.select().from(users).orderBy(desc(users.createdAt));
+  const allScouts = await db.select().from(scoutProfiles);
+  const allSellers = await db.select().from(sellerProfiles);
+  const allAncestry = await db.select().from(referralAncestry);
+  const allAdmins = await db.select().from(platformAdminRoles);
+  const allAbuse = await db.select().from(abuseReports).orderBy(desc(abuseReports.createdAt));
+  const allAudit = await db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt));
+  const allLedger = await db.select().from(commissionLedgerEntries);
+
+  const userMap = new Map(allUsers.map((u) => [u.id, u]));
+  const scoutMap = new Map(allScouts.map((s) => [s.userId, s]));
+  const sellerById = new Map(allSellers.map((s) => [s.id, s]));
+  const sellerByOwner = new Map(allSellers.map((s) => [s.ownerUserId, s]));
+  const ancestrySet = new Set(allAncestry.map((a) => a.scoutUserId));
+  const adminMap = new Map(allAdmins.map((a) => [a.userId, a.adminRole]));
+
+  const verificationQueue = allVerifs.map((v) => {
+    const scout = scoutMap.get(v.userId);
+    const seller = v.sellerProfileId ? sellerById.get(v.sellerProfileId) : null;
     return {
-      ...v,
+      id: v.id,
+      userId: v.userId,
+      sellerProfileId: v.sellerProfileId,
+      category: v.category as VerificationCategory,
+      status: v.status as VerificationStatus,
+      evidencePaths: v.evidencePaths,
+      reviewerNotes: v.reviewerNotes,
+      reviewedBy: v.reviewedBy,
+      submittedAt: v.submittedAt?.toISOString() ?? null,
+      reviewedAt: v.reviewedAt?.toISOString() ?? null,
       username: scout?.username || 'unknown',
       displayName: scout?.displayName || 'Unknown User',
-      email: store.users[v.userId]?.email || '',
+      email: userMap.get(v.userId)?.email || '',
       sellerName: seller?.sellerName || null,
       sellerType: seller?.sellerType || null,
-      sellerStatus: seller?.sellerStatus || null,
+      sellerStatus: (seller?.sellerStatus as SellerStatus | undefined) ?? null,
     };
   });
 
-  const managedUsers = Object.values(store.users).map((u) => {
-    const scout = store.scouts[u.id];
-    const seller = Object.values(store.sellers).find((s) => s.ownerUserId === u.id) ?? null;
-    const ancestryRec = store.ancestry[u.id];
-    const ledgerCount = store.ledger.filter((l) => l.beneficiaryScoutId === u.id).length;
+  const managedUsers = allUsers.map((u) => {
+    const scout = scoutMap.get(u.id);
+    const seller = sellerByOwner.get(u.id) ?? null;
+    const ledgerCount = allLedger.filter((l) => l.beneficiaryScoutId === u.id).length;
     return {
       userId: u.id,
       email: u.email,
       username: scout?.username || '',
       displayName: scout?.displayName || '',
-      accountStatus: u.accountStatus,
+      accountStatus: u.accountStatus as AccountStatus,
       restrictionReason: u.restrictionReason,
-      closedAt: u.closedAt,
+      closedAt: u.closedAt?.toISOString() ?? null,
       sellerProfileId: seller?.id || null,
       sellerName: seller?.sellerName || null,
-      sellerStatus: seller?.sellerStatus || null,
+      sellerStatus: (seller?.sellerStatus as SellerStatus | undefined) ?? null,
       subscriptionPlan: seller?.subscriptionPlan || null,
-      adminRole: store.adminRoles[u.id] || null,
-      hasPermanentAncestry: Boolean(ancestryRec),
+      adminRole: (adminMap.get(u.id) as AdminRole | undefined) ?? null,
+      hasPermanentAncestry: ancestrySet.has(u.id),
       ledgerEntriesCount: ledgerCount,
     };
   });
@@ -3297,12 +2812,38 @@ export function getAdminConsoleSnapshot(actorUserId: string) {
     adminRole: ctx!.adminRole ?? null,
     verifications: verificationQueue,
     users: managedUsers,
-    abuseReports: store.abuseReports,
-    auditLogs: store.auditLogs,
+    abuseReports: allAbuse.map((r) => ({
+      id: r.id,
+      reporterId: r.reporterId,
+      reporterHandle: scoutMap.get(r.reporterId)?.username || 'user',
+      reportedUserId: r.reportedUserId,
+      reportedHandle: scoutMap.get(r.reportedUserId)?.username || 'user',
+      referralEventId: r.referralEventId,
+      reason: r.reason,
+      description: r.description,
+      status: r.status,
+      resolvedBy: r.resolvedBy,
+      createdAt: r.createdAt.toISOString(),
+      resolvedAt: r.resolvedAt?.toISOString() ?? null,
+    })),
+    auditLogs: allAudit.map((l) => ({
+      id: l.id,
+      actorId: l.actorId,
+      actorHandle: l.actorId ? scoutMap.get(l.actorId)?.username || 'admin' : 'system',
+      affectedUserId: l.affectedUserId,
+      affectedHandle: scoutMap.get(l.affectedUserId)?.username || 'user',
+      action: l.action,
+      entityType: l.entityType,
+      entityId: l.entityId,
+      previousValue: (l.previousValue as Record<string, unknown> | null) ?? null,
+      newValue: (l.newValue as Record<string, unknown> | null) ?? null,
+      reason: l.reason,
+      createdAt: l.createdAt.toISOString(),
+    })),
   };
 }
 
-export function adminReviewVerification(
+export async function adminReviewVerification(
   actorUserId: string,
   input: {
     verificationId: string;
@@ -3310,62 +2851,88 @@ export function adminReviewVerification(
     reviewerNotes: string;
   }
 ) {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+  const db = requireDb();
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertAdminRole(ctx, ['VERIFICATION_OFFICER']);
 
   if (!input.reviewerNotes.trim()) {
     throw new AuthorizationError('Mandatory reviewer notes are required.', 400, 'NOTES_REQUIRED');
   }
-
-  const verif = store.verifications.find((v) => v.id === input.verificationId);
-  if (!verif) {
+  if (!isUuid(input.verificationId)) {
     throw new AuthorizationError('Verification record not found.', 404, 'VERIFICATION_NOT_FOUND');
   }
 
-  const prevStatus = verif.status;
-  verif.status = input.decision;
-  verif.reviewerNotes = input.reviewerNotes.trim();
-  verif.reviewedBy = actorUserId;
-  verif.reviewedAt = new Date().toISOString();
-
-  // If SELLER verification is APPROVED, activate sellerStatus from ONBOARDING -> ACTIVE
-  if (verif.category === 'SELLER' && verif.sellerProfileId) {
-    const seller = store.sellers[verif.sellerProfileId];
-    if (seller && input.decision === 'APPROVED' && seller.sellerStatus === 'ONBOARDING') {
-      seller.sellerStatus = 'ACTIVE';
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .select()
+      .from(verificationRecords)
+      .where(eq(verificationRecords.id, input.verificationId))
+      .limit(1);
+    const verif = rows[0];
+    if (!verif) {
+      throw new AuthorizationError('Verification record not found.', 404, 'VERIFICATION_NOT_FOUND');
     }
-  }
 
-  recordAuditLog(store, {
-    actorId: actorUserId,
-    affectedUserId: verif.userId,
-    action: `VERIFICATION_${input.decision}`,
-    entityType: 'verification_records',
-    entityId: verif.id,
-    previousValue: { status: prevStatus, category: verif.category },
-    newValue: { status: input.decision, category: verif.category },
-    reason: verif.reviewerNotes,
+    const prevStatus = verif.status;
+    const now = new Date();
+    const notes = input.reviewerNotes.trim();
+
+    const [updated] = await tx
+      .update(verificationRecords)
+      .set({
+        status: input.decision,
+        reviewerNotes: notes,
+        reviewedBy: actorUserId,
+        reviewedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(verificationRecords.id, verif.id))
+      .returning();
+
+    if (verif.category === 'SELLER' && verif.sellerProfileId && input.decision === 'APPROVED') {
+      await tx
+        .update(sellerProfiles)
+        .set({ sellerStatus: 'ACTIVE', updatedAt: now })
+        .where(
+          and(
+            eq(sellerProfiles.id, verif.sellerProfileId),
+            eq(sellerProfiles.sellerStatus, 'ONBOARDING')
+          )
+        );
+    }
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: verif.userId,
+      action: `VERIFICATION_${input.decision}`,
+      entityType: 'verification_records',
+      entityId: verif.id,
+      previousValue: { status: prevStatus, category: verif.category },
+      newValue: { status: input.decision, category: verif.category },
+      reason: notes,
+    });
+
+    await tx.insert(platformNotifications).values({
+      userId: verif.userId,
+      category: 'trust',
+      title: `${verif.category} verification ${input.decision}`,
+      body: notes,
+    });
+
+    return updated;
   });
-
-  store.notifications.unshift({
-    id: `NTF-${Date.now()}`,
-    userId: verif.userId,
-    category: 'trust',
-    title: `${verif.category} verification ${input.decision}`,
-    body: verif.reviewerNotes,
-    createdAt: new Date().toISOString(),
-    read: false,
-  });
-
-  return verif;
 }
 
-export function adminApplyUserAction(
+export async function adminApplyUserAction(
   actorUserId: string,
   input: {
     targetUserId: string;
-    actionType: 'SET_ACCOUNT_STATUS' | 'SET_SELLER_STATUS' | 'HOLD_PENDING_COMMISSIONS' | 'RESOLVE_ABUSE_REPORT';
+    actionType:
+      | 'SET_ACCOUNT_STATUS'
+      | 'SET_SELLER_STATUS'
+      | 'HOLD_PENDING_COMMISSIONS'
+      | 'RESOLVE_ABUSE_REPORT';
     accountStatus?: AccountStatus;
     sellerStatus?: SellerStatus;
     abuseReportId?: string;
@@ -3373,127 +2940,183 @@ export function adminApplyUserAction(
     reason: string;
   }
 ) {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertAdminRole(ctx, ['TRUST_AND_SAFETY', 'FINANCE_OPS']);
 
   if (!input.reason.trim()) {
-    throw new AuthorizationError('Documented reason is required for admin governance actions.', 400, 'REASON_REQUIRED');
+    throw new AuthorizationError(
+      'Documented reason is required for admin governance actions.',
+      400,
+      'REASON_REQUIRED'
+    );
   }
-
-  const targetUser = store.users[input.targetUserId];
-  if (!targetUser) {
+  if (!isUuid(input.targetUserId)) {
     throw new AuthorizationError('Target user not found.', 404, 'USER_NOT_FOUND');
   }
 
-  if (input.actionType === 'SET_ACCOUNT_STATUS' && input.accountStatus) {
-    const prev = targetUser.accountStatus;
-    targetUser.accountStatus = input.accountStatus;
-    targetUser.restrictionReason = input.reason.trim();
-    recordAuditLog(store, {
-      actorId: actorUserId,
-      affectedUserId: targetUser.id,
-      action: 'ADMIN_ACCOUNT_STATUS_CHANGED',
-      entityType: 'users',
-      entityId: targetUser.id,
-      previousValue: { accountStatus: prev },
-      newValue: { accountStatus: input.accountStatus },
-      reason: input.reason.trim(),
-    });
-  }
+  const reason = input.reason.trim();
 
-  if (input.actionType === 'SET_SELLER_STATUS' && input.sellerStatus) {
-    const seller = Object.values(store.sellers).find((s) => s.ownerUserId === targetUser.id);
-    if (!seller) {
-      throw new AuthorizationError('Target user has no Seller profile.', 400, 'NO_SELLER_PROFILE');
+  await db.transaction(async (tx) => {
+    const userRows = await tx
+      .select()
+      .from(users)
+      .where(eq(users.id, input.targetUserId))
+      .limit(1);
+    const targetUser = userRows[0];
+    if (!targetUser) {
+      throw new AuthorizationError('Target user not found.', 404, 'USER_NOT_FOUND');
     }
-    const prev = seller.sellerStatus;
-    seller.sellerStatus = input.sellerStatus;
-    recordAuditLog(store, {
-      actorId: actorUserId,
-      affectedUserId: targetUser.id,
-      action: 'ADMIN_SELLER_STATUS_CHANGED',
-      entityType: 'seller_profiles',
-      entityId: seller.id,
-      previousValue: { sellerStatus: prev },
-      newValue: { sellerStatus: input.sellerStatus },
-      reason: input.reason.trim(),
-    });
-  }
 
-  if (input.actionType === 'HOLD_PENDING_COMMISSIONS') {
-    const nowIso = new Date().toISOString();
-    const pendingEntries = store.ledger.filter(
-      (l) => l.beneficiaryScoutId === targetUser.id && l.status === 'Pending' && !l.linkedToReference
-    );
-    for (const root of pendingEntries) {
-      store.ledger.unshift({
-        id: `${root.reference}-HOLD-${Date.now()}`,
-        reference: `${root.reference}-HOLD`,
-        orderId: root.orderId,
-        referralEventId: root.referralEventId,
-        beneficiaryScoutId: root.beneficiaryScoutId,
-        generation: root.generation,
-        fractionLabel: root.fractionLabel,
-        amountKobo: root.amountKobo,
-        status: 'On Hold',
-        ruleVersion: COMMISSION_RULE_VERSION,
-        description: `Trust & Safety hold: ${input.reason.trim()} (${root.reference})`,
-        createdAt: nowIso,
-        linkedToReference: root.reference,
-      });
-    }
-    recordAuditLog(store, {
-      actorId: actorUserId,
-      affectedUserId: targetUser.id,
-      action: 'ADMIN_COMMISSIONS_PLACED_ON_HOLD',
-      entityType: 'ledger',
-      entityId: null,
-      newValue: { heldEntriesCount: pendingEntries.length },
-      reason: input.reason.trim(),
-    });
-  }
+    if (input.actionType === 'SET_ACCOUNT_STATUS' && input.accountStatus) {
+      const prev = targetUser.accountStatus;
+      await tx
+        .update(users)
+        .set({
+          accountStatus: input.accountStatus,
+          restrictionReason: reason,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, targetUser.id));
 
-  if (input.actionType === 'RESOLVE_ABUSE_REPORT' && input.abuseReportId) {
-    const rep = store.abuseReports.find((r) => r.id === input.abuseReportId);
-    if (rep) {
-      rep.status = input.abuseResolution || 'RESOLVED';
-      rep.resolvedBy = actorUserId;
-      rep.resolvedAt = new Date().toISOString();
-      recordAuditLog(store, {
+      await tx.insert(auditLogs).values({
         actorId: actorUserId,
-        affectedUserId: rep.reportedUserId,
-        action: `ABUSE_REPORT_${rep.status}`,
-        entityType: 'abuse_reports',
-        entityId: null,
-        newValue: { reportId: rep.id, status: rep.status },
-        reason: input.reason.trim(),
+        affectedUserId: targetUser.id,
+        action: 'ADMIN_ACCOUNT_STATUS_CHANGED',
+        entityType: 'users',
+        entityId: targetUser.id,
+        previousValue: { accountStatus: prev },
+        newValue: { accountStatus: input.accountStatus },
+        reason,
       });
     }
-  }
+
+    if (input.actionType === 'SET_SELLER_STATUS' && input.sellerStatus) {
+      const sellerRows = await tx
+        .select()
+        .from(sellerProfiles)
+        .where(eq(sellerProfiles.ownerUserId, targetUser.id))
+        .limit(1);
+      const seller = sellerRows[0];
+      if (!seller) {
+        throw new AuthorizationError('Target user has no Seller profile.', 400, 'NO_SELLER_PROFILE');
+      }
+      const prev = seller.sellerStatus;
+      await tx
+        .update(sellerProfiles)
+        .set({ sellerStatus: input.sellerStatus, updatedAt: new Date() })
+        .where(eq(sellerProfiles.id, seller.id));
+
+      await tx.insert(auditLogs).values({
+        actorId: actorUserId,
+        affectedUserId: targetUser.id,
+        action: 'ADMIN_SELLER_STATUS_CHANGED',
+        entityType: 'seller_profiles',
+        entityId: seller.id,
+        previousValue: { sellerStatus: prev },
+        newValue: { sellerStatus: input.sellerStatus },
+        reason,
+      });
+    }
+
+    if (input.actionType === 'HOLD_PENDING_COMMISSIONS') {
+      const userEntries = await tx
+        .select()
+        .from(commissionLedgerEntries)
+        .where(
+          and(
+            eq(commissionLedgerEntries.beneficiaryScoutId, targetUser.id),
+            eq(commissionLedgerEntries.status, 'Pending')
+          )
+        );
+      const roots = userEntries.filter((l) => !l.linkedToReference);
+      for (const root of roots) {
+        await tx.insert(commissionLedgerEntries).values({
+          reference: `${root.reference}-HOLD`,
+          orderId: root.orderId,
+          referralEventId: root.referralEventId,
+          beneficiaryScoutId: root.beneficiaryScoutId,
+          generation: root.generation,
+          fractionLabel: root.fractionLabel,
+          amountKobo: Number(root.amountKobo),
+          status: 'On Hold',
+          ruleVersion: COMMISSION_RULE_VERSION,
+          description: `Trust & Safety hold: ${reason} (${root.reference})`,
+          linkedToReference: root.reference,
+        });
+      }
+
+      await tx.insert(auditLogs).values({
+        actorId: actorUserId,
+        affectedUserId: targetUser.id,
+        action: 'ADMIN_COMMISSIONS_PLACED_ON_HOLD',
+        entityType: 'commission_ledger_entries',
+        entityId: null,
+        newValue: { heldEntriesCount: roots.length },
+        reason,
+      });
+    }
+
+    if (input.actionType === 'RESOLVE_ABUSE_REPORT' && isUuid(input.abuseReportId)) {
+      const nextStatus = input.abuseResolution || 'RESOLVED';
+      await tx
+        .update(abuseReports)
+        .set({
+          status: nextStatus,
+          resolvedBy: actorUserId,
+          resolvedAt: new Date(),
+        })
+        .where(eq(abuseReports.id, input.abuseReportId));
+
+      await tx.insert(auditLogs).values({
+        actorId: actorUserId,
+        affectedUserId: targetUser.id,
+        action: `ABUSE_REPORT_${nextStatus}`,
+        entityType: 'abuse_reports',
+        entityId: input.abuseReportId,
+        newValue: { reportId: input.abuseReportId, status: nextStatus },
+        reason,
+      });
+    }
+  });
 }
 
-export function submitSupportCaseForActor(
+export async function submitSupportCaseForActor(
   actorUserId: string,
   input: {
     topic: SupportCase['topic'];
     subject: string;
     details: string;
   }
-): SupportCase {
-  const store = getStore();
-  const ctx = buildUserAuthContextFromStore(actorUserId);
+): Promise<SupportCase> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
   assertActiveAccount(ctx);
 
-  const supportCase: SupportCase = {
-    id: `SUP-${Math.floor(1000 + Math.random() * 8999)}`,
-    userId: actorUserId,
-    topic: input.topic,
-    subject: input.subject.trim(),
-    details: input.details.trim(),
-    status: 'Under Review',
-    createdAt: new Date().toISOString(),
+  const id = `SUP-${Date.now().toString().slice(-5)}${Math.floor(10 + Math.random() * 89)}`;
+  const [created] = await db
+    .insert(supportCases)
+    .values({
+      id,
+      userId: actorUserId,
+      topic: input.topic,
+      subject: input.subject.trim(),
+      details: input.details.trim(),
+      status: 'Under Review',
+    })
+    .returning();
+
+  return {
+    id: created.id,
+    userId: created.userId,
+    topic: created.topic as SupportCase['topic'],
+    subject: created.subject,
+    details: created.details,
+    status: created.status as SupportCase['status'],
+    createdAt: created.createdAt.toISOString(),
   };
-  store.supportCases.unshift(supportCase);
-  return supportCase;
 }

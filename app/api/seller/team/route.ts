@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
     const operation = String(body?.operation || '');
 
     if (operation === 'invite') {
-      manageSellerTeamForActor(identity.userId, {
+      await manageSellerTeamForActor(identity.userId, {
         operation: 'invite',
         memberEmail: String(body.memberEmail || ''),
         role: body.role === 'BUSINESS_ADMIN' ? 'BUSINESS_ADMIN' : 'TEAM_MEMBER',
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
         },
       });
     } else if (operation === 'revoke') {
-      manageSellerTeamForActor(identity.userId, {
+      await manageSellerTeamForActor(identity.userId, {
         operation: 'revoke',
         memberId: String(body.memberId || ''),
       });
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      snapshot: getNairaScoutSnapshot(identity.userId),
+      snapshot: await getNairaScoutSnapshot(identity.userId),
     });
   } catch (err) {
     if (err instanceof AuthorizationError) {

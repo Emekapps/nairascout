@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const listing = createSellerDraftListing(identity.userId, {
+    const listing = await createSellerDraftListing(identity.userId, {
       title: String(body.title || ''),
       category: String(body.category || 'Home & Craft'),
       priceNaira: Number(body.priceNaira || 0),
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       listing,
-      snapshot: getNairaScoutSnapshot(identity.userId),
+      snapshot: await getNairaScoutSnapshot(identity.userId),
     });
   } catch (err) {
     if (err instanceof AuthorizationError) {

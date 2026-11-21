@@ -9,6 +9,10 @@ import type {
   ProductReferralEvent,
 } from '@/lib/nairascout-store';
 import { formatKoboToNaira } from '@/lib/commission-engine';
+import {
+  createSupabaseBrowserClient,
+  isSupabaseBrowserConfigured,
+} from '@/lib/supabase/client';
 import ProductImage from './ProductImage';
 
 interface CheckoutDrawerProps {
@@ -18,7 +22,7 @@ interface CheckoutDrawerProps {
     referralEvent: ProductReferralEvent | null;
   } | null;
   onClose: () => void;
-  onOtpAuthenticated: (token: string | null, snapshot: NairaScoutSnapshot) => void;
+  onOtpAuthenticated: (snapshot: NairaScoutSnapshot) => void;
   onConfirmOrder: (payload: {
     productListingId: string;
     quantity: number;
@@ -37,12 +41,12 @@ export default function CheckoutDrawer({
   const [submitting, setSubmitting] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState<MarketplaceOrder | null>(null);
 
-  // Inline Email OTP state for unauthenticated external buyers
+  // Inline Email OTP state via @supabase/ssr
   const [otpEmail, setOtpEmail] = useState('');
   const [otpDisplayName, setOtpDisplayName] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [otpStep, setOtpStep] = useState<'email' | 'code'>('email');
-  const [previewOtpHint, setPreviewOtpHint] = useState<string | null>(null);
+  const [otpInfo, setOtpInfo] = useState<string | null>(null);
   const [otpError, setOtpError] = useState<string | null>(null);
   const [otpBusy, setOtpBusy] = useState(false);
 
@@ -52,25 +56,32 @@ export default function CheckoutDrawer({
   const isReferral = Boolean(referralEvent);
   const merchTotalKobo = product.priceKobo * quantity;
   const totalChargedKobo = merchTotalKobo + product.deliveryFeeKobo;
+  const supabaseConfigured = isSupabaseBrowserConfigured();
 
   const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setOtpError(null);
+    setOtpInfo(null);
+
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) {
+      setOtpError('Supabase Auth is not configured.');
+      return;
+    }
+
     setOtpBusy(true);
     try {
-      const res = await fetch('/api/auth/otp', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'NairaScout',
+      const { error } = await supabase.auth.signInWithOtp({
+        email: otpEmail.trim(),
+        options: {
+          shouldCreateUser: true,
+          data: otpDisplayName.trim() ? { display_name: otpDisplayName.trim() } : undefined,
         },
-        body: JSON.stringify({ action: 'request', email: otpEmail }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setOtpError(data.error || 'Could not send OTP.');
+      if (error) {
+        setOtpError(error.message);
       } else {
-        setPreviewOtpHint(data.previewOtpCode || null);
+        setOtpInfo(`6-digit OTP code sent to ${otpEmail.trim()}.`);
         setOtpStep('code');
       }
     } finally {
@@ -81,27 +92,42 @@ export default function CheckoutDrawer({
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setOtpError(null);
+    setOtpInfo(null);
+
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) {
+      setOtpError('Supabase Auth is not configured.');
+      return;
+    }
+
     setOtpBusy(true);
     try {
-      const res = await fetch('/api/auth/otp', {
+      const { error } = await supabase.auth.verifyOtp({
+        email: otpEmail.trim(),
+        token: otpCode.trim(),
+        type: 'email',
+      });
+      if (error) {
+        setOtpError(error.message);
+        return;
+      }
+
+      const res = await fetch('/api/auth/provision', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Requested-With': 'NairaScout',
         },
         body: JSON.stringify({
-          action: 'verify',
-          email: otpEmail,
-          code: otpCode,
-          displayName: otpDisplayName,
+          displayName: otpDisplayName.trim() || undefined,
           referralEventId: referralEvent?.id ?? null,
         }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setOtpError(data.error || 'OTP verification failed.');
+        setOtpError(data.error || 'Could not provision account in PostgreSQL.');
       } else if (data.snapshot) {
-        onOtpAuthenticated(data.token ?? null, data.snapshot);
+        onOtpAuthenticated(data.snapshot);
       }
     } finally {
       setOtpBusy(false);
@@ -127,7 +153,7 @@ export default function CheckoutDrawer({
     setOtpStep('email');
     setOtpCode('');
     setOtpError(null);
-    setPreviewOtpHint(null);
+    setOtpInfo(null);
     onClose();
   };
 
@@ -319,7 +345,7 @@ export default function CheckoutDrawer({
                 </div>
               </div>
 
-              {/* Inline Email OTP Gate for Unauthenticated External Buyers */}
+              {/* Inline Email OTP Gate via @supabase/ssr */}
               {!authenticated && (
                 <div className="bg-[#FAFAF8] border border-[#E4E4DE] rounded-xl p-4 space-y-3">
                   <div className="flex items-center gap-2">
@@ -329,12 +355,23 @@ export default function CheckoutDrawer({
                     </p>
                   </div>
                   <p className="text-xs text-[#5C665E]">
-                    Verify your email to create your free Scout identity while preserving{' '}
+                    Verify your email via Supabase Auth to provision your free Scout identity while
+                    preserving{' '}
                     {isReferral ? `referral card ${referralEvent?.id}` : 'this checkout session'}.
                   </p>
 
+                  {!supabaseConfigured && (
+                    <p className="text-xs text-[#92400E] bg-[#FFFBEB] border border-[#FDE68A] p-2 rounded">
+                      Supabase Auth is not configured in environment variables yet.
+                    </p>
+                  )}
+
                   {otpError && (
                     <p className="text-xs text-[#B91C1C] font-medium">{otpError}</p>
+                  )}
+
+                  {otpInfo && (
+                    <p className="text-xs text-[#0B6E4F] font-medium">{otpInfo}</p>
                   )}
 
                   {otpStep === 'email' ? (
@@ -358,28 +395,22 @@ export default function CheckoutDrawer({
                       />
                       <button
                         type="submit"
-                        disabled={otpBusy}
-                        className="w-full py-2 px-3 text-xs font-semibold text-white bg-[#111814] rounded-lg cursor-pointer"
+                        disabled={otpBusy || !supabaseConfigured}
+                        className="w-full py-2 px-3 text-xs font-semibold text-white bg-[#111814] rounded-lg disabled:opacity-50 cursor-pointer"
                       >
-                        {otpBusy ? 'Sending OTP...' : 'Send 6-Digit Email Code'}
+                        {otpBusy ? 'Sending OTP...' : 'Send Email Verification Code'}
                       </button>
                     </form>
                   ) : (
                     <form onSubmit={handleVerifyOtp} className="space-y-2.5">
-                      {previewOtpHint && (
-                        <p className="text-xs bg-white border border-[#CBE2D8] text-[#0B6E4F] p-2 rounded">
-                          Preview verification code:{' '}
-                          <span className="font-mono font-bold">{previewOtpHint}</span>
-                        </p>
-                      )}
                       <input
                         type="text"
                         required
-                        maxLength={6}
+                        maxLength={8}
                         value={otpCode}
                         onChange={(e) => setOtpCode(e.target.value)}
                         placeholder="Enter 6-digit code"
-                        aria-label="6-digit OTP code"
+                        aria-label="OTP code"
                         className="w-full px-3 py-2 font-mono text-sm bg-white border border-[#D8D8D0] rounded-lg"
                       />
                       <div className="flex gap-2">
@@ -392,7 +423,10 @@ export default function CheckoutDrawer({
                         </button>
                         <button
                           type="button"
-                          onClick={() => setOtpStep('email')}
+                          onClick={() => {
+                            setOtpStep('email');
+                            setOtpInfo(null);
+                          }}
                           className="px-3 py-2 text-xs text-[#4B554E] border border-[#D8D8D0] rounded-lg cursor-pointer"
                         >
                           Change Email

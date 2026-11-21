@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -12,7 +11,6 @@ import {
   FileText,
   Lock,
   Search,
-  Shield,
   Users,
 } from 'lucide-react';
 import type {
@@ -66,27 +64,17 @@ export type AdminSection = 'overview' | 'verifications' | 'users' | 'audit_logs'
 interface AdminConsoleViewProps {
   initialSection: AdminSection;
   authenticated: boolean;
-  adminBootstrapAvailable: boolean;
   initialAdminData: AdminConsoleData | null;
 }
 
 export default function AdminConsoleView({
   initialSection,
   authenticated,
-  adminBootstrapAvailable,
   initialAdminData,
 }: AdminConsoleViewProps) {
-  const router = useRouter();
   const [adminData, setAdminData] = useState<AdminConsoleData | null>(initialAdminData);
-  const [bootstrapAvailable, setBootstrapAvailable] = useState(adminBootstrapAvailable);
-  const [bearerToken, setBearerToken] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
-
-  // First-run Super Admin claim form
-  const [claimName, setClaimName] = useState('Platform Super Admin');
-  const [claimEmail, setClaimEmail] = useState('');
-  const [claimPassword, setClaimPassword] = useState('');
 
   // Verification Queue filters & notes
   const [verifFilter, setVerifFilter] = useState<'ALL' | VerificationStatus>('PENDING');
@@ -94,7 +82,6 @@ export default function AdminConsoleView({
   const [signedPreview, setSignedPreview] = useState<{
     path: string;
     signedUrl: string | null;
-    summary?: string;
   } | null>(null);
 
   // User Governance state
@@ -107,63 +94,14 @@ export default function AdminConsoleView({
   // Audit Log filter
   const [auditQuery, setAuditQuery] = useState('');
 
-  const buildHeaders = (): HeadersInit => {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'X-Requested-With': 'NairaScout',
-    };
-    if (bearerToken) {
-      headers['Authorization'] = `Bearer ${bearerToken}`;
-    }
-    return headers;
-  };
-
-  const handleClaimSuperAdmin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setFeedback(null);
-    try {
-      const res = await fetch('/api/auth/session', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'NairaScout',
-        },
-        body: JSON.stringify({
-          action: 'claim_admin',
-          email: claimEmail,
-          password: claimPassword,
-          displayName: claimName,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setFeedback({ type: 'err', message: data.error || 'Could not claim Super Admin.' });
-        return;
-      }
-      if (data.token) setBearerToken(data.token);
-      setBootstrapAvailable(false);
-
-      const adminRes = await fetch('/api/admin', {
-        headers: data.token ? { Authorization: `Bearer ${data.token}` } : undefined,
-      });
-      if (adminRes.ok) {
-        const fetchedAdmin = (await adminRes.json()) as AdminConsoleData;
-        setAdminData(fetchedAdmin);
-        setSelectedUserId(fetchedAdmin.users[0]?.userId || '');
-      }
-      setFeedback({ type: 'ok', message: 'Super Admin role provisioned and signed in.' });
-      router.refresh();
-    } finally {
-      setBusy(false);
-    }
-  };
+  const buildHeaders = (): HeadersInit => ({
+    'Content-Type': 'application/json',
+    'X-Requested-With': 'NairaScout',
+  });
 
   const handleSignDocument = async (path: string) => {
     setFeedback(null);
-    const headers: Record<string, string> = {};
-    if (bearerToken) headers['Authorization'] = `Bearer ${bearerToken}`;
-    const res = await fetch(`/api/admin?signPath=${encodeURIComponent(path)}`, { headers });
+    const res = await fetch(`/api/admin?signPath=${encodeURIComponent(path)}`);
     const data = await res.json();
     if (!res.ok) {
       setFeedback({ type: 'err', message: data.error || 'Could not sign document URL.' });
@@ -172,7 +110,6 @@ export default function AdminConsoleView({
     setSignedPreview({
       path,
       signedUrl: data.signedUrl ?? null,
-      summary: data.previewDocumentSummary,
     });
   };
 
@@ -300,94 +237,6 @@ export default function AdminConsoleView({
     );
   }, [adminData, auditQuery]);
 
-  // Bootstrap Claim Super Admin UI when no admin exists yet
-  if (!adminData && bootstrapAvailable) {
-    return (
-      <div className="min-h-screen bg-[#FAFAF8] flex flex-col justify-center p-6">
-        <div className="max-w-md w-full mx-auto space-y-5">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-[#5C665E] hover:text-[#111814]"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
-            Back to NairaScout
-          </Link>
-
-          <div className="bg-white border border-[#E4E4DE] rounded-xl p-7 space-y-5">
-            <div className="flex items-center gap-2 text-[#0B6E4F] text-xs font-semibold uppercase tracking-wider">
-              <Shield className="w-4 h-4" aria-hidden="true" />
-              First-Run Bootstrap
-            </div>
-            <div>
-              <h1 className="font-display text-2xl font-bold text-[#111814]">
-                Claim Super Admin Console
-              </h1>
-              <p className="mt-1 text-xs text-[#5C665E] leading-relaxed">
-                No platform administrator exists yet. Claim the one-time Super Admin role to review
-                Seller verifications, enforce proportional restrictions, and inspect audit logs.
-              </p>
-            </div>
-
-            {feedback && (
-              <div className="p-3 bg-[#FEF2F2] border border-[#FECACA] rounded-lg text-xs text-[#B91C1C]">
-                {feedback.message}
-              </div>
-            )}
-
-            <form onSubmit={handleClaimSuperAdmin} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-medium text-[#4B554E] mb-1">
-                  Administrator Name
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={claimName}
-                  onChange={(e) => setClaimName(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[#4B554E] mb-1">
-                  Administrator Email
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={claimEmail}
-                  onChange={(e) => setClaimEmail(e.target.value)}
-                  placeholder="admin@nairascout.ng"
-                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[#4B554E] mb-1">
-                  Strong Password (min 8 chars)
-                </label>
-                <input
-                  type="password"
-                  required
-                  minLength={8}
-                  value={claimPassword}
-                  onChange={(e) => setClaimPassword(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={busy}
-                className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg hover:bg-[#09583F] cursor-pointer"
-              >
-                {busy ? 'Provisioning...' : 'Provision Super Admin Role'}
-              </button>
-            </form>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Non-admin Access Denied view
   if (!adminData) {
     return (
       <div className="min-h-screen bg-[#FAFAF8] flex items-center justify-center p-6">
@@ -398,8 +247,8 @@ export default function AdminConsoleView({
           </h1>
           <p className="text-sm text-[#5C665E]">
             {authenticated
-              ? 'Your current Scout/Seller session does not hold a platform administrator role.'
-              : 'Sign in with an administrator account to access NairaScout governance.'}
+              ? 'Your current session does not hold a platform administrator role in public.platform_admin_roles.'
+              : 'Sign in with an administrator account granted in public.platform_admin_roles to access NairaScout governance.'}
           </p>
           <div className="flex justify-center gap-3 pt-2">
             {!authenticated && (
@@ -499,8 +348,9 @@ export default function AdminConsoleView({
                 Platform Governance Overview
               </h1>
               <p className="mt-1.5 text-sm text-[#4B554E]">
-                Separation-of-duties governance console. Every verification decision and user/seller
-                restriction is permanently recorded in the append-only audit log.
+                Separation-of-duties governance console backed directly by PostgreSQL. Every
+                verification decision and user/seller restriction is permanently recorded in{' '}
+                <span className="font-mono">public.audit_logs</span>.
               </p>
             </div>
 
@@ -588,7 +438,7 @@ export default function AdminConsoleView({
               <div className="p-4 bg-[#F3F8F6] border border-[#CBE2D8] rounded-xl flex items-center justify-between gap-4 text-xs text-[#0B6E4F]">
                 <div>
                   <p className="font-semibold">60-Second Short-Lived Signed Document Access</p>
-                  <p className="font-mono mt-0.5">{signedPreview.summary || signedPreview.path}</p>
+                  <p className="font-mono mt-0.5">{signedPreview.path}</p>
                 </div>
                 {signedPreview.signedUrl && (
                   <a

@@ -12,6 +12,7 @@ import type {
   SellerPlanId,
   SupportCase,
 } from '@/lib/nairascout-store';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import HeaderNav, { NavTab } from './HeaderNav';
 import MarketplaceView from './MarketplaceView';
 import ReferralsView from './ReferralsView';
@@ -33,7 +34,6 @@ export default function NairaScoutApp({
 }: NairaScoutAppProps) {
   const router = useRouter();
   const [snapshot, setSnapshot] = useState<NairaScoutSnapshot>(initialSnapshot);
-  const [bearerToken, setBearerToken] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<NavTab>(
     initialRefEvent ? 'referrals' : 'marketplace'
   );
@@ -52,21 +52,13 @@ export default function NairaScoutApp({
     }, 5000);
   };
 
-  const buildHeaders = (): HeadersInit => {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'X-Requested-With': 'NairaScout',
-    };
-    if (bearerToken) {
-      headers['Authorization'] = `Bearer ${bearerToken}`;
-    }
-    return headers;
-  };
-
   const callJsonApi = async (url: string, body: Record<string, unknown>) => {
     const res = await fetch(url, {
       method: 'POST',
-      headers: buildHeaders(),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'NairaScout',
+      },
       body: JSON.stringify(body),
     });
     const data = await res.json();
@@ -85,8 +77,11 @@ export default function NairaScoutApp({
   };
 
   const handleLogout = async () => {
+    const supabase = createSupabaseBrowserClient();
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
     const data = await callJsonApi('/api/auth/session', { action: 'logout' });
-    setBearerToken(null);
     if (data?.snapshot) {
       setSnapshot(data.snapshot);
     }
@@ -248,7 +243,6 @@ export default function NairaScoutApp({
         inboxCount={activeInboxCount}
         authenticated={snapshot.authenticated}
         activeScout={snapshot.activeScout}
-        adminBootstrapAvailable={snapshot.adminBootstrapAvailable}
         onLogout={handleLogout}
       />
 
@@ -263,6 +257,18 @@ export default function NairaScoutApp({
           }`}
         >
           {feedback.message}
+        </div>
+      )}
+
+      {(!snapshot.dbConfigured || !snapshot.supabaseConfigured) && (
+        <div className="bg-[#FFFBEB] border-b border-[#FDE68A] px-4 py-2.5 text-xs text-[#92400E] text-center">
+          Live database and authentication require environment configuration:{' '}
+          {!snapshot.dbConfigured && <span className="font-mono font-semibold">DATABASE_URL </span>}
+          {!snapshot.supabaseConfigured && (
+            <span className="font-mono font-semibold">
+              NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY
+            </span>
+          )}
         </div>
       )}
 
@@ -357,8 +363,7 @@ export default function NairaScoutApp({
         authenticated={snapshot.authenticated}
         session={checkoutSession}
         onClose={() => setCheckoutSession(null)}
-        onOtpAuthenticated={(token, nextSnapshot) => {
-          if (token) setBearerToken(token);
+        onOtpAuthenticated={(nextSnapshot) => {
           setSnapshot(nextSnapshot);
           showFeedback('ok', 'Email verified. Complete your order below.');
         }}

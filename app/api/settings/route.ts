@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthorizationError } from '@/lib/auth/rbac';
 import {
-  buildClearSessionCookieHeader,
   extractSessionIdentityFromRequest,
   verifyMutationOrigin,
 } from '@/lib/auth/session';
@@ -14,6 +13,7 @@ import {
   updateProfileAndPrivacy,
   VerificationCategory,
 } from '@/lib/nairascout-store';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 export async function PATCH(req: NextRequest) {
   if (!verifyMutationOrigin(req)) {
@@ -30,7 +30,7 @@ export async function PATCH(req: NextRequest) {
     const section = String(body?.section || '');
 
     if (section === 'profile' || section === 'privacy') {
-      updateProfileAndPrivacy(identity.userId, {
+      await updateProfileAndPrivacy(identity.userId, {
         displayName: body.displayName,
         username: body.username,
         bio: body.bio,
@@ -44,12 +44,12 @@ export async function PATCH(req: NextRequest) {
           body.profileVisibility === 'NETWORK_ONLY' ? 'NETWORK_ONLY' : 'PUBLIC',
       });
     } else if (section === 'unblock') {
-      manageRelationshipForActor(identity.userId, {
+      await manageRelationshipForActor(identity.userId, {
         targetUserId: String(body.targetUserId || ''),
         operation: 'unblock',
       });
     } else if (section === 'verification') {
-      submitVerificationEvidence(identity.userId, {
+      await submitVerificationEvidence(identity.userId, {
         category: body.category as VerificationCategory,
         evidencePaths: Array.isArray(body.evidencePaths)
           ? body.evidencePaths.map(String)
@@ -62,7 +62,7 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      snapshot: getNairaScoutSnapshot(identity.userId),
+      snapshot: await getNairaScoutSnapshot(identity.userId),
     });
   } catch (err) {
     if (err instanceof AuthorizationError) {
@@ -88,15 +88,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unknown lifecycle action.' }, { status: 400 });
     }
 
-    closeAccountVoluntarily(identity.userId, body.reason ? String(body.reason) : undefined);
+    await closeAccountVoluntarily(identity.userId, body.reason ? String(body.reason) : undefined);
 
-    const res = NextResponse.json({
+    const supabase = await createSupabaseServerClient();
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+
+    return NextResponse.json({
       ok: true,
       closed: true,
-      snapshot: getNairaScoutSnapshot(null),
+      snapshot: await getNairaScoutSnapshot(null),
     });
-    res.headers.set('Set-Cookie', buildClearSessionCookieHeader());
-    return res;
   } catch (err) {
     if (err instanceof AuthorizationError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: err.statusCode });

@@ -18,6 +18,7 @@ import type {
   VerificationCategory,
 } from '@/lib/nairascout-store';
 import { formatKoboToNaira } from '@/lib/commission-engine';
+import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
 interface SettingsViewProps {
   initialSnapshot: NairaScoutSnapshot;
@@ -63,6 +64,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
   // Verification submission fields
   const [verifCat, setVerifCat] = useState<VerificationCategory>('IDENTITY');
   const [docName, setDocName] = useState('national-id-nin.pdf');
+  const [docFile, setDocFile] = useState<File | null>(null);
   const [bankSummary, setBankSummary] = useState(scout?.bankSummary || '');
 
   // Lifecycle closure confirmation
@@ -148,6 +150,10 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
       if (!res.ok) {
         setFeedback({ type: 'err', message: data.error || 'Account closure failed.' });
         return;
+      }
+      const supabase = createSupabaseBrowserClient();
+      if (supabase) {
+        await supabase.auth.signOut();
       }
       router.push('/');
       router.refresh();
@@ -493,13 +499,26 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
             </div>
 
             <form
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault();
-                patchSettings(
+                let targetPath = `verification-docs/${scout.id}/${docName}`;
+                const supabase = createSupabaseBrowserClient();
+                if (docFile && supabase) {
+                  const objectKey = `${scout.id}/${Date.now()}-${docFile.name}`;
+                  const { error: uploadErr } = await supabase.storage
+                    .from('verification-docs')
+                    .upload(objectKey, docFile, { upsert: true });
+                  if (uploadErr) {
+                    setFeedback({ type: 'err', message: uploadErr.message });
+                    return;
+                  }
+                  targetPath = `verification-docs/${objectKey}`;
+                }
+                await patchSettings(
                   {
                     section: 'verification',
                     category: verifCat,
-                    evidencePaths: [`verification-docs/${scout.id}/${docName}`],
+                    evidencePaths: [targetPath],
                     bankSummary: verifCat === 'PAYOUT_BANK' ? bankSummary : undefined,
                   },
                   `${verifCat} verification submitted for review.`
@@ -551,7 +570,10 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                   type="file"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
-                    if (f) setDocName(f.name);
+                    if (f) {
+                      setDocFile(f);
+                      setDocName(f.name);
+                    }
                   }}
                   className="block w-full text-xs text-[#4B554E] file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-[#F3F3EF] file:font-semibold"
                 />

@@ -1,27 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthorizationError } from '@/lib/auth/rbac';
 import {
-  buildClearSessionCookieHeader,
-  buildSessionCookieHeader,
   extractSessionIdentityFromRequest,
-  signSessionToken,
   verifyMutationOrigin,
 } from '@/lib/auth/session';
+import { isPostgresConfigured } from '@/lib/db';
 import {
-  claimFirstAdmin,
+  ensureUserProvisionedInDb,
   getNairaScoutSnapshot,
-  loginWithPassword,
-  registerUserAtomic,
 } from '@/lib/nairascout-store';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 export async function GET(req: NextRequest) {
   const identity = await extractSessionIdentityFromRequest(req);
-  const refEvent = req.nextUrl.searchParams.get('refEvent');
-  const snapshot = getNairaScoutSnapshot(identity?.userId ?? null, refEvent);
+  const refEvent = req.nextUrl.searchParams.get('refEvent') || req.cookies.get('ns_ref_event')?.value || null;
+  const refScout = req.cookies.get('ns_ref_scout')?.value || null;
+
+  if (identity && isPostgresConfigured()) {
+    try {
+      await ensureUserProvisionedInDb(identity, {
+        referralEventId: refEvent,
+        referralScoutUsername: refScout,
+      });
+    } catch {
+      // Allow snapshot to return cleanly if DB is temporarily unreachable
+    }
+  }
+
+  const snapshot = await getNairaScoutSnapshot(identity?.userId ?? null, refEvent);
   return NextResponse.json({
     authenticated: snapshot.authenticated,
-    adminBootstrapAvailable: snapshot.adminBootstrapAvailable,
     activeScout: snapshot.activeScout,
     snapshot,
   });
@@ -41,69 +49,14 @@ export async function POST(req: NextRequest) {
       if (supabase) {
         await supabase.auth.signOut();
       }
-      const res = NextResponse.json({ ok: true, snapshot: getNairaScoutSnapshot(null) });
-      res.headers.set('Set-Cookie', buildClearSessionCookieHeader());
-      return res;
+      const snapshot = await getNairaScoutSnapshot(null);
+      return NextResponse.json({ ok: true, snapshot });
     }
 
-    if (action === 'register') {
-      const refEventCookie = req.cookies.get('ns_ref_event')?.value || null;
-      const refScoutCookie = req.cookies.get('ns_ref_scout')?.value || null;
-
-      const { user } = registerUserAtomic({
-        email: String(body.email || ''),
-        password: String(body.password || ''),
-        displayName: String(body.displayName || ''),
-        username: body.username ? String(body.username) : undefined,
-        locationState: body.locationState ? String(body.locationState) : undefined,
-        referralEventId: body.referralEventId ? String(body.referralEventId) : refEventCookie,
-        referralScoutUsername: body.referralScoutUsername
-          ? String(body.referralScoutUsername)
-          : refScoutCookie,
-      });
-
-      const token = signSessionToken(user.id, user.email);
-      const res = NextResponse.json({
-        ok: true,
-        token,
-        snapshot: getNairaScoutSnapshot(user.id),
-      });
-      res.headers.set('Set-Cookie', buildSessionCookieHeader(token));
-      return res;
-    }
-
-    if (action === 'login') {
-      const user = loginWithPassword(
-        String(body.email || ''),
-        String(body.password || '')
-      );
-      const token = signSessionToken(user.id, user.email);
-      const res = NextResponse.json({
-        ok: true,
-        token,
-        snapshot: getNairaScoutSnapshot(user.id),
-      });
-      res.headers.set('Set-Cookie', buildSessionCookieHeader(token));
-      return res;
-    }
-
-    if (action === 'claim_admin') {
-      const { user } = claimFirstAdmin({
-        email: String(body.email || ''),
-        password: String(body.password || ''),
-        displayName: String(body.displayName || 'Platform Super Admin'),
-      });
-      const token = signSessionToken(user.id, user.email);
-      const res = NextResponse.json({
-        ok: true,
-        token,
-        snapshot: getNairaScoutSnapshot(user.id),
-      });
-      res.headers.set('Set-Cookie', buildSessionCookieHeader(token));
-      return res;
-    }
-
-    return NextResponse.json({ error: 'Unknown auth action.' }, { status: 400 });
+    return NextResponse.json(
+      { error: 'Use Supabase Auth (@supabase/ssr) + /api/auth/provision for sign-in and registration.' },
+      { status: 400 }
+    );
   } catch (err) {
     if (err instanceof AuthorizationError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: err.statusCode });

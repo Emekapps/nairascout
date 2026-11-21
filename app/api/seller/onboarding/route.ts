@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const seller = activateSellerOnboarding(identity.userId, {
+    const seller = await activateSellerOnboarding(identity.userId, {
       sellerType: body.sellerType === 'BUSINESS' ? 'BUSINESS' : 'INDIVIDUAL',
       sellerName: String(body.sellerName || ''),
       description: String(body.description || ''),
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       seller,
-      snapshot: getNairaScoutSnapshot(identity.userId),
+      snapshot: await getNairaScoutSnapshot(identity.userId),
     });
   } catch (err) {
     if (err instanceof AuthorizationError) {

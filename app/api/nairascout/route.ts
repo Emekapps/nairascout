@@ -4,10 +4,12 @@ import {
   extractSessionIdentityFromRequest,
   verifyMutationOrigin,
 } from '@/lib/auth/session';
+import { isPostgresConfigured } from '@/lib/db';
 import {
   advanceOrderStatus,
   createOrderFromCheckout,
   createReferralEventForActor,
+  ensureUserProvisionedInDb,
   getNairaScoutSnapshot,
   inviteToScoutsListForActor,
   manageRelationshipForActor,
@@ -26,8 +28,21 @@ import {
 
 export async function GET(req: NextRequest) {
   const identity = await extractSessionIdentityFromRequest(req);
-  const refEvent = req.nextUrl.searchParams.get('refEvent');
-  return NextResponse.json(getNairaScoutSnapshot(identity?.userId ?? null, refEvent));
+  const refEvent = req.nextUrl.searchParams.get('refEvent') || req.cookies.get('ns_ref_event')?.value || null;
+  const refScout = req.cookies.get('ns_ref_scout')?.value || null;
+
+  if (identity && isPostgresConfigured()) {
+    try {
+      await ensureUserProvisionedInDb(identity, {
+        referralEventId: refEvent,
+        referralScoutUsername: refScout,
+      });
+    } catch {
+      // Allow snapshot read to handle DB status cleanly
+    }
+  }
+
+  return NextResponse.json(await getNairaScoutSnapshot(identity?.userId ?? null, refEvent));
 }
 
 export async function POST(req: NextRequest) {
@@ -80,78 +95,78 @@ export async function POST(req: NextRequest) {
     const actorUserId = identity.userId;
 
     if (action === 'checkout') {
-      const order = createOrderFromCheckout(actorUserId, {
+      const order = await createOrderFromCheckout(actorUserId, {
         productListingId: String(body.productListingId || ''),
         quantity: Number(body.quantity || 1),
         referralEventId: body.referralEventId ? String(body.referralEventId) : null,
       });
-      return NextResponse.json({ order, snapshot: getNairaScoutSnapshot(actorUserId) });
+      return NextResponse.json({ order, snapshot: await getNairaScoutSnapshot(actorUserId) });
     }
 
     if (action === 'advance_order') {
-      const order = advanceOrderStatus(actorUserId, {
+      const order = await advanceOrderStatus(actorUserId, {
         orderId: String(body.orderId || ''),
         nextStatus: body.nextStatus as OrderFulfilmentStatus,
       });
-      return NextResponse.json({ order, snapshot: getNairaScoutSnapshot(actorUserId) });
+      return NextResponse.json({ order, snapshot: await getNairaScoutSnapshot(actorUserId) });
     }
 
     if (action === 'refer_product') {
-      const event = createReferralEventForActor(actorUserId, {
+      const event = await createReferralEventForActor(actorUserId, {
         productListingId: String(body.productListingId || ''),
         recipientScoutId: String(body.recipientScoutId || ''),
         note: String(body.note || ''),
       });
-      return NextResponse.json({ event, snapshot: getNairaScoutSnapshot(actorUserId) });
+      return NextResponse.json({ event, snapshot: await getNairaScoutSnapshot(actorUserId) });
     }
 
     if (action === 'invite_scout') {
-      const invitation = inviteToScoutsListForActor(
+      const invitation = await inviteToScoutsListForActor(
         actorUserId,
         String(body.targetScoutId || '')
       );
-      return NextResponse.json({ invitation, snapshot: getNairaScoutSnapshot(actorUserId) });
+      return NextResponse.json({ invitation, snapshot: await getNairaScoutSnapshot(actorUserId) });
     }
 
     if (action === 'respond_invite') {
-      respondToInvitationForActor(actorUserId, {
+      await respondToInvitationForActor(actorUserId, {
         invitationId: String(body.invitationId || ''),
         decision: body.decision as 'accept' | 'reject' | 'withdraw',
       });
-      return NextResponse.json({ snapshot: getNairaScoutSnapshot(actorUserId) });
+      return NextResponse.json({ snapshot: await getNairaScoutSnapshot(actorUserId) });
     }
 
     if (action === 'manage_contact') {
-      manageRelationshipForActor(actorUserId, {
+      await manageRelationshipForActor(actorUserId, {
         contactId: body.contactId ? String(body.contactId) : undefined,
         targetUserId: body.targetUserId ? String(body.targetUserId) : undefined,
         operation: body.operation as 'remove' | 'block' | 'unblock',
       });
-      return NextResponse.json({ snapshot: getNairaScoutSnapshot(actorUserId) });
+      return NextResponse.json({ snapshot: await getNairaScoutSnapshot(actorUserId) });
     }
 
     if (action === 'report_abuse') {
-      const report = reportAbuseForActor(actorUserId, {
+      const report = await reportAbuseForActor(actorUserId, {
         reportedUserId: String(body.reportedUserId || ''),
         referralEventId: body.referralEventId ? String(body.referralEventId) : null,
         reason: String(body.reason || ''),
         description: String(body.description || ''),
       });
-      return NextResponse.json({ report, snapshot: getNairaScoutSnapshot(actorUserId) });
+      return NextResponse.json({ report, snapshot: await getNairaScoutSnapshot(actorUserId) });
     }
 
     if (action === 'update_seller_plan') {
-      upgradeSellerPlanForActor(actorUserId, body.planId as SellerPlanId);
-      return NextResponse.json({ snapshot: getNairaScoutSnapshot(actorUserId) });
+      await upgradeSellerPlanForActor(actorUserId, body.planId as SellerPlanId);
+      return NextResponse.json({ snapshot: await getNairaScoutSnapshot(actorUserId) });
     }
 
     if (action === 'submit_support') {
-      const supportCase = submitSupportCaseForActor(actorUserId, {
+      const supportCase = await submitSupportCaseForActor(actorUserId, {
         topic: (body.topic || 'commission') as SupportCase['topic'],
         subject: String(body.subject || ''),
         details: String(body.details || ''),
       });
-      return NextResponse.json({ supportCase, snapshot: getNairaScoutSnapshot(actorUserId) });
+      return NextResponse.json({ supportCase, snapshot: await getNairaScoutSnapshot(actorUserId) });
     }
 
     return NextResponse.json({ error: 'Unknown action.' }, { status: 400 });
