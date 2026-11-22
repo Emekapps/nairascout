@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import {
+  capabilityRestrictions,
   platformAdminRoles,
   scoutProfiles,
   sellerProfiles,
@@ -9,14 +10,21 @@ import {
   users,
   verificationRecords,
 } from '@/lib/db/schema';
-import type {
-  AccountStatus,
-  AdminRole,
-  SellerStatus,
+import {
+  ActiveRestrictionDTO,
+  CapabilityCode,
+  normalizeAdminRole,
+  normalizeTeamRole,
+  RestrictionScope,
   SubscriptionPlan,
   UserAuthContext,
-  VerificationStatus,
 } from '@/lib/auth/rbac';
+import {
+  normalizeAccountStatus,
+  normalizeSellerStatus,
+  normalizeSubscriptionStatus,
+  normalizeVerificationStatus,
+} from '@/lib/auth/transitions';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 export interface SupabaseSessionIdentity {
@@ -46,7 +54,8 @@ export function verifyMutationOrigin(req: NextRequest): boolean {
 }
 
 /**
- * Loads UserAuthContext directly from PostgreSQL via Drizzle ORM.
+ * Loads UserAuthContext directly from PostgreSQL via Drizzle ORM,
+ * including granular capability_restrictions and normalized 4-axis statuses.
  */
 export async function loadDbAuthContext(userId: string): Promise<UserAuthContext | null> {
   const db = getDb();
@@ -61,6 +70,36 @@ export async function loadDbAuthContext(userId: string): Promise<UserAuthContext
     .from(platformAdminRoles)
     .where(eq(platformAdminRoles.userId, userId))
     .limit(1);
+
+  let activeRestrictions: ActiveRestrictionDTO[] = [];
+  try {
+    const restrictionRows = await db
+      .select()
+      .from(capabilityRestrictions)
+      .where(
+        and(
+          eq(capabilityRestrictions.userId, userId),
+          eq(capabilityRestrictions.status, 'ACTIVE')
+        )
+      );
+    const now = Date.now();
+    activeRestrictions = restrictionRows
+      .filter((r) => !r.expiresAt || r.expiresAt.getTime() > now)
+      .map((r) => ({
+        id: r.id,
+        scope: r.scope as RestrictionScope,
+        capabilityCode: r.capabilityCode as CapabilityCode,
+        resourceId: r.resourceId ?? null,
+        reason: r.reason,
+        status: 'ACTIVE',
+        imposedBy: r.imposedBy,
+        expiresAt: r.expiresAt?.toISOString() ?? null,
+        createdAt: r.createdAt.toISOString(),
+      }));
+  } catch {
+    // Graceful safety if capability_restrictions table check hasn't been reached yet
+    activeRestrictions = [];
+  }
 
   const ownedSellerRows = await db
     .select()
@@ -99,11 +138,11 @@ export async function loadDbAuthContext(userId: string): Promise<UserAuthContext
     sellerCtx = {
       sellerProfileId: targetSeller.id,
       sellerType: targetSeller.sellerType,
-      sellerStatus: targetSeller.sellerStatus as SellerStatus,
-      sellerVerificationStatus: (sellerVerif?.status ?? 'NOT_SUBMITTED') as VerificationStatus,
+      sellerStatus: normalizeSellerStatus(targetSeller.sellerStatus),
+      sellerVerificationStatus: normalizeVerificationStatus(sellerVerif?.status ?? 'NOT_STARTED'),
       subscriptionPlan: targetSeller.subscriptionPlan as SubscriptionPlan,
-      subscriptionStatus: targetSeller.subscriptionStatus,
-      role: teamMemberRecord ? teamMemberRecord.role : 'BUSINESS_OWNER',
+      subscriptionStatus: normalizeSubscriptionStatus(targetSeller.subscriptionStatus),
+      role: teamMemberRecord ? normalizeTeamRole(teamMemberRecord.role) : 'BUSINESS_OWNER',
       permissions: teamMemberRecord
         ? teamMemberRecord.permissions
         : {
@@ -121,15 +160,15 @@ export async function loadDbAuthContext(userId: string): Promise<UserAuthContext
   return {
     userId: user.id,
     email: user.email,
-    accountStatus: user.accountStatus as AccountStatus,
+    accountStatus: normalizeAccountStatus(user.accountStatus),
+    activeRestrictions,
     seller: sellerCtx,
-    adminRole: (adminRows[0]?.adminRole as AdminRole | undefined) ?? null,
+    adminRole: normalizeAdminRole(adminRows[0]?.adminRole),
   };
 }
 
 /**
  * Extracts verified Supabase Auth identity exclusively via @supabase/ssr.
- * Never issues or accepts mock/in-memory session tokens.
  */
 export async function extractSessionIdentityFromRequest(
   req?: NextRequest

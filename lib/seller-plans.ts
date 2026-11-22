@@ -1,4 +1,4 @@
-import type { SubscriptionPlan } from '@/lib/auth/rbac';
+import type { SellerTeamRole, SubscriptionPlan } from '@/lib/auth/rbac';
 
 export type SellerPlanId = 'starter' | 'traction' | 'growth' | 'sprawl';
 
@@ -20,8 +20,39 @@ export interface SellerPlanSpec {
   inventoryManagement: 'Basic' | 'Advanced';
   promotionalPlacements: boolean;
   sellerTeamAccounts: boolean;
+  maxTeamSeats: number;
   advancedReporting: boolean;
 }
+
+export const SELLER_TEAM_ROLE_LABELS: Record<
+  SellerTeamRole,
+  { label: string; summary: string }
+> = {
+  BUSINESS_OWNER: {
+    label: 'Business Owner',
+    summary: 'Full business control, payout settings, team management, listings, and orders.',
+  },
+  BUSINESS_ADMIN: {
+    label: 'Business Admin',
+    summary: 'Manages listings, orders, analytics, and team invitations (cannot alter payout bank).',
+  },
+  PRODUCT_MANAGER: {
+    label: 'Product Manager',
+    summary: 'Creates, edits, and manages product listings and stock within plan limits.',
+  },
+  ORDER_MANAGER: {
+    label: 'Order Manager',
+    summary: 'Views orders, updates fulfilment statuses, and handles delivery evidence.',
+  },
+  FINANCE_MANAGER: {
+    label: 'Finance Manager',
+    summary: 'Views Seller revenue, commission expenses, refunds, and payout reports.',
+  },
+  ANALYST_VIEWER: {
+    label: 'Analyst Viewer',
+    summary: 'Read-only access to business sales and referral analytics.',
+  },
+};
 
 export const SELLER_PLANS: Record<SellerPlanId, SellerPlanSpec> = {
   starter: {
@@ -42,6 +73,7 @@ export const SELLER_PLANS: Record<SellerPlanId, SellerPlanSpec> = {
     inventoryManagement: 'Basic',
     promotionalPlacements: false,
     sellerTeamAccounts: false,
+    maxTeamSeats: 0,
     advancedReporting: false,
   },
   traction: {
@@ -62,6 +94,7 @@ export const SELLER_PLANS: Record<SellerPlanId, SellerPlanSpec> = {
     inventoryManagement: 'Basic',
     promotionalPlacements: false,
     sellerTeamAccounts: false,
+    maxTeamSeats: 0,
     advancedReporting: false,
   },
   growth: {
@@ -82,13 +115,14 @@ export const SELLER_PLANS: Record<SellerPlanId, SellerPlanSpec> = {
     inventoryManagement: 'Advanced',
     promotionalPlacements: true,
     sellerTeamAccounts: false,
+    maxTeamSeats: 0,
     advancedReporting: false,
   },
   sprawl: {
     id: 'sprawl',
     enumPlan: 'SPRAWL',
     name: 'Sprawl',
-    tagline: 'For high-volume sellers and merchant teams',
+    tagline: 'For high-volume sellers and merchant teams (up to 5 seats)',
     monthlyPriceKobo: 25000000,
     maxActiveListings: 20,
     monthlyPublications: 100,
@@ -102,6 +136,7 @@ export const SELLER_PLANS: Record<SellerPlanId, SellerPlanSpec> = {
     inventoryManagement: 'Advanced',
     promotionalPlacements: true,
     sellerTeamAccounts: true,
+    maxTeamSeats: 5,
     advancedReporting: true,
   },
 };

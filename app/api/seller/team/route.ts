@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { AuthorizationError } from '@/lib/auth/rbac';
+import {
+  AuthorizationError,
+  normalizeTeamRole,
+  SELLER_TEAM_ROLE_PERMISSIONS,
+} from '@/lib/auth/rbac';
 import {
   extractSessionIdentityFromRequest,
   verifyMutationOrigin,
@@ -24,16 +28,18 @@ export async function POST(req: NextRequest) {
     const operation = String(body?.operation || '');
 
     if (operation === 'invite') {
+      const normalizedRole = normalizeTeamRole(String(body.role || 'PRODUCT_MANAGER'));
+      const defaults = SELLER_TEAM_ROLE_PERMISSIONS[normalizedRole];
       await manageSellerTeamForActor(identity.userId, {
         operation: 'invite',
         memberEmail: String(body.memberEmail || ''),
-        role: body.role === 'BUSINESS_ADMIN' ? 'BUSINESS_ADMIN' : 'TEAM_MEMBER',
+        role: normalizedRole,
         permissions: {
-          canManageListings: Boolean(body.permissions?.canManageListings ?? true),
-          canManageOrders: Boolean(body.permissions?.canManageOrders ?? true),
-          canViewAnalytics: Boolean(body.permissions?.canViewAnalytics ?? true),
-          canManageBilling: Boolean(body.permissions?.canManageBilling ?? false),
-          canManageTeam: Boolean(body.permissions?.canManageTeam ?? false),
+          canManageListings: Boolean(body.permissions?.canManageListings ?? defaults.canManageListings),
+          canManageOrders: Boolean(body.permissions?.canManageOrders ?? defaults.canManageOrders),
+          canViewAnalytics: Boolean(body.permissions?.canViewAnalytics ?? defaults.canViewAnalytics),
+          canManageBilling: Boolean(body.permissions?.canManageBilling ?? defaults.canManageBilling),
+          canManageTeam: Boolean(body.permissions?.canManageTeam ?? defaults.canManageTeam),
         },
       });
     } else if (operation === 'revoke') {

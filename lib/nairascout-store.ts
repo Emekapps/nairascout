@@ -8,27 +8,54 @@ import {
   validateAncestryRelationship,
 } from './commission-engine';
 import {
+  ALL_PLATFORM_ADMIN_ROLES,
   AccountStatus,
+  ActiveRestrictionDTO,
   AdminRole,
   AuthorizationError,
+  CapabilityCode,
+  MAX_SELLER_TEAM_SEATS,
   PublicScoutProfileDTO,
+  RestrictionScope,
+  SELLER_TEAM_ROLE_PERMISSIONS,
   SellerStatus,
+  SellerTeamRole,
   SubscriptionPlan,
+  SubscriptionStatus,
   UserAuthContext,
   VerificationStatus,
+  assertAccountOperational,
   assertActiveAccount,
   assertAdminRole,
   assertCanManageSellerDrafts,
   assertCanManageSellerTeam,
   assertCanParticipateAsScout,
   assertCanPublishListing,
+  assertCanReviewVerification,
+  assertCapabilityNotRestricted,
+  assertIndependentAppealsOfficer,
+  assertMakerCheckerDistinct,
+  assertReferralBatchValid,
+  normalizeAdminRole,
+  normalizeTeamRole,
   toPublicScoutProfileDTO,
 } from './auth/rbac';
+import {
+  InvalidTransitionError,
+  normalizeAccountStatus,
+  normalizeSellerStatus,
+  normalizeSubscriptionStatus,
+  normalizeVerificationStatus,
+  transitions,
+} from './auth/transitions';
 import { loadDbAuthContext, SupabaseSessionIdentity } from './auth/session';
 import { getDb, isPostgresConfigured, NairaScoutDb, requireDb } from './db';
 import {
   abuseReports,
   auditLogs,
+  capabilityRestrictions,
+  governanceAppeals,
+  makerCheckerRequests,
   platformAdminRoles,
   referralAncestry,
   scoutProfiles,
@@ -95,7 +122,7 @@ export interface SellerProfileRecord {
   businessContactPhone: string | null;
   sellerStatus: SellerStatus;
   subscriptionPlan: SubscriptionPlan;
-  subscriptionStatus: 'ACTIVE' | 'EXPIRED' | 'CANCELLED';
+  subscriptionStatus: SubscriptionStatus;
   termsAcceptedAt: string;
   createdAt: string;
 }
@@ -104,12 +131,70 @@ export interface SellerTeamMemberRecord {
   id: string;
   sellerProfileId: string;
   userId: string;
-  role: 'BUSINESS_OWNER' | 'BUSINESS_ADMIN' | 'TEAM_MEMBER';
+  role: SellerTeamRole;
   permissions: SellerTeamPermissions;
   status: 'INVITED' | 'ACTIVE' | 'REVOKED';
   invitedBy: string | null;
   createdAt: string;
   revokedAt: string | null;
+}
+
+export type MakerCheckerActionType =
+  | 'COMMISSION_ADJUSTMENT'
+  | 'WALLET_CORRECTION'
+  | 'EXCEPTIONAL_PAYOUT'
+  | 'REFUND_EXCEPTION'
+  | 'ROLE_ASSIGNMENT'
+  | 'ANCESTRY_OVERRIDE'
+  | 'CRITICAL_CONFIG';
+
+export interface MakerCheckerRequestDTO {
+  id: string;
+  actionType: MakerCheckerActionType;
+  targetUserId: string;
+  targetHandle: string;
+  targetEntityId: string | null;
+  payload: Record<string, unknown>;
+  reason: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXECUTED';
+  makerId: string;
+  makerHandle: string;
+  checkerId: string | null;
+  checkerHandle: string | null;
+  checkerNotes: string | null;
+  createdAt: string;
+  decidedAt: string | null;
+}
+
+export type AppealTargetType = 'VERIFICATION' | 'RESTRICTION' | 'SUSPENSION' | 'DISPUTE';
+
+export interface GovernanceAppealDTO {
+  id: string;
+  appellantUserId: string;
+  appellantHandle: string;
+  targetType: AppealTargetType;
+  targetRecordId: string;
+  originalReviewerId: string | null;
+  originalReviewerHandle: string | null;
+  appealReason: string;
+  evidencePaths: string[];
+  status: 'OPEN' | 'UNDER_REVIEW' | 'UPHELD' | 'OVERTURNED';
+  appealsOfficerId: string | null;
+  appealsOfficerHandle: string | null;
+  decisionNotes: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export interface ClosureAssessmentDTO {
+  openBuyerOrdersCount: number;
+  openSellerOrdersCount: number;
+  disputedOrdersCount: number;
+  activeListingsCount: number;
+  pendingWalletKobo: number;
+  availableWalletKobo: number;
+  canCloseFullAccount: boolean;
+  blockingReason: string | null;
 }
 
 export interface VerificationRecord {
@@ -339,6 +424,9 @@ export interface ActiveScoutDTO {
   >;
   adminRole: AdminRole | null;
   sellerPlan: SellerPlanId;
+  activeRestrictions: ActiveRestrictionDTO[];
+  governanceAppeals: GovernanceAppealDTO[];
+  closureAssessment: ClosureAssessmentDTO;
 }
 
 export interface NairaScoutSnapshot {
@@ -441,8 +529,12 @@ async function computeWalletFromDb(
     else if (state.status === 'Reversed') reversedKobo += state.amountKobo;
   }
 
-  const kycOk = verifRows.some((v) => v.category === 'IDENTITY' && v.status === 'APPROVED');
-  const bankOk = verifRows.some((v) => v.category === 'PAYOUT_BANK' && v.status === 'APPROVED');
+  const kycOk = verifRows.some(
+    (v) => v.category === 'IDENTITY' && normalizeVerificationStatus(v.status) === 'VERIFIED'
+  );
+  const bankOk = verifRows.some(
+    (v) => v.category === 'PAYOUT_BANK' && normalizeVerificationStatus(v.status) === 'VERIFIED'
+  );
   const minimumPayoutKobo = 500000;
 
   return {
@@ -688,7 +780,7 @@ export async function ensureUserProvisionedInDb(
     await tx.insert(verificationRecords).values({
       userId: identity.userId,
       category: 'CONTACT',
-      status: 'APPROVED',
+      status: 'VERIFIED',
       evidencePaths: [],
       reviewerNotes: 'Verified via Supabase Auth',
       submittedAt: new Date(),
@@ -787,8 +879,8 @@ export async function getNairaScoutSnapshot(
       (v) => v.sellerProfileId === sellerProfileId && v.category === 'SELLER'
     );
     return {
-      hasActiveSellerBadge: sp?.sellerStatus === 'ACTIVE',
-      isSellerVerified: sellerVerif?.status === 'APPROVED',
+      hasActiveSellerBadge: normalizeSellerStatus(sp?.sellerStatus) === 'ACTIVE',
+      isSellerVerified: normalizeVerificationStatus(sellerVerif?.status) === 'VERIFIED',
     };
   };
 
@@ -912,7 +1004,7 @@ export async function getNairaScoutSnapshot(
       userId: v.userId,
       sellerProfileId: v.sellerProfileId,
       category: v.category as VerificationCategory,
-      status: v.status as VerificationStatus,
+      status: normalizeVerificationStatus(v.status),
       evidencePaths: v.evidencePaths,
       reviewerNotes: v.reviewerNotes,
       reviewedBy: v.reviewedBy,
@@ -933,9 +1025,9 @@ export async function getNairaScoutSnapshot(
         businessAddress: sellerProfileRow.businessAddress,
         businessContactEmail: sellerProfileRow.businessContactEmail,
         businessContactPhone: sellerProfileRow.businessContactPhone,
-        sellerStatus: sellerProfileRow.sellerStatus as SellerStatus,
+        sellerStatus: normalizeSellerStatus(sellerProfileRow.sellerStatus),
         subscriptionPlan: sellerProfileRow.subscriptionPlan as SubscriptionPlan,
-        subscriptionStatus: sellerProfileRow.subscriptionStatus,
+        subscriptionStatus: normalizeSubscriptionStatus(sellerProfileRow.subscriptionStatus),
         termsAcceptedAt: sellerProfileRow.termsAcceptedAt.toISOString(),
         createdAt: sellerProfileRow.createdAt.toISOString(),
       }
@@ -987,7 +1079,7 @@ export async function getNairaScoutSnapshot(
       id: m.id,
       sellerProfileId: m.sellerProfileId,
       userId: m.userId,
-      role: m.role,
+      role: normalizeTeamRole(m.role),
       permissions: m.permissions,
       status: m.status,
       invitedBy: m.invitedBy,
@@ -998,9 +1090,81 @@ export async function getNairaScoutSnapshot(
       email: userById.get(m.userId)?.email || '',
     }));
 
-  const kycVerified = myVerifs.some((v) => v.category === 'IDENTITY' && v.status === 'APPROVED');
-  const bankVerified = myVerifs.some((v) => v.category === 'PAYOUT_BANK' && v.status === 'APPROVED');
+  const kycVerified = myVerifs.some((v) => v.category === 'IDENTITY' && v.status === 'VERIFIED');
+  const bankVerified = myVerifs.some((v) => v.category === 'PAYOUT_BANK' && v.status === 'VERIFIED');
   const payoutBankRec = myVerifs.find((v) => v.category === 'PAYOUT_BANK');
+
+  let myAppeals: GovernanceAppealDTO[] = [];
+  try {
+    const appealRows = await db
+      .select()
+      .from(governanceAppeals)
+      .where(eq(governanceAppeals.appellantUserId, viewerUserId))
+      .orderBy(desc(governanceAppeals.createdAt));
+    myAppeals = appealRows.map((a) => ({
+      id: a.id,
+      appellantUserId: a.appellantUserId,
+      appellantHandle: viewerScout.username,
+      targetType: a.targetType as AppealTargetType,
+      targetRecordId: a.targetRecordId,
+      originalReviewerId: a.originalReviewerId,
+      originalReviewerHandle: a.originalReviewerId
+        ? scoutByUserId.get(a.originalReviewerId)?.username || 'officer'
+        : null,
+      appealReason: a.appealReason,
+      evidencePaths: a.evidencePaths,
+      status: a.status as GovernanceAppealDTO['status'],
+      appealsOfficerId: a.appealsOfficerId,
+      appealsOfficerHandle: a.appealsOfficerId
+        ? scoutByUserId.get(a.appealsOfficerId)?.username || 'appeals_officer'
+        : null,
+      decisionNotes: a.decisionNotes,
+      createdAt: a.createdAt.toISOString(),
+      resolvedAt: a.resolvedAt?.toISOString() ?? null,
+    }));
+  } catch {
+    myAppeals = [];
+  }
+
+  const viewerWallet = await computeWalletFromDb(
+    db,
+    viewerUserId,
+    allVerifs.filter((v) => v.userId === viewerUserId)
+  );
+
+  // Quick obligation pre-check (orders queried cleanly below as well)
+  const viewerOrdersForAssessment = await db
+    .select()
+    .from(marketplaceOrders)
+    .where(
+      or(
+        eq(marketplaceOrders.buyerScoutId, viewerUserId),
+        eq(marketplaceOrders.sellerScoutId, viewerUserId)
+      )
+    );
+  const openBuyerOrdersCount = viewerOrdersForAssessment.filter(
+    (o) =>
+      o.buyerScoutId === viewerUserId &&
+      o.fulfilmentStatus !== 'Delivered' &&
+      o.fulfilmentStatus !== 'Refunded'
+  ).length;
+  const openSellerOrdersCount = viewerOrdersForAssessment.filter(
+    (o) =>
+      o.sellerScoutId === viewerUserId &&
+      o.fulfilmentStatus !== 'Delivered' &&
+      o.fulfilmentStatus !== 'Refunded'
+  ).length;
+  const disputedOrdersCount = viewerOrdersForAssessment.filter(
+    (o) => o.fulfilmentStatus === 'Disputed'
+  ).length;
+  const activePublishedCount = sellerListings.filter((l) => l.status === 'PUBLISHED').length;
+
+  let closureBlockingReason: string | null = null;
+  if (disputedOrdersCount > 0) {
+    closureBlockingReason = `${disputedOrdersCount} disputed order(s) must reach resolution before closing your full account.`;
+  } else if (openSellerOrdersCount > 0) {
+    closureBlockingReason = `${openSellerOrdersCount} open Seller order(s) must be delivered or refunded before full account closure.`;
+  }
 
   const activeScout: ActiveScoutDTO = {
     id: viewerUser.id,
@@ -1010,7 +1174,7 @@ export async function getNairaScoutSnapshot(
     bio: viewerScout.bio,
     city: viewerScout.locationState || 'Lagos',
     preferredCategories: viewerScout.preferredCategories,
-    accountStatus: viewerUser.accountStatus as AccountStatus,
+    accountStatus: normalizeAccountStatus(viewerUser.accountStatus),
     restrictionReason: viewerUser.restrictionReason,
     invitePolicy: viewerScout.invitationPolicy as InvitationPolicy,
     muteReferrals: viewerScout.muteReferrals,
@@ -1022,11 +1186,23 @@ export async function getNairaScoutSnapshot(
     bankSummary: payoutBankRec?.reviewerNotes || (bankVerified ? 'Verified Naira Account' : 'Not submitted'),
     isSeller: Boolean(sellerProfile),
     sellerProfile,
-    sellerVerificationStatus: authCtx.seller?.sellerVerificationStatus ?? 'NOT_SUBMITTED',
+    sellerVerificationStatus: authCtx.seller?.sellerVerificationStatus ?? 'NOT_STARTED',
     verifications: myVerifs,
     teamMembers,
     adminRole: authCtx.adminRole ?? null,
     sellerPlan: sellerProfile ? planEnumToId(sellerProfile.subscriptionPlan) : 'starter',
+    activeRestrictions: authCtx.activeRestrictions,
+    governanceAppeals: myAppeals,
+    closureAssessment: {
+      openBuyerOrdersCount,
+      openSellerOrdersCount,
+      disputedOrdersCount,
+      activeListingsCount: activePublishedCount,
+      pendingWalletKobo: viewerWallet.pendingKobo,
+      availableWalletKobo: viewerWallet.availableKobo,
+      canCloseFullAccount: closureBlockingReason === null,
+      blockingReason: closureBlockingReason,
+    },
   };
 
   // Blocks
@@ -1228,8 +1404,10 @@ export async function getNairaScoutSnapshot(
         avatarUrl: s.avatarUrl,
         bio: s.bio,
         locationState: s.locationState,
-        sellerStatus: (seller?.sellerStatus as SellerStatus | undefined) ?? null,
-        sellerVerificationStatus: (sellerVerif?.status as VerificationStatus | undefined) ?? null,
+        sellerStatus: seller ? normalizeSellerStatus(seller.sellerStatus) : null,
+        sellerVerificationStatus: sellerVerif
+          ? normalizeVerificationStatus(sellerVerif.status)
+          : null,
         workingWithCount,
         totalSoldUnits,
       });
@@ -1268,11 +1446,7 @@ export async function getNairaScoutSnapshot(
     sentReferrals,
     orders: visibleOrders,
     ledgerEntries,
-    wallet: await computeWalletFromDb(
-      db,
-      viewerUserId,
-      allVerifs.filter((v) => v.userId === viewerUserId)
-    ),
+    wallet: viewerWallet,
     upstreamAncestry: await buildAncestryChainFromDb(db, viewerUserId),
     downstreamGenerations: await computeDownstreamFromDb(db, viewerUserId),
     sellerStats: {
@@ -1324,7 +1498,8 @@ export async function createOrderFromCheckout(
   await ensureTablesReady(db);
 
   const ctx = await loadDbAuthContext(actorUserId);
-  assertActiveAccount(ctx);
+  assertAccountOperational(ctx);
+  assertCapabilityNotRestricted(ctx, 'INITIATE_PURCHASE');
 
   const buyerRows = await db
     .select()
@@ -1581,19 +1756,27 @@ export async function advanceOrderStatus(
   });
 }
 
-export async function createReferralEventForActor(
+export async function createReferralBatchForActor(
   actorUserId: string,
   input: {
     productListingId: string;
-    recipientScoutId: string;
+    recipientScoutIds: string[];
     note: string;
   }
-): Promise<ProductReferralEvent> {
+): Promise<ProductReferralEvent[]> {
   const db = requireDb();
   await ensureTablesReady(db);
 
   const ctx = await loadDbAuthContext(actorUserId);
   assertCanParticipateAsScout(ctx);
+
+  // Enforce 1..20 batch boundary upfront before touching DB
+  const requestedIds = assertReferralBatchValid(actorUserId, input.recipientScoutIds);
+  for (const rid of requestedIds) {
+    if (!isUuid(rid)) {
+      throw new AuthorizationError('Recipient Scout not found.', 404, 'RECIPIENT_NOT_FOUND');
+    }
+  }
 
   const listingRows = await db
     .select()
@@ -1610,131 +1793,156 @@ export async function createReferralEventForActor(
     throw new AuthorizationError('Published product listing not found.', 404, 'LISTING_NOT_FOUND');
   }
 
-  if (!isUuid(input.recipientScoutId)) {
-    throw new AuthorizationError('Recipient Scout not found.', 404, 'RECIPIENT_NOT_FOUND');
-  }
-
   const scoutRows = await db
     .select()
     .from(scoutProfiles)
-    .where(inArray(scoutProfiles.userId, [actorUserId, input.recipientScoutId]));
+    .where(inArray(scoutProfiles.userId, [actorUserId, ...requestedIds]));
   const sender = scoutRows.find((s) => s.userId === actorUserId);
-  const recipient = scoutRows.find((s) => s.userId === input.recipientScoutId);
+  if (!sender) {
+    throw new AuthorizationError('Sender Scout profile not found.', 404, 'SENDER_NOT_FOUND');
+  }
 
-  const recipientUserRows = await db
+  const recipientUsers = await db
     .select()
     .from(users)
-    .where(eq(users.id, input.recipientScoutId))
-    .limit(1);
-  const recipientUser = recipientUserRows[0];
-
-  if (!sender || !recipient || !recipientUser || recipientUser.accountStatus === 'CLOSED') {
-    throw new AuthorizationError('Recipient Scout not found.', 404, 'RECIPIENT_NOT_FOUND');
-  }
-  if (recipient.userId === sender.userId) {
-    throw new AuthorizationError('Self-referrals are prohibited.', 400, 'SELF_REFERRAL');
-  }
+    .where(inArray(users.id, requestedIds));
+  const recipientUserMap = new Map(recipientUsers.map((u) => [u.id, u]));
+  const recipientScoutMap = new Map(scoutRows.map((s) => [s.userId, s]));
 
   const blockRows = await db
     .select()
     .from(userBlocks)
-    .where(
-      or(
-        and(eq(userBlocks.blockerId, sender.userId), eq(userBlocks.blockedId, recipient.userId)),
-        and(eq(userBlocks.blockerId, recipient.userId), eq(userBlocks.blockedId, sender.userId))
-      )
-    )
-    .limit(1);
-  if (blockRows.length > 0) {
-    throw new AuthorizationError(
-      'Cannot send product referral due to a block between accounts.',
-      403,
-      'USER_BLOCKED'
-    );
+    .where(or(eq(userBlocks.blockerId, sender.userId), eq(userBlocks.blockedId, sender.userId)));
+  const blockedPairUserIds = new Set<string>();
+  for (const b of blockRows) {
+    blockedPairUserIds.add(b.blockerId === sender.userId ? b.blockedId : b.blockerId);
   }
-  if (recipient.muteReferrals) {
-    throw new AuthorizationError(
-      `@${recipient.username} has muted incoming product referrals.`,
-      403,
-      'REFERRALS_MUTED'
-    );
+
+  const mutedRecipientIds = new Set<string>();
+  for (const rid of requestedIds) {
+    const recUser = recipientUserMap.get(rid);
+    const recScout = recipientScoutMap.get(rid);
+    if (!recUser || !recScout || recUser.accountStatus === 'CLOSED') {
+      if (requestedIds.length === 1) {
+        throw new AuthorizationError('Recipient Scout not found.', 404, 'RECIPIENT_NOT_FOUND');
+      }
+      blockedPairUserIds.add(rid);
+    } else if (recScout.muteReferrals) {
+      mutedRecipientIds.add(rid);
+    }
   }
+
+  const validRecipientIds = assertReferralBatchValid(actorUserId, requestedIds, {
+    blockedPairUserIds,
+    mutedRecipientIds,
+  });
 
   const allAnc = await db.select().from(referralAncestry);
   const ancestryMap: Record<string, string | null> = {};
   for (const row of allAnc) ancestryMap[row.scoutUserId] = row.directReferrerId;
-  const ancestryCheck = validateAncestryRelationship(recipient.userId, sender.userId, ancestryMap);
 
-  const existingReverse = await db
+  const existingListingRefs = await db
     .select()
     .from(productReferralEvents)
     .where(
       and(
         eq(productReferralEvents.productListingId, product.id),
-        eq(productReferralEvents.senderScoutId, recipient.userId),
-        eq(productReferralEvents.recipientScoutId, sender.userId),
         eq(productReferralEvents.status, 'active')
       )
-    )
-    .limit(1);
-  if (existingReverse.length > 0 && !ancestryCheck.valid) {
-    throw new AuthorizationError('Circular product referral path rejected.', 400, 'CIRCULAR_PATH');
-  }
-
-  const pathSignature = `${sender.username}->${recipient.username}`;
-  const dup = await db
-    .select()
-    .from(productReferralEvents)
-    .where(
-      and(
-        eq(productReferralEvents.productListingId, product.id),
-        eq(productReferralEvents.ancestryPathSignature, pathSignature),
-        eq(productReferralEvents.status, 'active')
-      )
-    )
-    .limit(1);
-  if (dup[0]) {
-    throw new AuthorizationError(
-      `Active referral ${dup[0].id} already exists for @${recipient.username} on this listing.`,
-      409,
-      'DUPLICATE_REFERRAL'
     );
-  }
 
+  const createdEvents: ProductReferralEvent[] = [];
   const expiresAt = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
-  const [inserted] = await db
-    .insert(productReferralEvents)
-    .values({
-      productListingId: product.id,
-      senderScoutId: sender.userId,
-      recipientScoutId: recipient.userId,
-      note: input.note.trim() || `Recommended ${product.title} on NairaScout.`,
-      ancestryPathSignature: pathSignature,
-      status: 'active',
-      expiresAt,
-    })
-    .returning();
+  const noteText = input.note.trim() || `Recommended ${product.title} on NairaScout.`;
 
-  await db
-    .update(productListings)
-    .set({ referralShares: product.referralShares + 1 })
-    .where(eq(productListings.id, product.id));
+  await db.transaction(async (tx) => {
+    for (const rid of validRecipientIds) {
+      const recipient = recipientScoutMap.get(rid)!;
+      const ancestryCheck = validateAncestryRelationship(recipient.userId, sender.userId, ancestryMap);
+      const hasReverse = existingListingRefs.some(
+        (r) => r.senderScoutId === recipient.userId && r.recipientScoutId === sender.userId
+      );
+      if (hasReverse && !ancestryCheck.valid) {
+        if (validRecipientIds.length === 1) {
+          throw new AuthorizationError('Circular product referral path rejected.', 400, 'CIRCULAR_PATH');
+        }
+        continue;
+      }
 
-  return {
-    id: inserted.id,
-    productListingId: inserted.productListingId,
-    senderScoutId: sender.userId,
-    senderHandle: sender.username,
-    senderDisplayName: sender.displayName,
-    recipientScoutId: recipient.userId,
-    recipientHandle: recipient.username,
-    recipientDisplayName: recipient.displayName,
-    note: inserted.note,
-    ancestryPathSignature: inserted.ancestryPathSignature,
-    createdAt: inserted.createdAt.toISOString(),
-    expiresAt: inserted.expiresAt.toISOString(),
-    status: 'active',
-  };
+      const pathSignature = `${sender.username}->${recipient.username}`;
+      const dup = existingListingRefs.find((r) => r.ancestryPathSignature === pathSignature);
+      if (dup) {
+        if (validRecipientIds.length === 1) {
+          throw new AuthorizationError(
+            `Active referral ${dup.id} already exists for @${recipient.username} on this listing.`,
+            409,
+            'DUPLICATE_REFERRAL'
+          );
+        }
+        continue;
+      }
+
+      const [inserted] = await tx
+        .insert(productReferralEvents)
+        .values({
+          productListingId: product.id,
+          senderScoutId: sender.userId,
+          recipientScoutId: recipient.userId,
+          note: noteText,
+          ancestryPathSignature: pathSignature,
+          status: 'active',
+          expiresAt,
+        })
+        .returning();
+
+      createdEvents.push({
+        id: inserted.id,
+        productListingId: inserted.productListingId,
+        senderScoutId: sender.userId,
+        senderHandle: sender.username,
+        senderDisplayName: sender.displayName,
+        recipientScoutId: recipient.userId,
+        recipientHandle: recipient.username,
+        recipientDisplayName: recipient.displayName,
+        note: inserted.note,
+        ancestryPathSignature: inserted.ancestryPathSignature,
+        createdAt: inserted.createdAt.toISOString(),
+        expiresAt: inserted.expiresAt.toISOString(),
+        status: 'active',
+      });
+    }
+
+    if (createdEvents.length === 0) {
+      throw new AuthorizationError(
+        'No new referral cards could be created (duplicate active referrals or circular paths).',
+        409,
+        'DUPLICATE_REFERRAL'
+      );
+    }
+
+    await tx
+      .update(productListings)
+      .set({ referralShares: product.referralShares + createdEvents.length })
+      .where(eq(productListings.id, product.id));
+  });
+
+  return createdEvents;
+}
+
+export async function createReferralEventForActor(
+  actorUserId: string,
+  input: {
+    productListingId: string;
+    recipientScoutId: string;
+    note: string;
+  }
+): Promise<ProductReferralEvent> {
+  const events = await createReferralBatchForActor(actorUserId, {
+    productListingId: input.productListingId,
+    recipientScoutIds: input.recipientScoutId ? [input.recipientScoutId] : [],
+    note: input.note,
+  });
+  return events[0]!;
 }
 
 export async function inviteToScoutsListForActor(
@@ -2115,7 +2323,7 @@ export async function activateSellerOnboarding(
   const db = requireDb();
 
   const ctx = await loadDbAuthContext(actorUserId);
-  assertActiveAccount(ctx);
+  assertAccountOperational(ctx);
 
   if (!input.termsAccepted) {
     throw new AuthorizationError('You must accept the Seller Terms to proceed.', 400, 'TERMS_REQUIRED');
@@ -2144,7 +2352,7 @@ export async function activateSellerOnboarding(
         businessAddress: input.businessAddress?.trim() || null,
         businessContactEmail: input.businessContactEmail?.trim() || ctx.email,
         businessContactPhone: input.businessContactPhone?.trim() || null,
-        sellerStatus: 'ONBOARDING',
+        sellerStatus: 'ACTIVATION_PENDING',
         subscriptionPlan: planIdToEnum(input.planId),
         subscriptionStatus: 'ACTIVE',
         termsAcceptedAt: now,
@@ -2155,13 +2363,7 @@ export async function activateSellerOnboarding(
       sellerProfileId: seller.id,
       userId: actorUserId,
       role: 'BUSINESS_OWNER',
-      permissions: {
-        canManageListings: true,
-        canManageOrders: true,
-        canViewAnalytics: true,
-        canManageBilling: true,
-        canManageTeam: true,
-      },
+      permissions: SELLER_TEAM_ROLE_PERMISSIONS.BUSINESS_OWNER,
       status: 'ACTIVE',
     });
 
@@ -2169,7 +2371,7 @@ export async function activateSellerOnboarding(
       userId: actorUserId,
       sellerProfileId: seller.id,
       category: 'SELLER',
-      status: 'PENDING',
+      status: 'SUBMITTED',
       evidencePaths: cleanPaths,
       submittedAt: now,
     });
@@ -2177,7 +2379,7 @@ export async function activateSellerOnboarding(
     await tx.insert(verificationRecords).values({
       userId: actorUserId,
       category: 'IDENTITY',
-      status: 'PENDING',
+      status: 'SUBMITTED',
       evidencePaths: cleanPaths,
       submittedAt: now,
     });
@@ -2187,7 +2389,7 @@ export async function activateSellerOnboarding(
         userId: actorUserId,
         sellerProfileId: seller.id,
         category: 'BUSINESS',
-        status: 'PENDING',
+        status: 'SUBMITTED',
         evidencePaths: cleanPaths,
         submittedAt: now,
       });
@@ -2201,7 +2403,7 @@ export async function activateSellerOnboarding(
       entityId: seller.id,
       newValue: {
         sellerType: seller.sellerType,
-        sellerStatus: 'ONBOARDING',
+        sellerStatus: 'ACTIVATION_PENDING',
         subscriptionPlan: seller.subscriptionPlan,
       },
     });
@@ -2217,9 +2419,9 @@ export async function activateSellerOnboarding(
       businessAddress: seller.businessAddress,
       businessContactEmail: seller.businessContactEmail,
       businessContactPhone: seller.businessContactPhone,
-      sellerStatus: seller.sellerStatus as SellerStatus,
+      sellerStatus: normalizeSellerStatus(seller.sellerStatus),
       subscriptionPlan: seller.subscriptionPlan as SubscriptionPlan,
-      subscriptionStatus: seller.subscriptionStatus,
+      subscriptionStatus: normalizeSubscriptionStatus(seller.subscriptionStatus),
       termsAcceptedAt: seller.termsAcceptedAt.toISOString(),
       createdAt: seller.createdAt.toISOString(),
     };
@@ -2300,8 +2502,8 @@ export async function createSellerDraftListing(
     sellerProfileId: inserted.sellerProfileId,
     sellerName: inserted.sellerName,
     sellerCity: inserted.sellerCity,
-    hasActiveSellerBadge: seller.sellerStatus === 'ACTIVE',
-    isSellerVerified: ctx!.seller!.sellerVerificationStatus === 'APPROVED',
+    hasActiveSellerBadge: normalizeSellerStatus(seller.sellerStatus) === 'ACTIVE',
+    isSellerVerified: normalizeVerificationStatus(ctx!.seller!.sellerVerificationStatus) === 'VERIFIED',
     status: 'DRAFT',
     imageSeed: inserted.imageSeed,
     imageUrl: inserted.imageUrl,
@@ -2396,7 +2598,7 @@ export async function upgradeSellerPlanForActor(actorUserId: string, planId: Sel
   const db = requireDb();
 
   const ctx = await loadDbAuthContext(actorUserId);
-  assertActiveAccount(ctx);
+  assertAccountOperational(ctx);
   if (!ctx.seller) {
     throw new AuthorizationError('Activate Seller capabilities first.', 403, 'NOT_A_SELLER');
   }
@@ -2413,10 +2615,26 @@ export async function upgradeSellerPlanForActor(actorUserId: string, planId: Sel
       .limit(1);
     const seller = rows[0]!;
     const prevPlan = seller.subscriptionPlan;
+    const prevSubStatus = normalizeSubscriptionStatus(seller.subscriptionStatus);
+    if (prevSubStatus !== 'ACTIVE') {
+      try {
+        transitions.subscription(prevSubStatus, 'ACTIVE');
+      } catch (err) {
+        if (err instanceof InvalidTransitionError) {
+          throw new AuthorizationError(err.message, 409, 'INVALID_STATUS_TRANSITION');
+        }
+        throw err;
+      }
+    }
 
     await tx
       .update(sellerProfiles)
-      .set({ subscriptionPlan: nextPlan, subscriptionStatus: 'ACTIVE', updatedAt: new Date() })
+      .set({
+        subscriptionPlan: nextPlan,
+        subscriptionStatus: 'ACTIVE',
+        subscriptionExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        updatedAt: new Date(),
+      })
       .where(eq(sellerProfiles.id, seller.id));
 
     await tx.insert(auditLogs).values({
@@ -2425,8 +2643,8 @@ export async function upgradeSellerPlanForActor(actorUserId: string, planId: Sel
       action: 'SELLER_SUBSCRIPTION_UPDATED',
       entityType: 'seller_profiles',
       entityId: seller.id,
-      previousValue: { subscriptionPlan: prevPlan },
-      newValue: { subscriptionPlan: nextPlan },
+      previousValue: { subscriptionPlan: prevPlan, subscriptionStatus: prevSubStatus },
+      newValue: { subscriptionPlan: nextPlan, subscriptionStatus: 'ACTIVE' },
     });
   });
 }
@@ -2437,8 +2655,8 @@ export async function manageSellerTeamForActor(
     | {
         operation: 'invite';
         memberEmail: string;
-        role: 'BUSINESS_ADMIN' | 'TEAM_MEMBER';
-        permissions: SellerTeamPermissions;
+        role: SellerTeamRole;
+        permissions?: Partial<SellerTeamPermissions>;
       }
     | { operation: 'revoke'; memberId: string }
 ) {
@@ -2474,7 +2692,42 @@ export async function manageSellerTeamForActor(
       .update(sellerTeamMembers)
       .set({ status: 'REVOKED', revokedAt: new Date() })
       .where(eq(sellerTeamMembers.id, target.id));
+
+    await db.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: target.userId,
+      action: 'SELLER_TEAM_MEMBER_REVOKED',
+      entityType: 'seller_team_members',
+      entityId: target.id,
+      previousValue: { status: target.status, role: target.role },
+      newValue: { status: 'REVOKED' },
+    });
     return;
+  }
+
+  const normalizedRole = normalizeTeamRole(input.role);
+  if (normalizedRole === 'BUSINESS_OWNER') {
+    throw new AuthorizationError(
+      'Business ownership cannot be assigned through team invitations.',
+      403,
+      'OWNER_TRANSFER_RESTRICTED'
+    );
+  }
+
+  // Enforce Sprawl Plan Max 5 Team Seats (active non-revoked members excluding the primary owner)
+  const currentMembers = await db
+    .select()
+    .from(sellerTeamMembers)
+    .where(eq(sellerTeamMembers.sellerProfileId, sellerId));
+  const delegatedSeatsUsed = currentMembers.filter(
+    (m) => m.status !== 'REVOKED' && m.role !== 'BUSINESS_OWNER'
+  ).length;
+  if (delegatedSeatsUsed >= MAX_SELLER_TEAM_SEATS) {
+    throw new AuthorizationError(
+      `Sprawl plan seat cap (${MAX_SELLER_TEAM_SEATS} team seats) reached. Revoke an inactive seat before inviting another member.`,
+      403,
+      'TEAM_SEAT_LIMIT_REACHED'
+    );
   }
 
   const userRows = await db
@@ -2491,33 +2744,49 @@ export async function manageSellerTeamForActor(
     );
   }
 
-  const existing = await db
-    .select()
-    .from(sellerTeamMembers)
-    .where(
-      and(
-        eq(sellerTeamMembers.sellerProfileId, sellerId),
-        eq(sellerTeamMembers.userId, memberUser.id),
-        eq(sellerTeamMembers.status, 'ACTIVE')
-      )
-    )
-    .limit(1);
-  if (existing.length > 0) {
+  const existing = currentMembers.find(
+    (m) => m.userId === memberUser.id && m.status === 'ACTIVE'
+  );
+  if (existing) {
     throw new AuthorizationError('User is already an active team member.', 409, 'ALREADY_MEMBER');
   }
 
-  await db.insert(sellerTeamMembers).values({
-    sellerProfileId: sellerId,
-    userId: memberUser.id,
-    role: input.role,
-    permissions: input.permissions,
-    status: 'ACTIVE',
-    invitedBy: actorUserId,
+  const defaultPerms = SELLER_TEAM_ROLE_PERMISSIONS[normalizedRole];
+  const mergedPerms: SellerTeamPermissions = {
+    canManageListings: input.permissions?.canManageListings ?? defaultPerms.canManageListings,
+    canManageOrders: input.permissions?.canManageOrders ?? defaultPerms.canManageOrders,
+    canViewAnalytics: input.permissions?.canViewAnalytics ?? defaultPerms.canViewAnalytics,
+    canManageBilling:
+      normalizedRole === 'BUSINESS_ADMIN'
+        ? false
+        : (input.permissions?.canManageBilling ?? defaultPerms.canManageBilling),
+    canManageTeam: input.permissions?.canManageTeam ?? defaultPerms.canManageTeam,
+  };
+
+  const [created] = await db
+    .insert(sellerTeamMembers)
+    .values({
+      sellerProfileId: sellerId,
+      userId: memberUser.id,
+      role: normalizedRole,
+      permissions: mergedPerms,
+      status: 'ACTIVE',
+      invitedBy: actorUserId,
+    })
+    .returning();
+
+  await db.insert(auditLogs).values({
+    actorId: actorUserId,
+    affectedUserId: memberUser.id,
+    action: 'SELLER_TEAM_MEMBER_ADDED',
+    entityType: 'seller_team_members',
+    entityId: created.id,
+    newValue: { role: normalizedRole, permissions: mergedPerms },
   });
 }
 
 // ============================================================================
-// SETTINGS, PRIVACY, VERIFICATION SUBMISSIONS & VOLUNTARY CLOSURE
+// SETTINGS, PRIVACY, VERIFICATION SUBMISSIONS, APPEALS & TWO-TRACK CLOSURE
 // ============================================================================
 
 export async function updateProfileAndPrivacy(
@@ -2536,7 +2805,7 @@ export async function updateProfileAndPrivacy(
   const db = requireDb();
 
   const ctx = await loadDbAuthContext(actorUserId);
-  assertActiveAccount(ctx);
+  assertAccountOperational(ctx);
 
   const rows = await db
     .select()
@@ -2596,7 +2865,7 @@ export async function submitVerificationEvidence(
   const db = requireDb();
 
   const ctx = await loadDbAuthContext(actorUserId);
-  assertActiveAccount(ctx);
+  assertAccountOperational(ctx);
 
   const sellerId =
     input.category === 'SELLER' || input.category === 'BUSINESS'
@@ -2621,10 +2890,22 @@ export async function submitVerificationEvidence(
     .limit(1);
 
   if (existing[0]) {
+    const prevNormalized = normalizeVerificationStatus(existing[0].status);
+    if (prevNormalized !== 'SUBMITTED') {
+      try {
+        transitions.verification(prevNormalized, 'SUBMITTED');
+      } catch (err) {
+        if (err instanceof InvalidTransitionError) {
+          throw new AuthorizationError(err.message, 409, 'INVALID_STATUS_TRANSITION');
+        }
+        throw err;
+      }
+    }
+
     const [updated] = await db
       .update(verificationRecords)
       .set({
-        status: 'PENDING',
+        status: 'SUBMITTED',
         evidencePaths: cleanPaths,
         submittedAt: now,
         reviewerNotes:
@@ -2641,7 +2922,7 @@ export async function submitVerificationEvidence(
       userId: updated.userId,
       sellerProfileId: updated.sellerProfileId,
       category: updated.category as VerificationCategory,
-      status: updated.status as VerificationStatus,
+      status: normalizeVerificationStatus(updated.status),
       evidencePaths: updated.evidencePaths,
       reviewerNotes: updated.reviewerNotes,
       reviewedBy: updated.reviewedBy,
@@ -2656,7 +2937,7 @@ export async function submitVerificationEvidence(
       userId: actorUserId,
       sellerProfileId: sellerId,
       category: input.category,
-      status: 'PENDING',
+      status: 'SUBMITTED',
       evidencePaths: cleanPaths,
       reviewerNotes:
         input.category === 'PAYOUT_BANK' && input.bankSummary?.trim()
@@ -2671,7 +2952,7 @@ export async function submitVerificationEvidence(
     userId: created.userId,
     sellerProfileId: created.sellerProfileId,
     category: created.category as VerificationCategory,
-    status: created.status as VerificationStatus,
+    status: normalizeVerificationStatus(created.status),
     evidencePaths: created.evidencePaths,
     reviewerNotes: created.reviewerNotes,
     reviewedBy: created.reviewedBy,
@@ -2680,19 +2961,212 @@ export async function submitVerificationEvidence(
   };
 }
 
+/**
+ * Two-Track Closure Track 1: Close Seller Capabilities Only.
+ * Preserves Scout account (`users.accountStatus = 'ACTIVE'`), Scouts List,
+ * permanent referral ancestry, and Scout referral wallet/commissions intact.
+ */
+export async function closeSellerCapabilityVoluntarily(actorUserId: string, reason?: string) {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAccountOperational(ctx);
+  if (!ctx.seller) {
+    throw new AuthorizationError('No Seller profile found on this account.', 404, 'NOT_A_SELLER');
+  }
+  if (ctx.seller.role !== 'BUSINESS_OWNER') {
+    throw new AuthorizationError(
+      'Only the Business Owner can close Seller capabilities.',
+      403,
+      'OWNER_REQUIRED'
+    );
+  }
+
+  const closureReason = reason?.trim() || 'Voluntary Seller capability closure';
+
+  await db.transaction(async (tx) => {
+    const sellerRows = await tx
+      .select()
+      .from(sellerProfiles)
+      .where(eq(sellerProfiles.id, ctx.seller!.sellerProfileId))
+      .limit(1);
+    const seller = sellerRows[0];
+    if (!seller) {
+      throw new AuthorizationError('Seller profile not found.', 404, 'NOT_A_SELLER');
+    }
+
+    const prevStatus = normalizeSellerStatus(seller.sellerStatus);
+    try {
+      transitions.seller(prevStatus, 'CLOSURE_PENDING');
+      transitions.seller('CLOSURE_PENDING', 'CLOSED');
+    } catch (err) {
+      if (err instanceof InvalidTransitionError) {
+        throw new AuthorizationError(err.message, 409, 'INVALID_STATUS_TRANSITION');
+      }
+      throw err;
+    }
+
+    const sellerOrders = await tx
+      .select()
+      .from(marketplaceOrders)
+      .where(eq(marketplaceOrders.sellerScoutId, seller.ownerUserId));
+    const unresolvedOrders = sellerOrders.filter(
+      (o) => o.fulfilmentStatus !== 'Delivered' && o.fulfilmentStatus !== 'Refunded'
+    );
+    if (unresolvedOrders.length > 0) {
+      throw new AuthorizationError(
+        `Cannot close Seller capabilities while ${unresolvedOrders.length} Seller order(s) remain unfulfilled or disputed.`,
+        409,
+        'OPEN_SELLER_OBLIGATIONS'
+      );
+    }
+
+    await tx
+      .update(sellerProfiles)
+      .set({ sellerStatus: 'CLOSURE_PENDING', updatedAt: new Date() })
+      .where(eq(sellerProfiles.id, seller.id));
+
+    await tx
+      .update(productListings)
+      .set({ status: 'EXPIRED' })
+      .where(
+        and(
+          eq(productListings.sellerProfileId, seller.id),
+          inArray(productListings.status, ['PUBLISHED', 'DRAFT'])
+        )
+      );
+
+    await tx
+      .update(sellerProfiles)
+      .set({ sellerStatus: 'CLOSED', updatedAt: new Date() })
+      .where(eq(sellerProfiles.id, seller.id));
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: seller.ownerUserId,
+      action: 'SELLER_CAPABILITY_CLOSED',
+      entityType: 'seller_profiles',
+      entityId: seller.id,
+      previousValue: { sellerStatus: prevStatus },
+      newValue: {
+        sellerStatus: 'CLOSED',
+        scoutAccountPreserved: true,
+        listingsExpired: true,
+      },
+      reason: closureReason,
+    });
+
+    await tx.insert(platformNotifications).values({
+      userId: seller.ownerUserId,
+      category: 'trust',
+      title: 'Seller Capabilities Closed (Scout Account Active)',
+      body: 'Your Seller storefront and listings have been closed. Your Scout browsing, Scouts List, referrals, and wallet remain active.',
+    });
+  });
+}
+
+/**
+ * Two-Track Closure Track 2: Full NairaScout Account Closure.
+ * Assesses obligations -> transitions Account CLOSURE_PENDING -> CLOSED,
+ * closes any Seller capabilities, revokes sessions, while preserving users,
+ * referral_ancestry, product_referral_events, orders, and ledger records.
+ */
 export async function closeAccountVoluntarily(actorUserId: string, reason?: string) {
   const db = requireDb();
   await ensureTablesReady(db);
 
   const ctx = await loadDbAuthContext(actorUserId);
-  assertActiveAccount(ctx);
+  assertAccountOperational(ctx);
 
-  const closureReason = reason?.trim() || 'Voluntary account closure';
+  const closureReason = reason?.trim() || 'Voluntary full account closure';
 
   await db.transaction(async (tx) => {
     const userRows = await tx.select().from(users).where(eq(users.id, actorUserId)).limit(1);
-    const prevStatus = userRows[0]!.accountStatus;
+    const user = userRows[0];
+    if (!user) {
+      throw new AuthorizationError('User account not found.', 404, 'USER_NOT_FOUND');
+    }
 
+    const prevStatus = normalizeAccountStatus(user.accountStatus);
+    try {
+      transitions.account(prevStatus, 'CLOSURE_PENDING');
+      transitions.account('CLOSURE_PENDING', 'CLOSED');
+    } catch (err) {
+      if (err instanceof InvalidTransitionError) {
+        throw new AuthorizationError(err.message, 409, 'INVALID_STATUS_TRANSITION');
+      }
+      throw err;
+    }
+
+    const userOrders = await tx
+      .select()
+      .from(marketplaceOrders)
+      .where(
+        or(
+          eq(marketplaceOrders.buyerScoutId, actorUserId),
+          eq(marketplaceOrders.sellerScoutId, actorUserId)
+        )
+      );
+    const disputedOrders = userOrders.filter((o) => o.fulfilmentStatus === 'Disputed');
+    const openSellerOrders = userOrders.filter(
+      (o) =>
+        o.sellerScoutId === actorUserId &&
+        o.fulfilmentStatus !== 'Delivered' &&
+        o.fulfilmentStatus !== 'Refunded'
+    );
+    if (disputedOrders.length > 0 || openSellerOrders.length > 0) {
+      throw new AuthorizationError(
+        `Account closure paused at obligation check: resolve ${disputedOrders.length} disputed order(s) and ${openSellerOrders.length} open Seller order(s) first.`,
+        409,
+        'OPEN_OBLIGATIONS_EXIST'
+      );
+    }
+
+    // Step 1: Enter CLOSURE_PENDING
+    await tx
+      .update(users)
+      .set({
+        accountStatus: 'CLOSURE_PENDING',
+        restrictionReason: closureReason,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, actorUserId));
+
+    // Close owned Seller profile if not already closed
+    const ownedSellerRows = await tx
+      .select()
+      .from(sellerProfiles)
+      .where(eq(sellerProfiles.ownerUserId, actorUserId))
+      .limit(1);
+    if (ownedSellerRows[0]) {
+      const sellerNorm = normalizeSellerStatus(ownedSellerRows[0].sellerStatus);
+      if (sellerNorm !== 'CLOSED') {
+        await tx
+          .update(sellerProfiles)
+          .set({ sellerStatus: 'CLOSED', updatedAt: new Date() })
+          .where(eq(sellerProfiles.id, ownedSellerRows[0].id));
+      }
+    }
+
+    // Pause active/draft Seller listings without deleting any financial or referral rows
+    await tx
+      .update(productListings)
+      .set({ status: 'EXPIRED' })
+      .where(
+        and(
+          eq(productListings.sellerScoutId, actorUserId),
+          inArray(productListings.status, ['PUBLISHED', 'DRAFT'])
+        )
+      );
+
+    // Revoke active Seller team memberships
+    await tx
+      .update(sellerTeamMembers)
+      .set({ status: 'REVOKED', revokedAt: new Date() })
+      .where(eq(sellerTeamMembers.userId, actorUserId));
+
+    // Step 2: Finalize CLOSED while preserving users, referral_ancestry, events, orders, ledger
     await tx
       .update(users)
       .set({
@@ -2703,17 +3177,6 @@ export async function closeAccountVoluntarily(actorUserId: string, reason?: stri
       })
       .where(eq(users.id, actorUserId));
 
-    // Pause active Seller listings without deleting users, referral_ancestry, events, or ledger rows
-    await tx
-      .update(productListings)
-      .set({ status: 'EXPIRED' })
-      .where(
-        and(
-          eq(productListings.sellerScoutId, actorUserId),
-          eq(productListings.status, 'PUBLISHED')
-        )
-      );
-
     await tx.insert(auditLogs).values({
       actorId: actorUserId,
       affectedUserId: actorUserId,
@@ -2721,14 +3184,110 @@ export async function closeAccountVoluntarily(actorUserId: string, reason?: stri
       entityType: 'users',
       entityId: actorUserId,
       previousValue: { accountStatus: prevStatus },
-      newValue: { accountStatus: 'CLOSED', historicalRecordsPreserved: true },
+      newValue: {
+        accountStatus: 'CLOSURE_PENDING -> CLOSED',
+        historicalRecordsPreserved: true,
+      },
       reason: closureReason,
     });
   });
 }
 
+export async function submitGovernanceAppealForActor(
+  actorUserId: string,
+  input: {
+    targetType: AppealTargetType;
+    targetRecordId: string;
+    appealReason: string;
+    evidencePaths?: string[];
+  }
+): Promise<GovernanceAppealDTO> {
+  const db = requireDb();
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  if (!ctx || ctx.accountStatus === 'CLOSED') {
+    throw new AuthorizationError('Authentication required on a non-closed account.', 403, 'FORBIDDEN');
+  }
+  if (!input.appealReason.trim()) {
+    throw new AuthorizationError('Appeal reason is required.', 400, 'REASON_REQUIRED');
+  }
+  if (!isUuid(input.targetRecordId)) {
+    throw new AuthorizationError('Valid target record UUID is required.', 400, 'INVALID_TARGET');
+  }
+
+  let originalReviewerId: string | null = null;
+  if (input.targetType === 'VERIFICATION') {
+    const vRows = await db
+      .select()
+      .from(verificationRecords)
+      .where(eq(verificationRecords.id, input.targetRecordId))
+      .limit(1);
+    if (!vRows[0] || vRows[0].userId !== actorUserId) {
+      throw new AuthorizationError('Verification record not found for your account.', 404, 'NOT_FOUND');
+    }
+    originalReviewerId = vRows[0].reviewedBy;
+  } else if (input.targetType === 'RESTRICTION') {
+    const rRows = await db
+      .select()
+      .from(capabilityRestrictions)
+      .where(eq(capabilityRestrictions.id, input.targetRecordId))
+      .limit(1);
+    if (!rRows[0] || rRows[0].userId !== actorUserId) {
+      throw new AuthorizationError('Restriction record not found for your account.', 404, 'NOT_FOUND');
+    }
+    originalReviewerId = rRows[0].imposedBy;
+  }
+
+  const [created] = await db
+    .insert(governanceAppeals)
+    .values({
+      appellantUserId: actorUserId,
+      targetType: input.targetType,
+      targetRecordId: input.targetRecordId,
+      originalReviewerId,
+      appealReason: input.appealReason.trim(),
+      evidencePaths: Array.isArray(input.evidencePaths) ? input.evidencePaths : [],
+      status: 'OPEN',
+    })
+    .returning();
+
+  await db.insert(auditLogs).values({
+    actorId: actorUserId,
+    affectedUserId: actorUserId,
+    action: 'GOVERNANCE_APPEAL_SUBMITTED',
+    entityType: 'governance_appeals',
+    entityId: created.id,
+    newValue: { targetType: input.targetType, targetRecordId: input.targetRecordId },
+    reason: input.appealReason.trim(),
+  });
+
+  const scoutRows = await db
+    .select()
+    .from(scoutProfiles)
+    .where(eq(scoutProfiles.userId, actorUserId))
+    .limit(1);
+
+  return {
+    id: created.id,
+    appellantUserId: created.appellantUserId,
+    appellantHandle: scoutRows[0]?.username || 'scout',
+    targetType: created.targetType as AppealTargetType,
+    targetRecordId: created.targetRecordId,
+    originalReviewerId: created.originalReviewerId,
+    originalReviewerHandle: null,
+    appealReason: created.appealReason,
+    evidencePaths: created.evidencePaths,
+    status: 'OPEN',
+    appealsOfficerId: null,
+    appealsOfficerHandle: null,
+    decisionNotes: null,
+    createdAt: created.createdAt.toISOString(),
+    resolvedAt: null,
+  };
+}
+
 // ============================================================================
-// ADMIN GOVERNANCE & AUDIT LOGS (100% POSTGRESQL VIA DRIZZLE ORM)
+// ADMIN GOVERNANCE, MAKER-CHECKER & APPEALS CONSOLE (100% POSTGRESQL)
 // ============================================================================
 
 export async function getAdminConsoleSnapshot(actorUserId: string) {
@@ -2736,12 +3295,7 @@ export async function getAdminConsoleSnapshot(actorUserId: string) {
   await ensureTablesReady(db);
 
   const ctx = await loadDbAuthContext(actorUserId);
-  assertAdminRole(ctx, [
-    'VERIFICATION_OFFICER',
-    'TRUST_AND_SAFETY',
-    'FINANCE_OPS',
-    'SUPPORT_AGENT',
-  ]);
+  assertAdminRole(ctx, ALL_PLATFORM_ADMIN_ROLES);
 
   const allVerifs = await db
     .select()
@@ -2756,12 +3310,33 @@ export async function getAdminConsoleSnapshot(actorUserId: string) {
   const allAudit = await db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt));
   const allLedger = await db.select().from(commissionLedgerEntries);
 
+  let allRestrictions: Array<typeof capabilityRestrictions.$inferSelect> = [];
+  let allMakerChecker: Array<typeof makerCheckerRequests.$inferSelect> = [];
+  let allAppeals: Array<typeof governanceAppeals.$inferSelect> = [];
+
+  try {
+    allRestrictions = await db
+      .select()
+      .from(capabilityRestrictions)
+      .orderBy(desc(capabilityRestrictions.createdAt));
+    allMakerChecker = await db
+      .select()
+      .from(makerCheckerRequests)
+      .orderBy(desc(makerCheckerRequests.createdAt));
+    allAppeals = await db
+      .select()
+      .from(governanceAppeals)
+      .orderBy(desc(governanceAppeals.createdAt));
+  } catch {
+    // Graceful if Section 9 tables unavailable in test env
+  }
+
   const userMap = new Map(allUsers.map((u) => [u.id, u]));
   const scoutMap = new Map(allScouts.map((s) => [s.userId, s]));
   const sellerById = new Map(allSellers.map((s) => [s.id, s]));
   const sellerByOwner = new Map(allSellers.map((s) => [s.ownerUserId, s]));
   const ancestrySet = new Set(allAncestry.map((a) => a.scoutUserId));
-  const adminMap = new Map(allAdmins.map((a) => [a.userId, a.adminRole]));
+  const adminMap = new Map(allAdmins.map((a) => [a.userId, normalizeAdminRole(a.adminRole)]));
 
   const verificationQueue = allVerifs.map((v) => {
     const scout = scoutMap.get(v.userId);
@@ -2771,7 +3346,7 @@ export async function getAdminConsoleSnapshot(actorUserId: string) {
       userId: v.userId,
       sellerProfileId: v.sellerProfileId,
       category: v.category as VerificationCategory,
-      status: v.status as VerificationStatus,
+      status: normalizeVerificationStatus(v.status),
       evidencePaths: v.evidencePaths,
       reviewerNotes: v.reviewerNotes,
       reviewedBy: v.reviewedBy,
@@ -2782,7 +3357,8 @@ export async function getAdminConsoleSnapshot(actorUserId: string) {
       email: userMap.get(v.userId)?.email || '',
       sellerName: seller?.sellerName || null,
       sellerType: seller?.sellerType || null,
-      sellerStatus: (seller?.sellerStatus as SellerStatus | undefined) ?? null,
+      sellerStatus: seller ? normalizeSellerStatus(seller.sellerStatus) : null,
+      sellerOwnerUserId: seller?.ownerUserId ?? v.userId,
     };
   });
 
@@ -2795,23 +3371,78 @@ export async function getAdminConsoleSnapshot(actorUserId: string) {
       email: u.email,
       username: scout?.username || '',
       displayName: scout?.displayName || '',
-      accountStatus: u.accountStatus as AccountStatus,
+      accountStatus: normalizeAccountStatus(u.accountStatus),
       restrictionReason: u.restrictionReason,
       closedAt: u.closedAt?.toISOString() ?? null,
       sellerProfileId: seller?.id || null,
       sellerName: seller?.sellerName || null,
-      sellerStatus: (seller?.sellerStatus as SellerStatus | undefined) ?? null,
+      sellerStatus: seller ? normalizeSellerStatus(seller.sellerStatus) : null,
       subscriptionPlan: seller?.subscriptionPlan || null,
-      adminRole: (adminMap.get(u.id) as AdminRole | undefined) ?? null,
+      subscriptionStatus: seller ? normalizeSubscriptionStatus(seller.subscriptionStatus) : null,
+      adminRole: adminMap.get(u.id) ?? null,
       hasPermanentAncestry: ancestrySet.has(u.id),
       ledgerEntriesCount: ledgerCount,
     };
   });
 
   return {
+    adminUserId: actorUserId,
     adminRole: ctx!.adminRole ?? null,
     verifications: verificationQueue,
     users: managedUsers,
+    restrictions: allRestrictions.map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      userHandle: scoutMap.get(r.userId)?.username || 'user',
+      scope: r.scope as RestrictionScope,
+      capabilityCode: r.capabilityCode as CapabilityCode,
+      resourceId: r.resourceId,
+      reason: r.reason,
+      status: r.status as 'ACTIVE' | 'LIFTED',
+      imposedBy: r.imposedBy,
+      imposedByHandle: scoutMap.get(r.imposedBy)?.username || 'admin',
+      expiresAt: r.expiresAt?.toISOString() ?? null,
+      createdAt: r.createdAt.toISOString(),
+      liftedAt: r.liftedAt?.toISOString() ?? null,
+    })),
+    makerCheckerRequests: allMakerChecker.map((m) => ({
+      id: m.id,
+      actionType: m.actionType as MakerCheckerActionType,
+      targetUserId: m.targetUserId,
+      targetHandle: scoutMap.get(m.targetUserId)?.username || 'user',
+      targetEntityId: m.targetEntityId,
+      payload: m.payload,
+      reason: m.reason,
+      status: m.status as MakerCheckerRequestDTO['status'],
+      makerId: m.makerId,
+      makerHandle: scoutMap.get(m.makerId)?.username || 'maker',
+      checkerId: m.checkerId,
+      checkerHandle: m.checkerId ? scoutMap.get(m.checkerId)?.username || 'checker' : null,
+      checkerNotes: m.checkerNotes,
+      createdAt: m.createdAt.toISOString(),
+      decidedAt: m.decidedAt?.toISOString() ?? null,
+    })),
+    governanceAppeals: allAppeals.map((a) => ({
+      id: a.id,
+      appellantUserId: a.appellantUserId,
+      appellantHandle: scoutMap.get(a.appellantUserId)?.username || 'user',
+      targetType: a.targetType as AppealTargetType,
+      targetRecordId: a.targetRecordId,
+      originalReviewerId: a.originalReviewerId,
+      originalReviewerHandle: a.originalReviewerId
+        ? scoutMap.get(a.originalReviewerId)?.username || 'officer'
+        : null,
+      appealReason: a.appealReason,
+      evidencePaths: a.evidencePaths,
+      status: a.status as GovernanceAppealDTO['status'],
+      appealsOfficerId: a.appealsOfficerId,
+      appealsOfficerHandle: a.appealsOfficerId
+        ? scoutMap.get(a.appealsOfficerId)?.username || 'appeals_officer'
+        : null,
+      decisionNotes: a.decisionNotes,
+      createdAt: a.createdAt.toISOString(),
+      resolvedAt: a.resolvedAt?.toISOString() ?? null,
+    })),
     abuseReports: allAbuse.map((r) => ({
       id: r.id,
       reporterId: r.reporterId,
@@ -2847,16 +3478,26 @@ export async function adminReviewVerification(
   actorUserId: string,
   input: {
     verificationId: string;
-    decision: 'APPROVED' | 'REJECTED' | 'ACTION_REQUIRED';
+    decision: 'UNDER_REVIEW' | 'VERIFIED' | 'REJECTED' | 'ACTION_REQUIRED' | 'APPROVED';
     reviewerNotes: string;
   }
 ) {
   const db = requireDb();
 
   const ctx = await loadDbAuthContext(actorUserId);
-  assertAdminRole(ctx, ['VERIFICATION_OFFICER']);
+  assertAdminRole(ctx, ['VERIFICATION_OFFICER', 'PLATFORM_ADMIN']);
 
-  if (!input.reviewerNotes.trim()) {
+  const canonicalDecision = normalizeVerificationStatus(input.decision);
+  if (
+    canonicalDecision !== 'UNDER_REVIEW' &&
+    canonicalDecision !== 'VERIFIED' &&
+    canonicalDecision !== 'REJECTED' &&
+    canonicalDecision !== 'ACTION_REQUIRED'
+  ) {
+    throw new AuthorizationError('Unsupported verification decision.', 400, 'INVALID_DECISION');
+  }
+
+  if (!input.reviewerNotes.trim() && canonicalDecision !== 'UNDER_REVIEW') {
     throw new AuthorizationError('Mandatory reviewer notes are required.', 400, 'NOTES_REQUIRED');
   }
   if (!isUuid(input.verificationId)) {
@@ -2874,14 +3515,48 @@ export async function adminReviewVerification(
       throw new AuthorizationError('Verification record not found.', 404, 'VERIFICATION_NOT_FOUND');
     }
 
-    const prevStatus = verif.status;
+    let targetOwnerId = verif.userId;
+    let sellerRow: typeof sellerProfiles.$inferSelect | undefined;
+    if (verif.sellerProfileId) {
+      const sRows = await tx
+        .select()
+        .from(sellerProfiles)
+        .where(eq(sellerProfiles.id, verif.sellerProfileId))
+        .limit(1);
+      sellerRow = sRows[0];
+      if (sellerRow) {
+        targetOwnerId = sellerRow.ownerUserId;
+      }
+    }
+
+    // Separation of duties: prevent officers from reviewing/approving own Seller or KYC application
+    assertCanReviewVerification(actorUserId, verif.userId);
+    assertCanReviewVerification(actorUserId, targetOwnerId);
+
+    const prevStatus = normalizeVerificationStatus(verif.status);
+    try {
+      if (prevStatus === 'SUBMITTED' && canonicalDecision !== 'UNDER_REVIEW') {
+        transitions.verification('SUBMITTED', 'UNDER_REVIEW');
+        transitions.verification('UNDER_REVIEW', canonicalDecision);
+      } else {
+        transitions.verification(prevStatus, canonicalDecision);
+      }
+    } catch (err) {
+      if (err instanceof InvalidTransitionError) {
+        throw new AuthorizationError(err.message, 409, 'INVALID_STATUS_TRANSITION');
+      }
+      throw err;
+    }
+
     const now = new Date();
-    const notes = input.reviewerNotes.trim();
+    const notes =
+      input.reviewerNotes.trim() ||
+      (canonicalDecision === 'UNDER_REVIEW' ? 'Claimed for Verification Officer review' : '');
 
     const [updated] = await tx
       .update(verificationRecords)
       .set({
-        status: input.decision,
+        status: canonicalDecision,
         reviewerNotes: notes,
         reviewedBy: actorUserId,
         reviewedAt: now,
@@ -2890,37 +3565,141 @@ export async function adminReviewVerification(
       .where(eq(verificationRecords.id, verif.id))
       .returning();
 
-    if (verif.category === 'SELLER' && verif.sellerProfileId && input.decision === 'APPROVED') {
-      await tx
-        .update(sellerProfiles)
-        .set({ sellerStatus: 'ACTIVE', updatedAt: now })
-        .where(
-          and(
-            eq(sellerProfiles.id, verif.sellerProfileId),
-            eq(sellerProfiles.sellerStatus, 'ONBOARDING')
-          )
-        );
+    if (verif.category === 'SELLER' && sellerRow && canonicalDecision === 'VERIFIED') {
+      const prevSellerStatus = normalizeSellerStatus(sellerRow.sellerStatus);
+      if (prevSellerStatus === 'ACTIVATION_PENDING') {
+        transitions.seller(prevSellerStatus, 'ACTIVE');
+        await tx
+          .update(sellerProfiles)
+          .set({ sellerStatus: 'ACTIVE', updatedAt: now })
+          .where(eq(sellerProfiles.id, sellerRow.id));
+      }
     }
 
     await tx.insert(auditLogs).values({
       actorId: actorUserId,
       affectedUserId: verif.userId,
-      action: `VERIFICATION_${input.decision}`,
+      action: `VERIFICATION_${canonicalDecision}`,
       entityType: 'verification_records',
       entityId: verif.id,
       previousValue: { status: prevStatus, category: verif.category },
-      newValue: { status: input.decision, category: verif.category },
+      newValue: { status: canonicalDecision, category: verif.category },
       reason: notes,
     });
 
     await tx.insert(platformNotifications).values({
       userId: verif.userId,
       category: 'trust',
-      title: `${verif.category} verification ${input.decision}`,
+      title: `${verif.category} verification ${canonicalDecision}`,
       body: notes,
     });
 
     return updated;
+  });
+}
+
+export async function adminManageRestriction(
+  actorUserId: string,
+  input:
+    | {
+        operation: 'IMPOSE';
+        targetUserId: string;
+        scope: RestrictionScope;
+        capabilityCode: CapabilityCode;
+        reason: string;
+        expiresInDays?: number | null;
+      }
+    | {
+        operation: 'LIFT';
+        restrictionId: string;
+        reason: string;
+      }
+) {
+  const db = requireDb();
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAdminRole(ctx, ['TRUST_AND_SAFETY', 'PLATFORM_ADMIN']);
+
+  if (!input.reason.trim()) {
+    throw new AuthorizationError('Documented governance reason is required.', 400, 'REASON_REQUIRED');
+  }
+  const reason = input.reason.trim();
+
+  if (input.operation === 'LIFT') {
+    if (!isUuid(input.restrictionId)) {
+      throw new AuthorizationError('Restriction record not found.', 404, 'NOT_FOUND');
+    }
+    await db.transaction(async (tx) => {
+      const rows = await tx
+        .select()
+        .from(capabilityRestrictions)
+        .where(eq(capabilityRestrictions.id, input.restrictionId))
+        .limit(1);
+      const existing = rows[0];
+      if (!existing || existing.status === 'LIFTED') {
+        throw new AuthorizationError('Active restriction not found.', 404, 'NOT_FOUND');
+      }
+      await tx
+        .update(capabilityRestrictions)
+        .set({ status: 'LIFTED', liftedAt: new Date(), liftedBy: actorUserId })
+        .where(eq(capabilityRestrictions.id, existing.id));
+
+      await tx.insert(auditLogs).values({
+        actorId: actorUserId,
+        affectedUserId: existing.userId,
+        action: 'CAPABILITY_RESTRICTION_LIFTED',
+        entityType: 'capability_restrictions',
+        entityId: existing.id,
+        previousValue: { status: 'ACTIVE', capabilityCode: existing.capabilityCode },
+        newValue: { status: 'LIFTED' },
+        reason,
+      });
+    });
+    return;
+  }
+
+  if (!isUuid(input.targetUserId)) {
+    throw new AuthorizationError('Target user not found.', 404, 'USER_NOT_FOUND');
+  }
+
+  await db.transaction(async (tx) => {
+    const expiresAt =
+      input.expiresInDays && input.expiresInDays > 0
+        ? new Date(Date.now() + input.expiresInDays * 24 * 60 * 60 * 1000)
+        : null;
+
+    const [created] = await tx
+      .insert(capabilityRestrictions)
+      .values({
+        userId: input.targetUserId,
+        scope: input.scope,
+        capabilityCode: input.capabilityCode,
+        reason,
+        status: 'ACTIVE',
+        imposedBy: actorUserId,
+        expiresAt,
+      })
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: input.targetUserId,
+      action: 'CAPABILITY_RESTRICTION_IMPOSED',
+      entityType: 'capability_restrictions',
+      entityId: created.id,
+      newValue: {
+        scope: input.scope,
+        capabilityCode: input.capabilityCode,
+        expiresAt: expiresAt?.toISOString() ?? null,
+      },
+      reason,
+    });
+
+    await tx.insert(platformNotifications).values({
+      userId: input.targetUserId,
+      category: 'trust',
+      title: `Capability Restricted: ${input.capabilityCode}`,
+      body: `${reason}. You may submit an independent appeal from Account Settings if you believe this is in error.`,
+    });
   });
 }
 
@@ -2931,10 +3710,12 @@ export async function adminApplyUserAction(
     actionType:
       | 'SET_ACCOUNT_STATUS'
       | 'SET_SELLER_STATUS'
+      | 'SET_SUBSCRIPTION_STATUS'
       | 'HOLD_PENDING_COMMISSIONS'
       | 'RESOLVE_ABUSE_REPORT';
     accountStatus?: AccountStatus;
     sellerStatus?: SellerStatus;
+    subscriptionStatus?: SubscriptionStatus;
     abuseReportId?: string;
     abuseResolution?: 'RESOLVED' | 'DISMISSED';
     reason: string;
@@ -2944,7 +3725,12 @@ export async function adminApplyUserAction(
   await ensureTablesReady(db);
 
   const ctx = await loadDbAuthContext(actorUserId);
-  assertAdminRole(ctx, ['TRUST_AND_SAFETY', 'FINANCE_OPS']);
+  assertAdminRole(ctx, [
+    'PLATFORM_ADMIN',
+    'TRUST_AND_SAFETY',
+    'FINANCE_OFFICER',
+    'OPERATIONS_MANAGER',
+  ]);
 
   if (!input.reason.trim()) {
     throw new AuthorizationError(
@@ -2971,7 +3757,16 @@ export async function adminApplyUserAction(
     }
 
     if (input.actionType === 'SET_ACCOUNT_STATUS' && input.accountStatus) {
-      const prev = targetUser.accountStatus;
+      const prev = normalizeAccountStatus(targetUser.accountStatus);
+      try {
+        transitions.account(prev, input.accountStatus);
+      } catch (err) {
+        if (err instanceof InvalidTransitionError) {
+          throw new AuthorizationError(err.message, 409, 'INVALID_STATUS_TRANSITION');
+        }
+        throw err;
+      }
+
       await tx
         .update(users)
         .set({
@@ -3003,7 +3798,16 @@ export async function adminApplyUserAction(
       if (!seller) {
         throw new AuthorizationError('Target user has no Seller profile.', 400, 'NO_SELLER_PROFILE');
       }
-      const prev = seller.sellerStatus;
+      const prev = normalizeSellerStatus(seller.sellerStatus);
+      try {
+        transitions.seller(prev, input.sellerStatus);
+      } catch (err) {
+        if (err instanceof InvalidTransitionError) {
+          throw new AuthorizationError(err.message, 409, 'INVALID_STATUS_TRANSITION');
+        }
+        throw err;
+      }
+
       await tx
         .update(sellerProfiles)
         .set({ sellerStatus: input.sellerStatus, updatedAt: new Date() })
@@ -3016,12 +3820,87 @@ export async function adminApplyUserAction(
         entityType: 'seller_profiles',
         entityId: seller.id,
         previousValue: { sellerStatus: prev },
-        newValue: { sellerStatus: input.sellerStatus },
+        newValue: { sellerStatus: input.sellerStatus, scoutAccountUnaffected: true },
+        reason,
+      });
+    }
+
+    if (input.actionType === 'SET_SUBSCRIPTION_STATUS' && input.subscriptionStatus) {
+      const sellerRows = await tx
+        .select()
+        .from(sellerProfiles)
+        .where(eq(sellerProfiles.ownerUserId, targetUser.id))
+        .limit(1);
+      const seller = sellerRows[0];
+      if (!seller) {
+        throw new AuthorizationError('Target user has no Seller profile.', 400, 'NO_SELLER_PROFILE');
+      }
+
+      const prevSub = normalizeSubscriptionStatus(seller.subscriptionStatus);
+      try {
+        transitions.subscription(prevSub, input.subscriptionStatus);
+      } catch (err) {
+        if (err instanceof InvalidTransitionError) {
+          throw new AuthorizationError(err.message, 409, 'INVALID_STATUS_TRANSITION');
+        }
+        throw err;
+      }
+
+      const nextExpiresAt =
+        input.subscriptionStatus === 'GRACE_PERIOD'
+          ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+          : seller.subscriptionExpiresAt;
+
+      await tx
+        .update(sellerProfiles)
+        .set({
+          subscriptionStatus: input.subscriptionStatus,
+          subscriptionExpiresAt: nextExpiresAt,
+          updatedAt: new Date(),
+        })
+        .where(eq(sellerProfiles.id, seller.id));
+
+      // Downgrade rule: When subscription becomes EXPIRED, suspend excess active listings above STARTER cap (1) without deleting
+      let suspendedCount = 0;
+      if (input.subscriptionStatus === 'EXPIRED') {
+        const published = await tx
+          .select()
+          .from(productListings)
+          .where(
+            and(
+              eq(productListings.sellerProfileId, seller.id),
+              eq(productListings.status, 'PUBLISHED')
+            )
+          )
+          .orderBy(desc(productListings.createdAt));
+        const starterMaxActive = SELLER_PLANS.starter.maxActiveListings;
+        if (published.length > starterMaxActive) {
+          const excessIds = published.slice(starterMaxActive).map((l) => l.id);
+          await tx
+            .update(productListings)
+            .set({ status: 'EXPIRED' })
+            .where(inArray(productListings.id, excessIds));
+          suspendedCount = excessIds.length;
+        }
+      }
+
+      await tx.insert(auditLogs).values({
+        actorId: actorUserId,
+        affectedUserId: targetUser.id,
+        action: 'ADMIN_SUBSCRIPTION_STATUS_CHANGED',
+        entityType: 'seller_profiles',
+        entityId: seller.id,
+        previousValue: { subscriptionStatus: prevSub },
+        newValue: {
+          subscriptionStatus: input.subscriptionStatus,
+          excessListingsSuspended: suspendedCount,
+        },
         reason,
       });
     }
 
     if (input.actionType === 'HOLD_PENDING_COMMISSIONS') {
+      assertAdminRole(ctx, ['TRUST_AND_SAFETY', 'FINANCE_OFFICER']);
       const userEntries = await tx
         .select()
         .from(commissionLedgerEntries)
@@ -3083,6 +3962,293 @@ export async function adminApplyUserAction(
   });
 }
 
+export async function adminCreateMakerCheckerRequest(
+  actorUserId: string,
+  input: {
+    actionType: MakerCheckerActionType;
+    targetUserId: string;
+    targetEntityId?: string | null;
+    payload: Record<string, unknown>;
+    reason: string;
+  }
+) {
+  const db = requireDb();
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAdminRole(ctx, [
+    'FINANCE_OFFICER',
+    'PLATFORM_ADMIN',
+    'TRUST_AND_SAFETY',
+    'OPERATIONS_MANAGER',
+  ]);
+
+  if (!isUuid(input.targetUserId)) {
+    throw new AuthorizationError('Valid target user UUID is required.', 400, 'INVALID_TARGET');
+  }
+  if (!input.reason.trim()) {
+    throw new AuthorizationError('Maker justification reason is required.', 400, 'REASON_REQUIRED');
+  }
+
+  const [created] = await db
+    .insert(makerCheckerRequests)
+    .values({
+      actionType: input.actionType,
+      targetUserId: input.targetUserId,
+      targetEntityId: isUuid(input.targetEntityId) ? input.targetEntityId : null,
+      payload: input.payload || {},
+      reason: input.reason.trim(),
+      status: 'PENDING',
+      makerId: actorUserId,
+    })
+    .returning();
+
+  await db.insert(auditLogs).values({
+    actorId: actorUserId,
+    affectedUserId: input.targetUserId,
+    action: 'MAKER_CHECKER_REQUEST_CREATED',
+    entityType: 'maker_checker_requests',
+    entityId: created.id,
+    newValue: { actionType: input.actionType, payload: input.payload },
+    reason: input.reason.trim(),
+  });
+
+  return created;
+}
+
+export async function adminDecideMakerCheckerRequest(
+  actorUserId: string,
+  input: {
+    requestId: string;
+    decision: 'APPROVED' | 'REJECTED';
+    checkerNotes: string;
+  }
+) {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAdminRole(ctx, ['FINANCE_OFFICER', 'PLATFORM_ADMIN', 'TRUST_AND_SAFETY']);
+
+  if (!isUuid(input.requestId)) {
+    throw new AuthorizationError('Maker-Checker request not found.', 404, 'NOT_FOUND');
+  }
+  if (!input.checkerNotes.trim()) {
+    throw new AuthorizationError('Checker decision notes are required.', 400, 'NOTES_REQUIRED');
+  }
+
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .select()
+      .from(makerCheckerRequests)
+      .where(eq(makerCheckerRequests.id, input.requestId))
+      .limit(1);
+    const reqRow = rows[0];
+    if (!reqRow || reqRow.status !== 'PENDING') {
+      throw new AuthorizationError('Pending Maker-Checker request not found.', 404, 'NOT_FOUND');
+    }
+
+    // Strict Dual-Control Check: maker_id !== checker_id
+    assertMakerCheckerDistinct(reqRow.makerId, actorUserId);
+
+    const now = new Date();
+    const notes = input.checkerNotes.trim();
+
+    if (input.decision === 'REJECTED') {
+      const [rejected] = await tx
+        .update(makerCheckerRequests)
+        .set({
+          status: 'REJECTED',
+          checkerId: actorUserId,
+          checkerNotes: notes,
+          decidedAt: now,
+        })
+        .where(eq(makerCheckerRequests.id, reqRow.id))
+        .returning();
+
+      await tx.insert(auditLogs).values({
+        actorId: actorUserId,
+        affectedUserId: reqRow.targetUserId,
+        action: 'MAKER_CHECKER_REJECTED',
+        entityType: 'maker_checker_requests',
+        entityId: reqRow.id,
+        previousValue: { status: 'PENDING' },
+        newValue: { status: 'REJECTED' },
+        reason: notes,
+      });
+      return rejected;
+    }
+
+    // Execute approved dual-control action atomically
+    const payload = reqRow.payload || {};
+    if (
+      reqRow.actionType === 'COMMISSION_ADJUSTMENT' ||
+      reqRow.actionType === 'WALLET_CORRECTION'
+    ) {
+      const amountNaira = Number(payload.amountNaira || 0);
+      const amountKobo = Math.round(amountNaira * 100);
+      if (amountKobo !== 0) {
+        const ref = `MC-${reqRow.id.slice(0, 8).toUpperCase()}`;
+        await tx.insert(commissionLedgerEntries).values({
+          reference: ref,
+          orderId: String(payload.orderId || ref),
+          referralEventId: null,
+          beneficiaryScoutId: reqRow.targetUserId,
+          generation: 1,
+          fractionLabel: 'Dual-Control Adj',
+          amountKobo: Math.abs(amountKobo),
+          status: amountKobo > 0 ? 'Available' : 'Reversed',
+          ruleVersion: COMMISSION_RULE_VERSION,
+          description: `Maker-Checker ${reqRow.actionType}: ${reqRow.reason} (${notes})`,
+        });
+      }
+    } else if (reqRow.actionType === 'ROLE_ASSIGNMENT') {
+      const assignedRole = String(payload.adminRole || '');
+      if (ALL_PLATFORM_ADMIN_ROLES.includes(assignedRole as AdminRole)) {
+        await tx
+          .insert(platformAdminRoles)
+          .values({
+            userId: reqRow.targetUserId,
+            adminRole: assignedRole as AdminRole,
+            assignedBy: actorUserId,
+          })
+          .onConflictDoUpdate({
+            target: platformAdminRoles.userId,
+            set: { adminRole: assignedRole as AdminRole, assignedBy: actorUserId },
+          });
+      }
+    } else if (reqRow.actionType === 'ANCESTRY_OVERRIDE') {
+      const newDirectReferrerId =
+        typeof payload.directReferrerId === 'string' && isUuid(payload.directReferrerId)
+          ? payload.directReferrerId
+          : null;
+      if (newDirectReferrerId === reqRow.targetUserId) {
+        throw new AuthorizationError('Self-referral ancestry override rejected.', 400, 'SELF_REFERRAL');
+      }
+      await tx
+        .update(referralAncestry)
+        .set({
+          directReferrerId: newDirectReferrerId,
+          attributionSource: newDirectReferrerId ? 'MAKER_CHECKER_OVERRIDE' : 'ORGANIC',
+        })
+        .where(eq(referralAncestry.scoutUserId, reqRow.targetUserId));
+    }
+
+    const [executed] = await tx
+      .update(makerCheckerRequests)
+      .set({
+        status: 'EXECUTED',
+        checkerId: actorUserId,
+        checkerNotes: notes,
+        decidedAt: now,
+      })
+      .where(eq(makerCheckerRequests.id, reqRow.id))
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: reqRow.targetUserId,
+      action: `MAKER_CHECKER_EXECUTED_${reqRow.actionType}`,
+      entityType: 'maker_checker_requests',
+      entityId: reqRow.id,
+      previousValue: { status: 'PENDING', makerId: reqRow.makerId },
+      newValue: { status: 'EXECUTED', checkerId: actorUserId, payload },
+      reason: notes,
+    });
+
+    return executed;
+  });
+}
+
+export async function adminDecideAppeal(
+  actorUserId: string,
+  input: {
+    appealId: string;
+    decision: 'UNDER_REVIEW' | 'UPHELD' | 'OVERTURNED';
+    decisionNotes: string;
+  }
+) {
+  const db = requireDb();
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAdminRole(ctx, ['APPEALS_OFFICER']);
+
+  if (!isUuid(input.appealId)) {
+    throw new AuthorizationError('Appeal record not found.', 404, 'NOT_FOUND');
+  }
+  if (!input.decisionNotes.trim() && input.decision !== 'UNDER_REVIEW') {
+    throw new AuthorizationError('Appeal resolution notes are required.', 400, 'NOTES_REQUIRED');
+  }
+
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .select()
+      .from(governanceAppeals)
+      .where(eq(governanceAppeals.id, input.appealId))
+      .limit(1);
+    const appeal = rows[0];
+    if (!appeal) {
+      throw new AuthorizationError('Appeal record not found.', 404, 'NOT_FOUND');
+    }
+
+    // Independent reviewer enforcement: cannot adjudicate own prior decision or own appeal
+    assertIndependentAppealsOfficer(
+      actorUserId,
+      appeal.originalReviewerId,
+      appeal.appellantUserId
+    );
+
+    const now = new Date();
+    const notes = input.decisionNotes.trim() || 'Marked Under Review by independent Appeals Officer';
+
+    if (input.decision === 'OVERTURNED') {
+      if (appeal.targetType === 'RESTRICTION') {
+        await tx
+          .update(capabilityRestrictions)
+          .set({ status: 'LIFTED', liftedAt: now, liftedBy: actorUserId })
+          .where(eq(capabilityRestrictions.id, appeal.targetRecordId));
+      } else if (appeal.targetType === 'VERIFICATION') {
+        await tx
+          .update(verificationRecords)
+          .set({
+            status: 'SUBMITTED',
+            reviewerNotes: `Appeal overturned: ${notes}`,
+            updatedAt: now,
+          })
+          .where(eq(verificationRecords.id, appeal.targetRecordId));
+      }
+    }
+
+    const [updated] = await tx
+      .update(governanceAppeals)
+      .set({
+        status: input.decision,
+        appealsOfficerId: actorUserId,
+        decisionNotes: notes,
+        resolvedAt: input.decision === 'UNDER_REVIEW' ? null : now,
+      })
+      .where(eq(governanceAppeals.id, appeal.id))
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: appeal.appellantUserId,
+      action: `APPEAL_${input.decision}`,
+      entityType: 'governance_appeals',
+      entityId: appeal.id,
+      previousValue: { status: appeal.status },
+      newValue: { status: input.decision, targetType: appeal.targetType },
+      reason: notes,
+    });
+
+    await tx.insert(platformNotifications).values({
+      userId: appeal.appellantUserId,
+      category: 'trust',
+      title: `Appeal ${input.decision}`,
+      body: notes,
+    });
+
+    return updated;
+  });
+}
+
 export async function submitSupportCaseForActor(
   actorUserId: string,
   input: {
@@ -3095,7 +4261,7 @@ export async function submitSupportCaseForActor(
   await ensureTablesReady(db);
 
   const ctx = await loadDbAuthContext(actorUserId);
-  assertActiveAccount(ctx);
+  assertAccountOperational(ctx);
 
   const id = `SUP-${Date.now().toString().slice(-5)}${Math.floor(10 + Math.random() * 89)}`;
   const [created] = await db

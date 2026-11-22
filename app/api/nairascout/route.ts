@@ -7,8 +7,10 @@ import {
 import { isPostgresConfigured } from '@/lib/db';
 import {
   advanceOrderStatus,
+  AppealTargetType,
+  closeSellerCapabilityVoluntarily,
   createOrderFromCheckout,
-  createReferralEventForActor,
+  createReferralBatchForActor,
   ensureUserProvisionedInDb,
   getNairaScoutSnapshot,
   inviteToScoutsListForActor,
@@ -17,6 +19,7 @@ import {
   reportAbuseForActor,
   respondToInvitationForActor,
   SellerPlanId,
+  submitGovernanceAppealForActor,
   submitSupportCaseForActor,
   SupportCase,
   upgradeSellerPlanForActor,
@@ -112,12 +115,22 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'refer_product') {
-      const event = await createReferralEventForActor(actorUserId, {
+      const recipientIds: string[] = Array.isArray(body.recipientScoutIds)
+        ? body.recipientScoutIds.map(String)
+        : body.recipientScoutId
+          ? [String(body.recipientScoutId)]
+          : [];
+      const events = await createReferralBatchForActor(actorUserId, {
         productListingId: String(body.productListingId || ''),
-        recipientScoutId: String(body.recipientScoutId || ''),
+        recipientScoutIds: recipientIds,
         note: String(body.note || ''),
       });
-      return NextResponse.json({ event, snapshot: await getNairaScoutSnapshot(actorUserId) });
+      return NextResponse.json({
+        events,
+        event: events[0],
+        count: events.length,
+        snapshot: await getNairaScoutSnapshot(actorUserId),
+      });
     }
 
     if (action === 'invite_scout') {
@@ -167,6 +180,28 @@ export async function POST(req: NextRequest) {
         details: String(body.details || ''),
       });
       return NextResponse.json({ supportCase, snapshot: await getNairaScoutSnapshot(actorUserId) });
+    }
+
+    if (action === 'submit_appeal') {
+      const appeal = await submitGovernanceAppealForActor(actorUserId, {
+        targetType: (body.targetType || 'RESTRICTION') as AppealTargetType,
+        targetRecordId: String(body.targetRecordId || ''),
+        appealReason: String(body.appealReason || ''),
+        evidencePaths: Array.isArray(body.evidencePaths) ? body.evidencePaths.map(String) : [],
+      });
+      return NextResponse.json({ appeal, snapshot: await getNairaScoutSnapshot(actorUserId) });
+    }
+
+    if (action === 'close_seller') {
+      await closeSellerCapabilityVoluntarily(
+        actorUserId,
+        body.reason ? String(body.reason) : undefined
+      );
+      return NextResponse.json({
+        ok: true,
+        sellerClosed: true,
+        snapshot: await getNairaScoutSnapshot(actorUserId),
+      });
     }
 
     return NextResponse.json({ error: 'Unknown action.' }, { status: 400 });

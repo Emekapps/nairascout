@@ -5,10 +5,13 @@ import {
   verifyMutationOrigin,
 } from '@/lib/auth/session';
 import {
+  AppealTargetType,
   closeAccountVoluntarily,
+  closeSellerCapabilityVoluntarily,
   getNairaScoutSnapshot,
   InvitationPolicy,
   manageRelationshipForActor,
+  submitGovernanceAppealForActor,
   submitVerificationEvidence,
   updateProfileAndPrivacy,
   VerificationCategory,
@@ -84,26 +87,57 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    if (body?.action !== 'close_account') {
-      return NextResponse.json({ error: 'Unknown lifecycle action.' }, { status: 400 });
+    const action = String(body?.action || '');
+
+    if (action === 'submit_appeal') {
+      const appeal = await submitGovernanceAppealForActor(identity.userId, {
+        targetType: (body.targetType || 'RESTRICTION') as AppealTargetType,
+        targetRecordId: String(body.targetRecordId || ''),
+        appealReason: String(body.appealReason || ''),
+        evidencePaths: Array.isArray(body.evidencePaths) ? body.evidencePaths.map(String) : [],
+      });
+      return NextResponse.json({
+        ok: true,
+        appeal,
+        snapshot: await getNairaScoutSnapshot(identity.userId),
+      });
     }
 
-    await closeAccountVoluntarily(identity.userId, body.reason ? String(body.reason) : undefined);
-
-    const supabase = await createSupabaseServerClient();
-    if (supabase) {
-      await supabase.auth.signOut();
+    if (action === 'close_seller') {
+      await closeSellerCapabilityVoluntarily(
+        identity.userId,
+        body.reason ? String(body.reason) : undefined
+      );
+      return NextResponse.json({
+        ok: true,
+        sellerClosed: true,
+        snapshot: await getNairaScoutSnapshot(identity.userId),
+      });
     }
 
-    return NextResponse.json({
-      ok: true,
-      closed: true,
-      snapshot: await getNairaScoutSnapshot(null),
-    });
+    if (action === 'close_account') {
+      await closeAccountVoluntarily(
+        identity.userId,
+        body.reason ? String(body.reason) : undefined
+      );
+
+      const supabase = await createSupabaseServerClient();
+      if (supabase) {
+        await supabase.auth.signOut();
+      }
+
+      return NextResponse.json({
+        ok: true,
+        closed: true,
+        snapshot: await getNairaScoutSnapshot(null),
+      });
+    }
+
+    return NextResponse.json({ error: 'Unknown lifecycle action.' }, { status: 400 });
   } catch (err) {
     if (err instanceof AuthorizationError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: err.statusCode });
     }
-    return NextResponse.json({ error: 'Account closure failed.' }, { status: 400 });
+    return NextResponse.json({ error: 'Lifecycle action failed.' }, { status: 400 });
   }
 }

@@ -108,13 +108,23 @@ export default function NairaScoutApp({
 
   const handleSendReferral = async (payload: {
     productListingId: string;
-    recipientScoutId: string;
+    recipientScoutIds: string[];
     note: string;
-  }): Promise<ProductReferralEvent | null> => {
+  }): Promise<ProductReferralEvent[] | null> => {
     const data = await callApi({ action: 'refer_product', ...payload });
-    if (!data?.event) return null;
-    showFeedback('ok', `Referral card ${data.event.id} sent to @${data.event.recipientHandle}.`);
-    return data.event;
+    const events: ProductReferralEvent[] = Array.isArray(data?.events)
+      ? data.events
+      : data?.event
+        ? [data.event]
+        : [];
+    if (events.length === 0) return null;
+    showFeedback(
+      'ok',
+      events.length === 1
+        ? `Referral card ${events[0].id} sent to @${events[0].recipientHandle}.`
+        : `${events.length} referral cards dispatched across your Scouts List.`
+    );
+    return events;
   };
 
   const handleAdvanceOrder = async (orderId: string, nextStatus: OrderFulfilmentStatus) => {
@@ -260,6 +270,23 @@ export default function NairaScoutApp({
         </div>
       )}
 
+      {snapshot.activeScout?.activeRestrictions &&
+        snapshot.activeScout.activeRestrictions.some((r) => r.status === 'ACTIVE') && (
+          <div className="bg-[#FEF2F2] border-b border-[#FECACA] px-4 py-2.5 text-xs text-[#991B1B] text-center">
+            Active capability restriction(s):{' '}
+            <span className="font-mono font-semibold">
+              {snapshot.activeScout.activeRestrictions
+                .filter((r) => r.status === 'ACTIVE')
+                .map((r) => r.capabilityCode)
+                .join(', ')}
+            </span>{' '}
+            — Unrelated account features remain operational.{' '}
+            <a href="/settings" className="underline font-semibold">
+              Review &amp; Appeal
+            </a>
+          </div>
+        )}
+
       {(!snapshot.dbConfigured || !snapshot.supabaseConfigured) && (
         <div className="bg-[#FFFBEB] border-b border-[#FDE68A] px-4 py-2.5 text-xs text-[#92400E] text-center">
           Live database and authentication require environment configuration:{' '}
@@ -371,6 +398,7 @@ export default function NairaScoutApp({
       />
 
       <ReferProductModal
+        key={referModalProduct?.id ?? 'closed'}
         product={referModalProduct}
         snapshot={snapshot}
         onClose={() => setReferModalProduct(null)}

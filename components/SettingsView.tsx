@@ -70,6 +70,12 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
   // Lifecycle closure confirmation
   const [closeReason, setCloseReason] = useState('');
   const [confirmText, setConfirmText] = useState('');
+  const [appealTarget, setAppealTarget] = useState<{
+    targetType: 'VERIFICATION' | 'RESTRICTION';
+    targetRecordId: string;
+    label: string;
+  } | null>(null);
+  const [appealReason, setAppealReason] = useState('');
 
   if (!snapshot.authenticated || !scout) {
     return (
@@ -157,6 +163,69 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
       }
       router.push('/');
       router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCloseSeller = async () => {
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'NairaScout',
+        },
+        body: JSON.stringify({ action: 'close_seller', reason: closeReason }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFeedback({ type: 'err', message: data.error || 'Seller closure failed.' });
+        return;
+      }
+      if (data.snapshot) setSnapshot(data.snapshot);
+      setFeedback({
+        type: 'ok',
+        message: 'Track 1 Seller capabilities closed. Your Scout identity and wallet remain operational.',
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSubmitAppeal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!appealTarget || !appealReason.trim()) return;
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'NairaScout',
+        },
+        body: JSON.stringify({
+          action: 'submit_appeal',
+          targetType: appealTarget.targetType,
+          targetRecordId: appealTarget.targetRecordId,
+          appealReason,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFeedback({ type: 'err', message: data.error || 'Failed to submit appeal.' });
+        return;
+      }
+      if (data.snapshot) setSnapshot(data.snapshot);
+      setAppealTarget(null);
+      setAppealReason('');
+      setFeedback({
+        type: 'ok',
+        message: 'Appeal submitted for independent Appeals Officer review.',
+      });
     } finally {
       setBusy(false);
     }
@@ -471,14 +540,14 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                   </p>
                 ) : (
                   scout.verifications.map((v) => (
-                    <div key={v.id} className="py-3.5 first:pt-0 space-y-1">
+                    <div key={v.id} className="py-3.5 first:pt-0 space-y-1.5">
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-mono font-semibold text-[#111814]">{v.category}</span>
                         <span
                           className={`font-semibold ${
-                            v.status === 'APPROVED'
+                            v.status === 'VERIFIED'
                               ? 'text-[#0B6E4F]'
-                              : v.status === 'REJECTED'
+                              : v.status === 'REJECTED' || v.status === 'REVOKED'
                               ? 'text-[#B91C1C]'
                               : 'text-[#B45309]'
                           }`}
@@ -489,13 +558,120 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                       {v.reviewerNotes && (
                         <p className="text-xs text-[#4B554E]">Reviewer Note: {v.reviewerNotes}</p>
                       )}
-                      <p className="font-mono text-[11px] text-[#6C776E]">
-                        {v.evidencePaths.join(', ') || 'Direct check'}
-                      </p>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-mono text-[11px] text-[#6C776E]">
+                          {v.evidencePaths.join(', ') || 'Direct check'}
+                        </p>
+                        {(v.status === 'REJECTED' || v.status === 'REVOKED') && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setAppealTarget({
+                                targetType: 'VERIFICATION',
+                                targetRecordId: v.id,
+                                label: `${v.category} verification (${v.status})`,
+                              })
+                            }
+                            className="text-xs font-semibold text-[#0B6E4F] hover:underline cursor-pointer"
+                          >
+                            Appeal Decision
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))
                 )}
               </div>
+
+              {scout.activeRestrictions && scout.activeRestrictions.length > 0 && (
+                <div className="pt-4 border-t border-[#ECECE6] space-y-2">
+                  <p className="text-xs font-semibold text-[#991B1B]">
+                    Active Capability Restrictions ({scout.activeRestrictions.length})
+                  </p>
+                  {scout.activeRestrictions.map((r) => (
+                    <div
+                      key={r.id}
+                      className="p-3 bg-[#FEF2F2] border border-[#FECACA] rounded-lg text-xs text-[#991B1B] flex items-center justify-between gap-3"
+                    >
+                      <div>
+                        <p className="font-mono font-semibold">
+                          {r.capabilityCode} ({r.scope})
+                        </p>
+                        <p className="mt-0.5">{r.reason}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAppealTarget({
+                            targetType: 'RESTRICTION',
+                            targetRecordId: r.id,
+                            label: `${r.capabilityCode} restriction`,
+                          })
+                        }
+                        className="px-2.5 py-1 text-xs font-semibold bg-white border border-[#FECACA] rounded text-[#991B1B] shrink-0 cursor-pointer"
+                      >
+                        Appeal
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {appealTarget && (
+                <form
+                  onSubmit={handleSubmitAppeal}
+                  className="p-4 bg-[#FAFAF8] border border-[#D8D8D0] rounded-lg space-y-3"
+                >
+                  <p className="text-xs font-semibold text-[#111814]">
+                    Submit Independent Appeal for {appealTarget.label}
+                  </p>
+                  <textarea
+                    rows={2}
+                    required
+                    value={appealReason}
+                    onChange={(e) => setAppealReason(e.target.value)}
+                    placeholder="Provide clear context and supporting facts for an independent Appeals Officer..."
+                    className="w-full px-3 py-2 text-xs border border-[#D8D8D0] rounded-lg bg-white"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      disabled={busy}
+                      className="px-3.5 py-1.5 text-xs font-semibold text-white bg-[#0B6E4F] rounded cursor-pointer"
+                    >
+                      Submit Appeal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAppealTarget(null)}
+                      className="px-3 py-1.5 text-xs text-[#5C665E] cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {scout.governanceAppeals && scout.governanceAppeals.length > 0 && (
+                <div className="pt-4 border-t border-[#ECECE6] space-y-2">
+                  <p className="text-xs font-semibold text-[#111814]">Your Appeals</p>
+                  {scout.governanceAppeals.map((a) => (
+                    <div
+                      key={a.id}
+                      className="p-2.5 bg-[#FAFAF8] border border-[#E4E4DE] rounded-lg text-xs space-y-1"
+                    >
+                      <div className="flex justify-between font-mono">
+                        <span className="font-semibold">{a.targetType}</span>
+                        <span className="text-[#0B6E4F] font-semibold">{a.status}</span>
+                      </div>
+                      <p className="text-[#4B554E]">{a.appealReason}</p>
+                      {a.decisionNotes && (
+                        <p className="text-[#5C665E]">Officer Note: {a.decisionNotes}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <form
@@ -595,22 +771,26 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
 
         {tab === 'lifecycle' && (
           <div className="max-w-2xl bg-white border border-[#E4E4DE] rounded-xl p-6 space-y-6">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-[#B91C1C] shrink-0 mt-0.5" aria-hidden="true" />
-              <div>
-                <h2 className="font-display text-xl font-bold text-[#111814]">
-                  Voluntary Account Closure
-                </h2>
-                <p className="mt-1 text-xs text-[#4B554E] leading-relaxed">
-                  Closing your account disables sign-in, pauses active Seller listings, and blocks
-                  future referrals. For auditability and 13-generation ledger integrity,{' '}
-                  <strong>
-                    users, referralAncestry, referralEvents, and commission ledger rows are
-                    preserved permanently
-                  </strong>{' '}
-                  rather than hard-deleted.
-                </p>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-[#B91C1C] shrink-0 mt-0.5" aria-hidden="true" />
+                <div>
+                  <h2 className="font-display text-xl font-bold text-[#111814]">
+                    Two-Track Account &amp; Seller Closure
+                  </h2>
+                  <p className="mt-1 text-xs text-[#4B554E] leading-relaxed">
+                    Choose Track 1 to close only your Seller store while keeping your Scout identity
+                    and commission wallet active, or Track 2 to permanently close your full
+                    NairaScout account while preserving immutable ancestry &amp; ledger history.
+                  </p>
+                </div>
               </div>
+              <Link
+                href="/settings/closure"
+                className="px-3.5 py-2 text-xs font-semibold text-white bg-[#111814] rounded-lg shrink-0"
+              >
+                Open Closure Flow
+              </Link>
             </div>
 
             <div className="grid grid-cols-3 gap-4 p-4 bg-[#FAFAF8] border border-[#E4E4DE] rounded-lg text-xs">
@@ -634,6 +814,28 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
               </div>
             </div>
 
+            {scout.sellerProfile && scout.sellerProfile.sellerStatus !== 'CLOSED' && (
+              <div className="p-4 bg-[#FAFAF8] border border-[#E4E4DE] rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="text-xs">
+                  <p className="font-semibold text-[#111814]">
+                    Track 1: Close Seller Capabilities Only ({scout.sellerProfile.sellerName})
+                  </p>
+                  <p className="text-[#5C665E] mt-0.5">
+                    Expires active Seller listings and closes Seller Hub while preserving your
+                    Scout account and commission wallet.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={handleCloseSeller}
+                  className="px-4 py-2 text-xs font-semibold text-[#B45309] border border-[#E5CFA3] bg-white rounded-lg hover:bg-[#FFFBEB] shrink-0 cursor-pointer"
+                >
+                  Close Seller Only
+                </button>
+              </div>
+            )}
+
             <form onSubmit={handleCloseAccount} className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-[#4B554E] mb-1">
@@ -650,7 +852,8 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
 
               <div>
                 <label className="block text-xs font-medium text-[#4B554E] mb-1">
-                  Type <span className="font-mono font-bold">CLOSE MY ACCOUNT</span> to confirm
+                  Track 2: Type <span className="font-mono font-bold">CLOSE MY ACCOUNT</span> to
+                  confirm full closure
                 </label>
                 <input
                   type="text"
@@ -668,7 +871,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                 className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-[#B91C1C] rounded-lg hover:bg-[#991B1B] disabled:opacity-45 cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                {busy ? 'Closing Account...' : 'Close Account & Preserve Ledger'}
+                {busy ? 'Closing Account...' : 'Close Full Account & Preserve Ledger'}
               </button>
             </form>
 

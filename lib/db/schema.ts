@@ -13,24 +13,30 @@ import {
 import { sql } from 'drizzle-orm';
 
 // ============================================================================
-// 1. ENUMS (Decoupled State Dimensions per Blueprint Part B)
+// 1. ENUMS (Decoupled State Dimensions — Section 9 Non-Destructive Upgrade)
 // ============================================================================
 
 export const accountStatusEnum = pgEnum('account_status', [
+  'PENDING_ACTIVATION',
   'PENDING_VERIFICATION',
   'ACTIVE',
   'RESTRICTED',
   'SUSPENDED',
+  'CLOSURE_PENDING',
   'CLOSED',
 ]);
 
 export const sellerTypeEnum = pgEnum('seller_type', ['INDIVIDUAL', 'BUSINESS']);
 
 export const sellerStatusEnum = pgEnum('seller_status', [
+  'NOT_ACTIVATED',
+  'ACTIVATION_PENDING',
   'ONBOARDING',
   'ACTIVE',
   'RESTRICTED',
   'SUSPENDED',
+  'CLOSURE_PENDING',
+  'CLOSED',
 ]);
 
 export const verificationCategoryEnum = pgEnum('verification_category', [
@@ -42,11 +48,17 @@ export const verificationCategoryEnum = pgEnum('verification_category', [
 ]);
 
 export const verificationStatusEnum = pgEnum('verification_status', [
+  'NOT_STARTED',
   'NOT_SUBMITTED',
+  'SUBMITTED',
   'PENDING',
+  'UNDER_REVIEW',
+  'ACTION_REQUIRED',
+  'VERIFIED',
   'APPROVED',
   'REJECTED',
-  'ACTION_REQUIRED',
+  'EXPIRED',
+  'REVOKED',
   'SUSPENDED',
 ]);
 
@@ -58,7 +70,13 @@ export const subscriptionPlanEnum = pgEnum('subscription_plan', [
 ]);
 
 export const subscriptionStatusEnum = pgEnum('subscription_status', [
+  'NOT_SUBSCRIBED',
+  'PAYMENT_PENDING',
   'ACTIVE',
+  'PAST_DUE',
+  'GRACE_PERIOD',
+  'SUSPENDED',
+  'CANCELLATION_SCHEDULED',
   'EXPIRED',
   'CANCELLED',
 ]);
@@ -80,6 +98,10 @@ export const invitationStatusEnum = pgEnum('invitation_status', [
 export const teamRoleEnum = pgEnum('team_role', [
   'BUSINESS_OWNER',
   'BUSINESS_ADMIN',
+  'PRODUCT_MANAGER',
+  'ORDER_MANAGER',
+  'FINANCE_MANAGER',
+  'ANALYST_VIEWER',
   'TEAM_MEMBER',
 ]);
 
@@ -91,9 +113,15 @@ export const teamMemberStatusEnum = pgEnum('team_member_status', [
 
 export const adminRoleEnum = pgEnum('admin_role', [
   'SUPER_ADMIN',
+  'PLATFORM_ADMIN',
   'VERIFICATION_OFFICER',
-  'FINANCE_OPS',
   'TRUST_AND_SAFETY',
+  'APPEALS_OFFICER',
+  'FINANCE_OFFICER',
+  'SUPPORT_OFFICER',
+  'OPERATIONS_MANAGER',
+  'ANALYST_VIEWER',
+  'FINANCE_OPS',
   'SUPPORT_AGENT',
 ]);
 
@@ -171,7 +199,7 @@ export const sellerProfiles = pgTable('seller_profiles', {
   businessAddress: text('business_address'),
   businessContactEmail: text('business_contact_email'),
   businessContactPhone: text('business_contact_phone'),
-  sellerStatus: sellerStatusEnum('seller_status').default('ONBOARDING').notNull(),
+  sellerStatus: sellerStatusEnum('seller_status').default('ACTIVATION_PENDING').notNull(),
   subscriptionPlan: subscriptionPlanEnum('subscription_plan').default('STARTER').notNull(),
   subscriptionStatus: subscriptionStatusEnum('subscription_status').default('ACTIVE').notNull(),
   subscriptionExpiresAt: timestamp('subscription_expires_at', { withTimezone: true }),
@@ -221,7 +249,7 @@ export const verificationRecords = pgTable('verification_records', {
     onDelete: 'restrict',
   }),
   category: verificationCategoryEnum('category').notNull(),
-  status: verificationStatusEnum('status').default('NOT_SUBMITTED').notNull(),
+  status: verificationStatusEnum('status').default('NOT_STARTED').notNull(),
   evidencePaths: jsonb('evidence_paths').$type<string[]>().default([]).notNull(),
   reviewerNotes: text('reviewer_notes'),
   reviewedBy: uuid('reviewed_by').references(() => users.id, { onDelete: 'set null' }),
@@ -308,7 +336,7 @@ export const abuseReports = pgTable('abuse_reports', {
 });
 
 // ============================================================================
-// 5. PLATFORM ADMIN ROLES & IMMUTABLE AUDIT LOGS
+// 5. PLATFORM ADMIN ROLES, AUDIT LOGS & MODULE 3 GOVERNANCE TABLES
 // ============================================================================
 
 export const platformAdminRoles = pgTable('platform_admin_roles', {
@@ -335,3 +363,90 @@ export const auditLogs = pgTable('audit_logs', {
   ipAddress: text('ip_address'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const capabilityRestrictions = pgTable(
+  'capability_restrictions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    scope: text('scope').notNull(), // 'ACCOUNT' | 'ROLE' | 'CAPABILITY' | 'RESOURCE'
+    capabilityCode: text('capability_code').notNull(), // 'CREATE_REFERRAL' | 'PUBLISH_LISTING' | 'REQUEST_WITHDRAWAL' | 'INITIATE_PURCHASE' | 'MANAGE_TEAM'
+    resourceId: uuid('resource_id'),
+    reason: text('reason').notNull(),
+    status: text('status').default('ACTIVE').notNull(), // 'ACTIVE' | 'LIFTED'
+    imposedBy: uuid('imposed_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    liftedAt: timestamp('lifted_at', { withTimezone: true }),
+    liftedBy: uuid('lifted_by').references(() => users.id, { onDelete: 'restrict' }),
+  },
+  (table) => [
+    check(
+      'capability_restriction_scope_check',
+      sql`${table.scope} IN ('ACCOUNT', 'ROLE', 'CAPABILITY', 'RESOURCE')`
+    ),
+    check('capability_restriction_status_check', sql`${table.status} IN ('ACTIVE', 'LIFTED')`),
+  ]
+);
+
+export const makerCheckerRequests = pgTable(
+  'maker_checker_requests',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    actionType: text('action_type').notNull(),
+    targetUserId: uuid('target_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    targetEntityId: uuid('target_entity_id'),
+    payload: jsonb('payload').$type<Record<string, unknown>>().default({}).notNull(),
+    reason: text('reason').notNull(),
+    status: text('status').default('PENDING').notNull(), // 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXECUTED'
+    makerId: uuid('maker_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    checkerId: uuid('checker_id').references(() => users.id, { onDelete: 'restrict' }),
+    checkerNotes: text('checker_notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      'maker_checker_distinct_officers',
+      sql`${table.checkerId} IS NULL OR ${table.makerId} <> ${table.checkerId}`
+    ),
+  ]
+);
+
+export const governanceAppeals = pgTable(
+  'governance_appeals',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    appellantUserId: uuid('appellant_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    targetType: text('target_type').notNull(), // 'VERIFICATION' | 'RESTRICTION' | 'SUSPENSION' | 'DISPUTE'
+    targetRecordId: uuid('target_record_id').notNull(),
+    originalReviewerId: uuid('original_reviewer_id').references(() => users.id, {
+      onDelete: 'restrict',
+    }),
+    appealReason: text('appeal_reason').notNull(),
+    evidencePaths: jsonb('evidence_paths').$type<string[]>().default([]).notNull(),
+    status: text('status').default('OPEN').notNull(), // 'OPEN' | 'UNDER_REVIEW' | 'UPHELD' | 'OVERTURNED'
+    appealsOfficerId: uuid('appeals_officer_id').references(() => users.id, {
+      onDelete: 'restrict',
+    }),
+    decisionNotes: text('decision_notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      'independent_appeals_reviewer',
+      sql`${table.appealsOfficerId} IS NULL OR ${table.originalReviewerId} IS NULL OR ${table.appealsOfficerId} <> ${table.originalReviewerId}`
+    ),
+  ]
+);

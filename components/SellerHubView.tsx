@@ -16,9 +16,14 @@ import type {
   OrderFulfilmentStatus,
   SellerPlanId,
 } from '@/lib/nairascout-store';
-import { SELLER_PLANS } from '@/lib/seller-plans';
+import { SELLER_PLANS, SELLER_TEAM_ROLE_LABELS } from '@/lib/seller-plans';
 import { formatKoboToNaira, formatWholeNaira } from '@/lib/commission-engine';
 import type { SellerTeamPermissions } from '@/lib/db/schema';
+import {
+  MAX_SELLER_TEAM_SEATS,
+  SELLER_TEAM_ROLE_PERMISSIONS,
+  type SellerTeamRole,
+} from '@/lib/auth/rbac';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
 interface SellerHubViewProps {
@@ -83,14 +88,12 @@ export default function SellerHubView({
 
   // Team invite state
   const [memberEmail, setMemberEmail] = useState('');
-  const [memberRole, setMemberRole] = useState<'BUSINESS_ADMIN' | 'TEAM_MEMBER'>('TEAM_MEMBER');
-  const [memberPerms, setMemberPerms] = useState<SellerTeamPermissions>({
-    canManageListings: true,
-    canManageOrders: true,
-    canViewAnalytics: true,
-    canManageBilling: false,
-    canManageTeam: false,
-  });
+  const [memberRole, setMemberRole] = useState<Exclude<SellerTeamRole, 'BUSINESS_OWNER'>>(
+    'PRODUCT_MANAGER'
+  );
+  const [memberPerms, setMemberPerms] = useState<SellerTeamPermissions>(
+    SELLER_TEAM_ROLE_PERMISSIONS.PRODUCT_MANAGER
+  );
 
   if (!snapshot.authenticated || !snapshot.activeScout) {
     return (
@@ -413,9 +416,16 @@ export default function SellerHubView({
   const currentPlan = SELLER_PLANS[scout.sellerPlan];
   const { sellerStats } = snapshot;
   const sellerProfile = scout.sellerProfile;
+  const publishRestriction = scout.activeRestrictions?.find(
+    (r) => r.status === 'ACTIVE' && r.capabilityCode === 'PUBLISH_LISTING'
+  );
   const canPublishNow =
     sellerProfile.sellerStatus === 'ACTIVE' &&
-    scout.sellerVerificationStatus === 'APPROVED';
+    scout.sellerVerificationStatus === 'VERIFIED' &&
+    !publishRestriction;
+  const delegatedSeatsUsed = scout.teamMembers.filter(
+    (m) => m.role !== 'BUSINESS_OWNER'
+  ).length;
 
   const handleCreateDraft = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -457,11 +467,32 @@ export default function SellerHubView({
           <h1 className="font-display text-3xl font-bold text-[#111814]">
             Seller Operations &amp; Subscriptions
           </h1>
-          <p className="mt-1.5 text-sm text-[#4B554E] max-w-2xl">
-            {sellerProfile.sellerName} · {sellerProfile.sellerType} · Seller Status:{' '}
-            <strong>{sellerProfile.sellerStatus}</strong> · Verification:{' '}
-            <strong>{scout.sellerVerificationStatus}</strong>
-          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-[#4B554E]">
+              {sellerProfile.sellerName} ({sellerProfile.sellerType})
+            </span>
+            <span className="px-2 py-0.5 rounded bg-[#F0F0EA] font-mono font-semibold text-[#111814]">
+              Seller: {sellerProfile.sellerStatus}
+            </span>
+            <span
+              className={`px-2 py-0.5 rounded font-mono font-semibold ${
+                scout.sellerVerificationStatus === 'VERIFIED'
+                  ? 'bg-[#F3F8F6] text-[#0B6E4F]'
+                  : 'bg-[#FFFBEB] text-[#B45309]'
+              }`}
+            >
+              Verification: {scout.sellerVerificationStatus}
+            </span>
+            <span className="px-2 py-0.5 rounded bg-[#FAFAF8] border border-[#E4E4DE] font-mono text-[#5C665E]">
+              Plan: {currentPlan.name} ({sellerProfile.subscriptionStatus})
+            </span>
+            <Link
+              href="/settings/closure"
+              className="text-xs font-medium text-[#5C665E] hover:text-[#B91C1C] underline ml-1"
+            >
+              Close Seller Capabilities
+            </Link>
+          </div>
         </div>
 
         <div className="flex items-center gap-1 p-1 bg-[#EFEFE9] rounded-lg shrink-0 self-start">
@@ -498,19 +529,21 @@ export default function SellerHubView({
         </div>
       </div>
 
-      {/* Mandatory Verification Gate Banner */}
+      {/* Mandatory Verification & Lifecycle Gate Banner */}
       {!canPublishNow && (
         <div className="bg-[#FFFBEB] border border-[#E5CFA3] rounded-xl p-4 flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 text-[#B45309] shrink-0 mt-0.5" aria-hidden="true" />
           <div className="text-xs text-[#78350F] space-y-1">
             <p className="font-semibold">
-              Seller Verification Gate Active ({scout.sellerVerificationStatus})
+              Seller Publish Gate Active (Seller: {sellerProfile.sellerStatus} · Verification:{' '}
+              {scout.sellerVerificationStatus})
             </p>
             <p>
-              You can create and edit Draft listings now, but publishing to the public Marketplace
-              is blocked (HTTP 403) until a Verification Officer marks your{' '}
-              <span className="font-mono">SELLER</span> verification record as{' '}
-              <span className="font-mono">APPROVED</span>.
+              {publishRestriction
+                ? `Publishing is currently restricted (${publishRestriction.reason}). Draft creation and Scout referral functions remain available.`
+                : sellerProfile.sellerStatus === 'CLOSED'
+                  ? 'Seller capabilities are closed. Your Scout identity, referral links, and commission wallet remain active.'
+                  : 'You can create and edit Draft listings now, while public publishing is blocked (HTTP 403) until a Verification Officer marks your SELLER verification record as VERIFIED.'}
             </p>
           </div>
         </div>
@@ -602,7 +635,7 @@ export default function SellerHubView({
                             title={
                               canPublishNow
                                 ? 'Publish listing to Marketplace'
-                                : 'SELLER verification must be APPROVED before publishing'
+                                : 'SELLER verification must be VERIFIED and Seller status ACTIVE before publishing'
                             }
                             onClick={() => onPublishListing(lst.id)}
                             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg hover:bg-[#09583F] disabled:opacity-45 shrink-0 cursor-pointer"
@@ -947,6 +980,12 @@ export default function SellerHubView({
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               <div className="lg:col-span-7 bg-white border border-[#E4E4DE] rounded-xl divide-y divide-[#ECECE6]">
+                <div className="p-4 flex items-center justify-between text-xs bg-[#FAFAF8]">
+                  <span className="font-semibold text-[#111814]">Active Team Members</span>
+                  <span className="font-mono font-semibold text-[#0B6E4F]">
+                    {delegatedSeatsUsed} / {MAX_SELLER_TEAM_SEATS} delegated seats used
+                  </span>
+                </div>
                 {scout.teamMembers.map((m) => (
                   <div key={m.id} className="p-4 flex items-center justify-between gap-4">
                     <div>
@@ -955,7 +994,7 @@ export default function SellerHubView({
                         <span className="font-mono text-xs text-[#5C665E]">@{m.username}</span>
                       </p>
                       <p className="text-xs text-[#5C665E]">
-                        {m.role} · {m.email}
+                        {SELLER_TEAM_ROLE_LABELS[m.role]?.label || m.role} ({m.role}) · {m.email}
                       </p>
                     </div>
                     {m.role !== 'BUSINESS_OWNER' && (
@@ -972,9 +1011,14 @@ export default function SellerHubView({
               </div>
 
               <div className="lg:col-span-5 bg-white border border-[#E4E4DE] rounded-xl p-5 space-y-4">
-                <h3 className="font-display text-lg font-bold text-[#111814]">
-                  Add Business Team Member
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="font-display text-lg font-bold text-[#111814]">
+                    Add Business Team Member
+                  </h3>
+                  <span className="font-mono text-xs text-[#5C665E]">
+                    {delegatedSeatsUsed}/{MAX_SELLER_TEAM_SEATS}
+                  </span>
+                </div>
                 <form onSubmit={handleInviteTeam} className="space-y-3">
                   <input
                     type="email"
@@ -986,13 +1030,26 @@ export default function SellerHubView({
                   />
                   <select
                     value={memberRole}
-                    onChange={(e) =>
-                      setMemberRole(e.target.value as 'BUSINESS_ADMIN' | 'TEAM_MEMBER')
-                    }
+                    onChange={(e) => {
+                      const nextRole = e.target.value as Exclude<SellerTeamRole, 'BUSINESS_OWNER'>;
+                      setMemberRole(nextRole);
+                      setMemberPerms(SELLER_TEAM_ROLE_PERMISSIONS[nextRole]);
+                    }}
                     className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg bg-white"
                   >
-                    <option value="TEAM_MEMBER">Team Member</option>
-                    <option value="BUSINESS_ADMIN">Business Admin</option>
+                    {(
+                      [
+                        'BUSINESS_ADMIN',
+                        'PRODUCT_MANAGER',
+                        'ORDER_MANAGER',
+                        'FINANCE_MANAGER',
+                        'ANALYST_VIEWER',
+                      ] as Exclude<SellerTeamRole, 'BUSINESS_OWNER'>[]
+                    ).map((roleKey) => (
+                      <option key={roleKey} value={roleKey}>
+                        {SELLER_TEAM_ROLE_LABELS[roleKey].label}
+                      </option>
+                    ))}
                   </select>
                   <div className="space-y-1.5 text-xs text-[#4B554E]">
                     {(
@@ -1019,10 +1076,12 @@ export default function SellerHubView({
                   </div>
                   <button
                     type="submit"
-                    disabled={submitting}
-                    className="w-full py-2.5 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg cursor-pointer"
+                    disabled={submitting || delegatedSeatsUsed >= MAX_SELLER_TEAM_SEATS}
+                    className="w-full py-2.5 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg disabled:opacity-45 cursor-pointer"
                   >
-                    Add Team Member
+                    {delegatedSeatsUsed >= MAX_SELLER_TEAM_SEATS
+                      ? 'Seat Limit Reached (5 / 5)'
+                      : 'Add Team Member'}
                   </button>
                 </form>
               </div>

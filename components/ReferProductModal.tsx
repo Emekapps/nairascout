@@ -2,13 +2,15 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Check, Copy, Send, X } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Send, Users, X } from 'lucide-react';
 import type {
   NairaScoutSnapshot,
   ProductListing,
   ProductReferralEvent,
 } from '@/lib/nairascout-store';
 import { formatWholeNaira } from '@/lib/commission-engine';
+
+const MAX_RECIPIENTS = 20;
 
 interface ReferProductModalProps {
   product: ProductListing | null;
@@ -17,9 +19,9 @@ interface ReferProductModalProps {
   onClose: () => void;
   onSendReferral: (payload: {
     productListingId: string;
-    recipientScoutId: string;
+    recipientScoutIds: string[];
     note: string;
-  }) => Promise<ProductReferralEvent | null>;
+  }) => Promise<ProductReferralEvent[] | null>;
 }
 
 export default function ReferProductModal({
@@ -30,49 +32,69 @@ export default function ReferProductModal({
   onSendReferral,
 }: ReferProductModalProps) {
   const activeContacts = snapshot.scoutsList.filter((c) => !c.blocked);
-  const [recipientId, setRecipientId] = useState<string>(
-    initialRecipientId || activeContacts[0]?.scoutId || ''
-  );
+  const [selectedIds, setSelectedIds] = useState<string[]>(() => {
+    if (initialRecipientId) return [initialRecipientId];
+    return activeContacts[0]?.scoutId ? [activeContacts[0].scoutId] : [];
+  });
   const [note, setNote] = useState('');
-  const [createdEvent, setCreatedEvent] = useState<ProductReferralEvent | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [createdEvents, setCreatedEvents] = useState<ProductReferralEvent[]>([]);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   if (!product) return null;
 
-  const selectedId = recipientId || activeContacts[0]?.scoutId || '';
+  const referralRestriction = snapshot.activeScout?.activeRestrictions?.find(
+    (r) => r.status === 'ACTIVE' && r.capabilityCode === 'CREATE_REFERRAL'
+  );
+
+  const toggleRecipient = (scoutId: string) => {
+    setSelectedIds((prev) => {
+      if (prev.includes(scoutId)) {
+        return prev.filter((id) => id !== scoutId);
+      }
+      if (prev.length >= MAX_RECIPIENTS) {
+        return prev;
+      }
+      return [...prev, scoutId];
+    });
+  };
+
+  const handleSelectUpTo20 = () => {
+    const eligible = activeContacts.slice(0, MAX_RECIPIENTS);
+    setSelectedIds(eligible.map((c) => c.scoutId));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedId) return;
+    if (selectedIds.length === 0 || selectedIds.length > MAX_RECIPIENTS) return;
     setSubmitting(true);
-    const ev = await onSendReferral({
+    const events = await onSendReferral({
       productListingId: product.id,
-      recipientScoutId: selectedId,
+      recipientScoutIds: selectedIds,
       note,
     });
-    if (ev) {
-      setCreatedEvent(ev);
+    if (events && events.length > 0) {
+      setCreatedEvents(events);
     }
     setSubmitting(false);
   };
 
-  const shareUrl = createdEvent
-    ? `${typeof window !== 'undefined' ? window.location.origin : 'https://nairascout.ng'}/?refEvent=${createdEvent.id}&refScout=${createdEvent.senderHandle}`
-    : '';
+  const buildShareUrl = (ev: ProductReferralEvent) =>
+    `${typeof window !== 'undefined' ? window.location.origin : 'https://nairascout.ng'}/?refEvent=${ev.id}&refScout=${ev.senderHandle}`;
 
-  const handleCopy = () => {
-    if (!shareUrl) return;
-    navigator.clipboard?.writeText(shareUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1800);
+  const handleCopy = (ev: ProductReferralEvent) => {
+    navigator.clipboard?.writeText(buildShareUrl(ev));
+    setCopiedId(ev.id);
+    setTimeout(() => setCopiedId((prev) => (prev === ev.id ? null : prev)), 1800);
   };
 
   const handleClose = () => {
-    setCreatedEvent(null);
+    setCreatedEvents([]);
     setNote('');
     onClose();
   };
+
+  const atBatchCap = selectedIds.length >= MAX_RECIPIENTS;
 
   return (
     <div
@@ -81,14 +103,15 @@ export default function ReferProductModal({
       aria-label="Refer Product"
       className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-4"
     >
-      <div className="bg-white border border-[#E4E4DE] rounded-xl max-w-md w-full p-6 space-y-5">
+      <div className="bg-white border border-[#E4E4DE] rounded-xl max-w-lg w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="font-display text-xl font-bold text-[#111814]">
-              Refer Product to Scout
+              Refer Product to Scouts List
             </h2>
             <p className="text-xs text-[#5C665E] mt-0.5">
-              Creates a unique, traceable product referral event (not a recruitment action).
+              Generates one unique, traceable referral event per selected contact (max{' '}
+              {MAX_RECIPIENTS} recipients per batch).
             </p>
           </div>
           <button
@@ -113,6 +136,18 @@ export default function ReferProductModal({
           </p>
         </div>
 
+        {referralRestriction && (
+          <div className="bg-[#FEF2F2] border border-[#FECACA] rounded-lg p-3.5 text-xs text-[#991B1B] flex items-start gap-2.5">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+            <div>
+              <p className="font-semibold">Referral Capability Restricted (CREATE_REFERRAL)</p>
+              <p className="mt-0.5">
+                {referralRestriction.reason}. You may appeal this restriction from Account Settings.
+              </p>
+            </div>
+          </div>
+        )}
+
         {!snapshot.authenticated ? (
           <div className="space-y-4 text-xs text-[#4B554E]">
             <p>
@@ -126,39 +161,49 @@ export default function ReferProductModal({
               Sign In to Refer Products
             </Link>
           </div>
-        ) : createdEvent ? (
+        ) : createdEvents.length > 0 ? (
           <div className="space-y-4">
             <div className="bg-[#F3F8F6] border border-[#CBE2D8] rounded-lg p-4 text-xs text-[#0B6E4F] space-y-1">
               <p className="font-semibold">
-                Referral Event {createdEvent.id} Created
+                {createdEvents.length} Referral{' '}
+                {createdEvents.length === 1 ? 'Event' : 'Events'} Created
               </p>
               <p>
-                Sent to @{createdEvent.recipientHandle}. Attribution is preserved if the recipient
-                initiates checkout from this referral card or link.
+                Dispatched to {createdEvents.map((e) => `@${e.recipientHandle}`).join(', ')}.
+                Attribution is preserved when a recipient initiates checkout from a referral card
+                or link.
               </p>
             </div>
 
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-[#4B554E]">
-                Event-Specific External Referral Link
-              </p>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  readOnly
-                  value={shareUrl}
-                  aria-label="Event-specific referral link"
-                  className="flex-1 px-3 py-2 font-mono text-xs bg-[#FAFAF8] border border-[#D8D8D0] rounded-lg text-[#111814]"
-                />
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-white bg-[#111814] rounded-lg cursor-pointer shrink-0"
-                >
-                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {createdEvents.map((ev) => (
+                <div key={ev.id} className="space-y-1 p-2.5 bg-[#FAFAF8] border border-[#E4E4DE] rounded-lg">
+                  <p className="text-[11px] font-mono text-[#4B554E]">
+                    @{ev.recipientHandle} · {ev.id}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={buildShareUrl(ev)}
+                      aria-label={`Event-specific referral link for ${ev.recipientHandle}`}
+                      className="flex-1 px-2.5 py-1.5 font-mono text-[11px] bg-white border border-[#D8D8D0] rounded text-[#111814]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(ev)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-[#111814] rounded cursor-pointer shrink-0"
+                    >
+                      {copiedId === ev.id ? (
+                        <Check className="w-3.5 h-3.5" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                      {copiedId === ev.id ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
 
             <button
@@ -179,25 +224,65 @@ export default function ReferProductModal({
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label
-                htmlFor="ref-recipient"
-                className="block text-xs font-medium text-[#4B554E] mb-1"
-              >
-                Select Contact from Scouts List
-              </label>
-              <select
-                id="ref-recipient"
-                value={selectedId}
-                onChange={(e) => setRecipientId(e.target.value)}
-                required
-                className="w-full px-3 py-2 text-sm bg-white border border-[#D8D8D0] rounded-lg focus:outline-none focus:border-[#0B6E4F]"
-              >
-                {activeContacts.map((c) => (
-                  <option key={c.contactId} value={c.scoutId}>
-                    {c.displayName} (@{c.handle}) · {c.city}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <label className="text-xs font-medium text-[#4B554E] inline-flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-[#0B6E4F]" aria-hidden="true" />
+                  Select Recipients from Scouts List
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSelectUpTo20}
+                    className="text-[11px] font-semibold text-[#0B6E4F] hover:underline cursor-pointer"
+                  >
+                    Select Eligible
+                  </button>
+                  <span
+                    className={`font-mono text-xs font-semibold tabular-nums ${
+                      atBatchCap ? 'text-[#B45309]' : 'text-[#0B6E4F]'
+                    }`}
+                  >
+                    Selected: {selectedIds.length} / {MAX_RECIPIENTS} recipients
+                  </span>
+                </div>
+              </div>
+
+              <div className="max-h-48 overflow-y-auto border border-[#D8D8D0] rounded-lg divide-y divide-[#ECECE6] bg-white">
+                {activeContacts.map((c) => {
+                  const checked = selectedIds.includes(c.scoutId);
+                  const disabled = !checked && atBatchCap;
+                  return (
+                    <label
+                      key={c.contactId}
+                      className={`flex items-center justify-between gap-3 px-3 py-2.5 text-xs ${
+                        disabled ? 'opacity-50 cursor-not-allowed bg-[#FAFAF8]' : 'cursor-pointer hover:bg-[#FAFAF8]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={disabled}
+                          onChange={() => toggleRecipient(c.scoutId)}
+                          className="accent-[#0B6E4F]"
+                        />
+                        <div>
+                          <p className="font-semibold text-[#111814]">
+                            {c.displayName}{' '}
+                            <span className="font-mono font-normal text-[#5C665E]">@{c.handle}</span>
+                          </p>
+                          <p className="text-[11px] text-[#5C665E]">{c.city}</p>
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+              {atBatchCap && (
+                <p className="mt-1 text-[11px] text-[#B45309]">
+                  Maximum batch limit of {MAX_RECIPIENTS} recipients reached for this operation.
+                </p>
+              )}
             </div>
 
             <div>
@@ -219,11 +304,13 @@ export default function ReferProductModal({
 
             <button
               type="submit"
-              disabled={!selectedId || submitting}
+              disabled={selectedIds.length === 0 || submitting || Boolean(referralRestriction)}
               className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg hover:bg-[#09583F] disabled:opacity-45 cursor-pointer"
             >
               <Send className="w-3.5 h-3.5" aria-hidden="true" />
-              {submitting ? 'Generating Referral Card...' : 'Send Product Referral'}
+              {submitting
+                ? 'Generating Referral Cards...'
+                : `Send Product Referral (${selectedIds.length})`}
             </button>
           </form>
         )}

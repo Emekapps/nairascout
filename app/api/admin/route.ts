@@ -1,13 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { AccountStatus, AuthorizationError, SellerStatus } from '@/lib/auth/rbac';
+import {
+  AccountStatus,
+  AuthorizationError,
+  CapabilityCode,
+  RestrictionScope,
+  SellerStatus,
+  SubscriptionStatus,
+} from '@/lib/auth/rbac';
 import {
   extractSessionIdentityFromRequest,
   verifyMutationOrigin,
 } from '@/lib/auth/session';
 import {
   adminApplyUserAction,
+  adminCreateMakerCheckerRequest,
+  adminDecideAppeal,
+  adminDecideMakerCheckerRequest,
+  adminManageRestriction,
   adminReviewVerification,
   getAdminConsoleSnapshot,
+  MakerCheckerActionType,
 } from '@/lib/nairascout-store';
 import { createSupabaseAdminClient } from '@/lib/supabase/server';
 
@@ -66,7 +78,12 @@ export async function POST(req: NextRequest) {
     if (action === 'review_verification') {
       const updated = await adminReviewVerification(identity.userId, {
         verificationId: String(body.verificationId || ''),
-        decision: body.decision as 'APPROVED' | 'REJECTED' | 'ACTION_REQUIRED',
+        decision: body.decision as
+          | 'UNDER_REVIEW'
+          | 'VERIFIED'
+          | 'REJECTED'
+          | 'ACTION_REQUIRED'
+          | 'APPROVED',
         reviewerNotes: String(body.reviewerNotes || ''),
       });
       return NextResponse.json({
@@ -82,12 +99,80 @@ export async function POST(req: NextRequest) {
         actionType: body.actionType,
         accountStatus: body.accountStatus as AccountStatus | undefined,
         sellerStatus: body.sellerStatus as SellerStatus | undefined,
+        subscriptionStatus: body.subscriptionStatus as SubscriptionStatus | undefined,
         abuseReportId: body.abuseReportId ? String(body.abuseReportId) : undefined,
         abuseResolution: body.abuseResolution as 'RESOLVED' | 'DISMISSED' | undefined,
         reason: String(body.reason || ''),
       });
       return NextResponse.json({
         ok: true,
+        admin: await getAdminConsoleSnapshot(identity.userId),
+      });
+    }
+
+    if (action === 'manage_restriction') {
+      if (body.operation === 'LIFT') {
+        await adminManageRestriction(identity.userId, {
+          operation: 'LIFT',
+          restrictionId: String(body.restrictionId || ''),
+          reason: String(body.reason || ''),
+        });
+      } else {
+        await adminManageRestriction(identity.userId, {
+          operation: 'IMPOSE',
+          targetUserId: String(body.targetUserId || ''),
+          scope: (body.scope || 'CAPABILITY') as RestrictionScope,
+          capabilityCode: body.capabilityCode as CapabilityCode,
+          reason: String(body.reason || ''),
+          expiresInDays: body.expiresInDays ? Number(body.expiresInDays) : null,
+        });
+      }
+      return NextResponse.json({
+        ok: true,
+        admin: await getAdminConsoleSnapshot(identity.userId),
+      });
+    }
+
+    if (action === 'maker_checker_create') {
+      const requestRecord = await adminCreateMakerCheckerRequest(identity.userId, {
+        actionType: body.actionType as MakerCheckerActionType,
+        targetUserId: String(body.targetUserId || ''),
+        targetEntityId: body.targetEntityId ? String(body.targetEntityId) : null,
+        payload: (body.payload && typeof body.payload === 'object' ? body.payload : {}) as Record<
+          string,
+          unknown
+        >,
+        reason: String(body.reason || ''),
+      });
+      return NextResponse.json({
+        ok: true,
+        request: requestRecord,
+        admin: await getAdminConsoleSnapshot(identity.userId),
+      });
+    }
+
+    if (action === 'maker_checker_decide') {
+      const decided = await adminDecideMakerCheckerRequest(identity.userId, {
+        requestId: String(body.requestId || ''),
+        decision: body.decision === 'REJECTED' ? 'REJECTED' : 'APPROVED',
+        checkerNotes: String(body.checkerNotes || ''),
+      });
+      return NextResponse.json({
+        ok: true,
+        request: decided,
+        admin: await getAdminConsoleSnapshot(identity.userId),
+      });
+    }
+
+    if (action === 'decide_appeal') {
+      const appeal = await adminDecideAppeal(identity.userId, {
+        appealId: String(body.appealId || ''),
+        decision: body.decision as 'UNDER_REVIEW' | 'UPHELD' | 'OVERTURNED',
+        decisionNotes: String(body.decisionNotes || ''),
+      });
+      return NextResponse.json({
+        ok: true,
+        appeal,
         admin: await getAdminConsoleSnapshot(identity.userId),
       });
     }
