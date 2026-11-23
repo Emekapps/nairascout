@@ -4,7 +4,7 @@ import {
   extractSessionIdentityFromRequest,
   verifyMutationOrigin,
 } from '@/lib/auth/session';
-import { isPostgresConfigured } from '@/lib/db';
+import { formatPostgresError, isPostgresConfigured } from '@/lib/db';
 import {
   advanceOrderStatus,
   AppealTargetType,
@@ -40,8 +40,8 @@ export async function GET(req: NextRequest) {
         referralEventId: refEvent,
         referralScoutUsername: refScout,
       });
-    } catch {
-      // Allow snapshot read to handle DB status cleanly
+    } catch (err) {
+      console.error('[GET /api/nairascout] PostgreSQL provisioning failed:', formatPostgresError(err), err);
     }
   }
 

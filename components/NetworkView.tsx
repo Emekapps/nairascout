@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -19,6 +19,7 @@ import {
 import type { NairaScoutSnapshot, ProductListing } from '@/lib/nairascout-store';
 import { CommissionBreakdown, formatKoboToNaira } from '@/lib/commission-engine';
 import { DismissibleNoticePanel } from './shared/DismissibleNoticePanel';
+import { UserIdentityRow } from './shared/UserIdentityRow';
 
 interface NetworkViewProps {
   snapshot: NairaScoutSnapshot;
@@ -48,10 +49,25 @@ export default function NetworkView({
   const [subTab, setSubTab] = useState<'explorer' | 'scouts_list' | 'simulator'>('explorer');
   const [inviteSubTab, setInviteSubTab] = useState<'received' | 'sent'>('received');
   const [scoutSearch, setScoutSearch] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const searchDropdownRef = useRef<HTMLDivElement | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [abuseTarget, setAbuseTarget] = useState<{ userId: string; handle: string } | null>(null);
   const [abuseReason, setAbuseReason] = useState('Unsolicited spam or harassment');
   const [abuseDesc, setAbuseDesc] = useState('');
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (
+        searchDropdownRef.current &&
+        !searchDropdownRef.current.contains(event.target as Node)
+      ) {
+        setSearchFocused(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, []);
 
   // Simulator controls
   const [merchNaira, setMerchNaira] = useState<number>(100000);
@@ -412,25 +428,20 @@ export default function NetworkView({
                         key={contact.contactId}
                         className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                       >
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold text-sm text-foreground">
-                              {contact.displayName}
-                            </p>
-                            <span className="font-sans text-xs text-muted-foreground">
-                              @{contact.handle}
-                            </span>
-                            {contact.hasActiveSellerBadge && (
-                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-success">
-                                <Store className="w-3 h-3" />
+                        <UserIdentityRow
+                          avatarUrl={contact.avatarUrl}
+                          displayName={contact.displayName}
+                          username={contact.handle}
+                          badge={
+                            contact.hasActiveSellerBadge ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-success shrink-0">
+                                <Store className="w-3 h-3" aria-hidden="true" />
                                 Seller
                               </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {contact.city} · Added {contact.addedAt}
-                          </p>
-                        </div>
+                            ) : undefined
+                          }
+                          subtitle={`${contact.city} · Added ${contact.addedAt}`}
+                        />
 
                         <div className="flex flex-wrap items-center gap-2 shrink-0">
                           {snapshot.products[0] && (
@@ -498,16 +509,113 @@ export default function NetworkView({
                       search.
                     </p>
                   </div>
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                  <div ref={searchDropdownRef} className="relative w-full sm:w-72">
+                    <Search
+                      className="w-3.5 h-3.5 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                      aria-hidden="true"
+                    />
                     <input
                       type="text"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-controls="scout-suggestions-listbox"
                       value={scoutSearch}
-                      onChange={(e) => setScoutSearch(e.target.value)}
+                      onFocus={() => setSearchFocused(true)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setSearchFocused(false);
+                      }}
+                      onChange={(e) => {
+                        setScoutSearch(e.target.value);
+                        setSearchFocused(true);
+                      }}
                       placeholder="Search username or state..."
                       aria-label="Search public Scouts directory"
-                      className="pl-8 pr-3 py-2 text-xs bg-card text-foreground border border-border rounded-xl w-56 focus:outline-none focus:border-ring"
+                      aria-expanded={searchFocused && scoutSearch.trim().length > 0}
+                      className="pl-8 pr-8 py-2 text-xs bg-card text-foreground border border-border rounded-xl w-full focus:outline-none focus:border-ring"
                     />
+                    {scoutSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setScoutSearch('')}
+                        aria-label="Clear Scout search"
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
+                    {/* Smart Suggestion Dropdown */}
+                    {searchFocused && scoutSearch.trim().length > 0 && (
+                      <div
+                        id="scout-suggestions-listbox"
+                        role="listbox"
+                        aria-label="Scout search suggestions"
+                        className="absolute left-0 right-0 mt-1.5 z-40 bg-popover text-popover-foreground border border-border rounded-2xl shadow-xl overflow-hidden max-h-72 overflow-y-auto divide-y divide-border"
+                      >
+                        {filteredDirectory.length === 0 ? (
+                          <p className="px-4 py-3 text-xs text-muted-foreground">
+                            No Scouts matching &ldquo;{scoutSearch.trim()}&rdquo;.
+                          </p>
+                        ) : (
+                          filteredDirectory.slice(0, 6).map((scout) => {
+                            const alreadyContact = snapshot.scoutsList.some(
+                              (c) => c.scoutId === scout.userId
+                            );
+                            const pendingInv = snapshot.invitations.some(
+                              (i) => i.otherScoutId === scout.userId && i.status === 'pending'
+                            );
+                            return (
+                              <div
+                                key={`suggest-${scout.userId}`}
+                                role="option"
+                                aria-selected={false}
+                                className="px-3.5 py-2.5 flex items-center justify-between gap-3 hover:bg-muted/60 transition-colors"
+                              >
+                                <UserIdentityRow
+                                  avatarUrl={scout.avatarUrl}
+                                  displayName={scout.displayName}
+                                  username={scout.username}
+                                  size="sm"
+                                  badge={
+                                    scout.hasActiveSellerBadge ? (
+                                      <span className="text-[10px] font-semibold text-success shrink-0">
+                                        Seller
+                                      </span>
+                                    ) : undefined
+                                  }
+                                />
+                                <div className="shrink-0">
+                                  {alreadyContact ? (
+                                    <span className="text-[11px] font-semibold text-success">
+                                      Contact
+                                    </span>
+                                  ) : pendingInv ? (
+                                    <span className="text-[11px] text-amber-600 dark:text-amber-400">
+                                      Pending
+                                    </span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      disabled={busyId === scout.userId}
+                                      onClick={async () => {
+                                        setBusyId(scout.userId);
+                                        await onInviteScout(scout.userId);
+                                        setBusyId(null);
+                                        setSearchFocused(false);
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-primary-foreground bg-primary border border-primary-border rounded-lg hover:bg-primary/90 cursor-pointer"
+                                    >
+                                      <UserPlus className="w-3 h-3" aria-hidden="true" />
+                                      Invite
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -524,30 +632,26 @@ export default function NetworkView({
                         key={scout.userId}
                         className="p-4 flex items-center justify-between gap-4"
                       >
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2 text-sm">
-                            <span className="font-semibold text-foreground">
-                              {scout.displayName}
-                            </span>
-                            <span className="font-sans text-xs text-muted-foreground">
-                              @{scout.username}
-                            </span>
-                            {scout.hasActiveSellerBadge && (
-                              <span className="text-[11px] font-medium text-foreground">
-                                · Seller
-                              </span>
-                            )}
-                            {scout.isSellerVerified && (
-                              <span className="text-[11px] font-semibold text-success">
-                                · KYC Verified
-                              </span>
-                            )}
-                          </div>
-                          <p className="font-sans text-xs text-muted-foreground mt-0.5 tabular-nums">
-                            {scout.locationState || 'Nigeria'} · Working with{' '}
-                            {scout.workingWithCount} Scouts · {scout.totalSoldUnits} units sold
-                          </p>
-                        </div>
+                        <UserIdentityRow
+                          avatarUrl={scout.avatarUrl}
+                          displayName={scout.displayName}
+                          username={scout.username}
+                          badge={
+                            <>
+                              {scout.hasActiveSellerBadge && (
+                                <span className="text-[11px] font-medium text-foreground shrink-0">
+                                  Seller
+                                </span>
+                              )}
+                              {scout.isSellerVerified && (
+                                <span className="text-[11px] font-semibold text-success shrink-0">
+                                  · KYC Verified
+                                </span>
+                              )}
+                            </>
+                          }
+                          subtitle={`${scout.locationState || 'Nigeria'} · Working with ${scout.workingWithCount} Scouts · ${scout.totalSoldUnits} units sold`}
+                        />
 
                         <div className="shrink-0">
                           {alreadyContact ? (
@@ -620,16 +724,16 @@ export default function NetworkView({
                   ) : (
                     <div className="divide-y divide-border">
                       {receivedInvites.map((inv) => (
-                        <div key={inv.id} className="py-3 first:pt-0 space-y-2">
-                          <div className="flex justify-between text-sm">
-                            <span className="font-medium text-foreground">
-                              {inv.otherDisplayName} (@{inv.otherHandle})
-                            </span>
-                            <span className="text-xs text-muted-foreground">{inv.otherCity}</span>
+                        <div key={inv.id} className="py-3 first:pt-0 space-y-2.5">
+                          <div className="flex items-start justify-between gap-3">
+                            <UserIdentityRow
+                              avatarUrl={inv.otherAvatarUrl}
+                              displayName={inv.otherDisplayName}
+                              username={inv.otherHandle}
+                              size="sm"
+                              subtitle={`${inv.otherCity} · Expires ${inv.expiresAt}`}
+                            />
                           </div>
-                          <p className="font-numeric text-xs text-muted-foreground">
-                            Expires {inv.expiresAt}
-                          </p>
                           <div className="flex gap-2">
                             <button
                               type="button"
@@ -657,17 +761,18 @@ export default function NetworkView({
                   <div className="divide-y divide-border">
                     {sentInvites.map((inv) => (
                       <div key={inv.id} className="py-3 first:pt-0 space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span className="font-medium text-foreground">
-                            {inv.otherDisplayName} (@{inv.otherHandle})
-                          </span>
-                          <span className="text-xs capitalize text-muted-foreground">
+                        <div className="flex items-start justify-between gap-3">
+                          <UserIdentityRow
+                            avatarUrl={inv.otherAvatarUrl}
+                            displayName={inv.otherDisplayName}
+                            username={inv.otherHandle}
+                            size="sm"
+                            subtitle={`${inv.otherCity} · Expires ${inv.expiresAt}`}
+                          />
+                          <span className="text-xs capitalize text-muted-foreground shrink-0">
                             {inv.status}
                           </span>
                         </div>
-                        <p className="font-numeric text-xs text-muted-foreground">
-                          {inv.otherCity} · Expires {inv.expiresAt}
-                        </p>
                         {inv.status === 'pending' && (
                           <button
                             type="button"
@@ -947,7 +1052,7 @@ export default function NetworkView({
                 <select
                   value={abuseReason}
                   onChange={(e) => setAbuseReason(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
+                  className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                 >
                   <option value="Unsolicited spam or harassment">
                     Unsolicited spam or harassment

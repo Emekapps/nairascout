@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import type { ActiveScoutDTO } from '@/lib/nairascout-store';
 import type { NavTab } from '@/components/HeaderNav';
+import { UserAvatar } from '@/components/shared/UserAvatar';
 import { ThemeToggle } from './ThemeToggle';
 
 interface DesktopSidebarProps {
@@ -45,14 +46,6 @@ export function DesktopSidebar({
   authenticated,
   activeScout,
 }: DesktopSidebarProps) {
-  const initials = activeScout
-    ? activeScout.displayName
-        .split(' ')
-        .map((p) => p[0])
-        .join('')
-        .slice(0, 2)
-        .toUpperCase()
-    : 'NS';
 
   return (
     <aside
@@ -143,9 +136,12 @@ export function DesktopSidebar({
       <div className="p-3 border-t border-sidebar-border space-y-3 shrink-0">
         {authenticated && activeScout ? (
           <div className="flex items-center gap-2.5 p-2 rounded-xl bg-muted/60">
-            <div className="w-9 h-9 rounded-lg bg-primary text-primary-foreground border border-primary-border font-sans font-bold text-xs flex items-center justify-center shrink-0">
-              {initials}
-            </div>
+            <UserAvatar
+              avatarUrl={activeScout.avatarUrl}
+              displayName={activeScout.displayName}
+              username={activeScout.handle}
+              size="md"
+            />
             <div className="min-w-0 flex-1">
               <p className="text-xs font-semibold text-foreground truncate">
                 {activeScout.displayName}

@@ -19,6 +19,7 @@ import type {
   ProductReferralEvent,
 } from '@/lib/nairascout-store';
 import { formatWholeNaira } from '@/lib/commission-engine';
+import { UserIdentityRow } from './shared/UserIdentityRow';
 
 const MAX_RECIPIENTS = 20;
 
@@ -341,23 +342,21 @@ export default function ReferProductModal({
                           : 'cursor-pointer hover:bg-muted/60'
                       }`}
                     >
-                      <div className="flex items-center gap-2.5">
+                      <div className="flex items-center gap-2.5 min-w-0">
                         <input
                           type="checkbox"
                           checked={checked}
                           disabled={disabled}
                           onChange={() => toggleRecipient(c.scoutId)}
-                          className="accent-foreground"
+                          className="accent-foreground shrink-0"
                         />
-                        <div>
-                          <p className="font-semibold text-foreground">
-                            {c.displayName}{' '}
-                            <span className="font-sans font-normal text-muted-foreground">
-                              @{c.handle}
-                            </span>
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">{c.city}</p>
-                        </div>
+                        <UserIdentityRow
+                          avatarUrl={c.avatarUrl}
+                          displayName={c.displayName}
+                          username={c.handle}
+                          size="sm"
+                          subtitle={c.city}
+                        />
                       </div>
                     </label>
                   );

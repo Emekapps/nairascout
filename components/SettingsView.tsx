@@ -19,6 +19,7 @@ import type {
 } from '@/lib/nairascout-store';
 import { formatKoboToNaira } from '@/lib/commission-engine';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { UserIdentityRow } from './shared/UserIdentityRow';
 import { ThemeToggle } from './layout/ThemeToggle';
 
 interface SettingsViewProps {
@@ -245,7 +246,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
             className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground hover:text-muted-foreground"
           >
             <ArrowLeft className="w-4 h-4" aria-hidden="true" />
-            Back to NairaScout Workspace
+            Back to Home
           </Link>
           <div className="flex items-center gap-3">
             <span className="font-sans text-xs text-muted-foreground">@{scout.handle}</span>
@@ -255,7 +256,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-8 py-8 space-y-8">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-border pb-6">
+        <div className="flex flex-col gap-5 border-b border-border pb-6">
           <div>
             <h1 className="font-sans text-2xl md:text-3xl font-bold text-foreground">
               Account Settings
@@ -265,7 +266,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
               <strong className="font-sans text-foreground">{scout.accountStatus}</strong>
             </p>
           </div>
-          <div className="flex flex-wrap gap-1 p-1 bg-muted rounded-xl text-xs font-semibold">
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1 snap-x">
             {(
               [
                 { id: 'profile', label: 'Profile' },
@@ -281,10 +282,10 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                   setTab(t.id);
                   setFeedback(null);
                 }}
-                className={`px-3 py-2 rounded-lg cursor-pointer transition-colors ${
+                className={`whitespace-nowrap shrink-0 snap-start rounded-full px-4 py-2 font-sans text-xs font-semibold transition-all cursor-pointer ${
                   tab === t.id
-                    ? 'bg-card text-foreground shadow-xs'
-                    : 'text-muted-foreground hover:text-foreground'
+                    ? 'bg-primary text-primary-foreground border border-primary-border shadow-xs'
+                    : 'bg-secondary/70 text-muted-foreground border border-transparent hover:bg-secondary hover:text-foreground'
                 }`}
               >
                 {t.label}
@@ -382,7 +383,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                       e.target.value === 'NETWORK_ONLY' ? 'NETWORK_ONLY' : 'PUBLIC'
                     )
                   }
-                  className="w-full px-3 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
+                  className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                 >
                   <option value="PUBLIC">Public Sanitized Directory</option>
                   <option value="NETWORK_ONLY">Scouts List &amp; Network Only</option>
@@ -461,7 +462,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                 <select
                   value={invitationPolicy}
                   onChange={(e) => setInvitationPolicy(e.target.value as InvitationPolicy)}
-                  className="w-full px-3 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
+                  className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                 >
                   <option value="EVERYONE">EVERYONE — Any active Scout can invite you</option>
                   <option value="CONTACTS_ONLY">
@@ -511,10 +512,11 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                 <div className="divide-y divide-border">
                   {snapshot.blockedUsers.map((b) => (
                     <div key={b.userId} className="py-3 flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">{b.displayName}</p>
-                        <p className="font-sans text-xs text-muted-foreground">@{b.username}</p>
-                      </div>
+                      <UserIdentityRow
+                        displayName={b.displayName}
+                        username={b.username}
+                        size="sm"
+                      />
                       <button
                         type="button"
                         onClick={() =>
@@ -727,7 +729,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                 <select
                   value={verifCat}
                   onChange={(e) => setVerifCat(e.target.value as VerificationCategory)}
-                  className="w-full px-3 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
+                  className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                 >
                   <option value="IDENTITY">IDENTITY (NIN / Passport / Driver&apos;s License)</option>
                   <option value="PAYOUT_BANK">PAYOUT_BANK (Nigerian Naira Settlement Account)</option>
@@ -785,23 +787,23 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
 
         {tab === 'lifecycle' && (
           <div className="max-w-2xl bg-card border border-border rounded-2xl p-6 space-y-6">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-destructive shrink-0 mt-0.5" aria-hidden="true" />
-                <div>
-                  <h2 className="font-sans text-xl font-bold text-foreground">
+            <div className="flex flex-col items-start gap-4">
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-destructive shrink-0" aria-hidden="true" />
+                  <h2 className="font-sans text-base sm:text-xl font-bold text-foreground">
                     Two-Track Account &amp; Seller Closure
                   </h2>
-                  <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                    Choose Track 1 to close only your Seller store while keeping your Scout identity
-                    and commission wallet active, or Track 2 to permanently close your full
-                    NairaScout account while preserving immutable ancestry &amp; ledger history.
-                  </p>
                 </div>
+                <p className="font-sans text-sm leading-relaxed text-muted-foreground">
+                  Choose Track 1 to close only your Seller store while keeping your Scout identity
+                  and commission wallet active, or Track 2 to permanently close your full NairaScout
+                  account while preserving immutable ancestry &amp; ledger history.
+                </p>
               </div>
               <Link
                 href="/settings/closure"
-                className="px-3.5 py-2 text-xs font-semibold text-commerce-foreground bg-commerce rounded-xl shrink-0"
+                className="w-full sm:w-auto inline-flex items-center justify-center rounded-xl bg-destructive px-4 py-2.5 font-sans text-xs font-semibold text-destructive-foreground hover:bg-destructive/90 transition-colors"
               >
                 Open Closure Flow
               </Link>

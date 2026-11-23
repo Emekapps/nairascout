@@ -49,7 +49,7 @@ import {
   transitions,
 } from './auth/transitions';
 import { loadDbAuthContext, SupabaseSessionIdentity } from './auth/session';
-import { getDb, isPostgresConfigured, NairaScoutDb, requireDb } from './db';
+import { formatPostgresError, getDb, isPostgresConfigured, NairaScoutDb, requireDb } from './db';
 import {
   abuseReports,
   auditLogs,
@@ -242,6 +242,7 @@ export interface ScoutsListContact {
   scoutId: string;
   handle: string;
   displayName: string;
+  avatarUrl?: string | null;
   city: string;
   addedAt: string;
   blocked: boolean;
@@ -257,6 +258,7 @@ export interface ScoutsListInvitation {
   otherScoutId: string;
   otherHandle: string;
   otherDisplayName: string;
+  otherAvatarUrl?: string | null;
   otherCity: string;
   status: 'pending' | 'accepted' | 'rejected' | 'withdrawn' | 'expired';
   createdAt: string;
@@ -400,6 +402,7 @@ export interface ActiveScoutDTO {
   email: string;
   handle: string;
   displayName: string;
+  avatarUrl?: string | null;
   bio: string | null;
   city: string;
   preferredCategories: string[];
@@ -467,7 +470,13 @@ export interface NairaScoutSnapshot {
 // ============================================================================
 
 async function ensureTablesReady(db: NairaScoutDb) {
-  await ensureCommerceTables((q) => db.execute(q));
+  try {
+    await ensureCommerceTables((q) => db.execute(q));
+  } catch (err) {
+    const formatted = formatPostgresError(err);
+    console.error('[PostgreSQL DDL Error] ensureCommerceTables failed:', formatted, err);
+    throw err;
+  }
 }
 
 function emptyWallet(): WalletSummary {
@@ -661,27 +670,37 @@ export async function ensureUserProvisionedInDb(
   const db = requireDb();
   await ensureTablesReady(db);
 
-  const existing = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.id, identity.userId))
-    .limit(1);
+  const [existingUser, existingProfile, existingAncestry] = await Promise.all([
+    db.select({ id: users.id }).from(users).where(eq(users.id, identity.userId)).limit(1),
+    db
+      .select({ userId: scoutProfiles.userId })
+      .from(scoutProfiles)
+      .where(eq(scoutProfiles.userId, identity.userId))
+      .limit(1),
+    db
+      .select({ scoutUserId: referralAncestry.scoutUserId })
+      .from(referralAncestry)
+      .where(eq(referralAncestry.scoutUserId, identity.userId))
+      .limit(1),
+  ]);
 
-  if (existing.length > 0) {
+  if (existingUser.length > 0 && existingProfile.length > 0 && existingAncestry.length > 0) {
     return { createdNew: false, userId: identity.userId };
   }
 
+  const normalizedEmail = identity.email.trim().toLowerCase();
+  const normalizedPhone = identity.phone?.trim() ? identity.phone.trim() : null;
   const meta = identity.userMetadata || {};
   const rawDisplayName =
     input?.displayName?.trim() ||
     (typeof meta.display_name === 'string' && meta.display_name.trim()) ||
     (typeof meta.full_name === 'string' && meta.full_name.trim()) ||
-    identity.email.split('@')[0];
+    normalizedEmail.split('@')[0];
 
   const baseUsernameRaw =
     input?.username?.trim() ||
     (typeof meta.username === 'string' && meta.username.trim()) ||
-    identity.email.split('@')[0];
+    normalizedEmail.split('@')[0];
   const baseSlug =
     baseUsernameRaw
       .toLowerCase()
@@ -693,131 +712,263 @@ export async function ensureUserProvisionedInDb(
     (typeof meta.location_state === 'string' && meta.location_state.trim()) ||
     'Lagos';
 
-  const created = await db.transaction(async (tx) => {
-    const insideCheck = await tx
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.id, identity.userId))
-      .limit(1);
-    if (insideCheck.length > 0) {
-      return false;
-    }
+  try {
+    const created = await db.transaction(async (tx) => {
+      let anyCreated = false;
 
-    // Resolve unique username safely
-    let candidate = baseSlug;
-    let suffix = 1;
-    while (true) {
-      const taken = await tx
-        .select({ userId: scoutProfiles.userId })
-        .from(scoutProfiles)
-        .where(eq(scoutProfiles.username, candidate))
+      // 1. Idempotent insert into public.users
+      let userRow = await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, identity.userId))
         .limit(1);
-      if (taken.length === 0) break;
-      candidate = `${baseSlug}_${suffix++}`;
-    }
 
-    // Resolve referral attribution cleanly without self-referral
-    let directReferrerId: string | null = null;
-    let attributionSource: 'REFERRAL_CARD' | 'REFERRAL_LINK' | 'ORGANIC' = 'ORGANIC';
-    let resolvedEventId: string | null = null;
+      if (userRow.length === 0) {
+        await tx
+          .insert(users)
+          .values({
+            id: identity.userId,
+            email: normalizedEmail,
+            phone: normalizedPhone,
+            accountStatus: 'ACTIVE',
+          })
+          .onConflictDoNothing();
 
-    if (isUuid(input?.referralEventId)) {
-      const evRows = await tx
-        .select()
-        .from(productReferralEvents)
-        .where(eq(productReferralEvents.id, input!.referralEventId!))
-        .limit(1);
-      const ev = evRows[0];
-      if (ev && ev.senderScoutId !== identity.userId) {
-        directReferrerId = ev.senderScoutId;
-        attributionSource = 'REFERRAL_CARD';
-        resolvedEventId = ev.id;
+        userRow = await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.id, identity.userId))
+          .limit(1);
+
+        if (userRow.length === 0 && normalizedPhone !== null) {
+          await tx
+            .insert(users)
+            .values({
+              id: identity.userId,
+              email: normalizedEmail,
+              phone: null,
+              accountStatus: 'ACTIVE',
+            })
+            .onConflictDoNothing();
+
+          userRow = await tx
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.id, identity.userId))
+            .limit(1);
+        }
+
+        if (userRow.length === 0) {
+          const emailConflict = await tx
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.email, normalizedEmail))
+            .limit(1);
+          if (emailConflict.length > 0) {
+            throw new AuthorizationError(
+              `Email ${normalizedEmail} is already registered in public.users under user ID ${emailConflict[0].id} (current Auth ID: ${identity.userId}).`,
+              409,
+              'USER_EMAIL_ID_MISMATCH'
+            );
+          }
+          throw new Error(`Failed to verify or insert public.users row for ${identity.userId}.`);
+        }
+
+        anyCreated = true;
       }
-    }
 
-    if (!directReferrerId && input?.referralScoutUsername?.trim()) {
-      const refSlug = input.referralScoutUsername.trim().toLowerCase();
-      const refRows = await tx
-        .select({ userId: scoutProfiles.userId })
+      // 2. Idempotent insert into public.scout_profiles
+      let profileRow = await tx
+        .select({ userId: scoutProfiles.userId, username: scoutProfiles.username })
         .from(scoutProfiles)
-        .where(eq(scoutProfiles.username, refSlug))
+        .where(eq(scoutProfiles.userId, identity.userId))
         .limit(1);
-      if (refRows[0] && refRows[0].userId !== identity.userId) {
-        directReferrerId = refRows[0].userId;
-        attributionSource = 'REFERRAL_LINK';
+
+      let resolvedUsername = profileRow[0]?.username ?? baseSlug;
+
+      if (profileRow.length === 0) {
+        let candidate = baseSlug;
+        let suffix = 1;
+        while (true) {
+          const taken = await tx
+            .select({ userId: scoutProfiles.userId })
+            .from(scoutProfiles)
+            .where(eq(scoutProfiles.username, candidate))
+            .limit(1);
+          if (taken.length === 0) break;
+          candidate = `${baseSlug}_${suffix++}`;
+        }
+
+        await tx
+          .insert(scoutProfiles)
+          .values({
+            userId: identity.userId,
+            username: candidate,
+            displayName: rawDisplayName,
+            locationState,
+            preferredCategories: [],
+            invitationPolicy: 'EVERYONE',
+            muteReferrals: false,
+            profileVisibility: 'PUBLIC',
+          })
+          .onConflictDoNothing();
+
+        profileRow = await tx
+          .select({ userId: scoutProfiles.userId, username: scoutProfiles.username })
+          .from(scoutProfiles)
+          .where(eq(scoutProfiles.userId, identity.userId))
+          .limit(1);
+
+        if (profileRow.length === 0) {
+          const fallbackUsername = `${baseSlug}_${identity.userId.replace(/-/g, '').slice(0, 8)}`;
+          await tx
+            .insert(scoutProfiles)
+            .values({
+              userId: identity.userId,
+              username: fallbackUsername,
+              displayName: rawDisplayName,
+              locationState,
+              preferredCategories: [],
+              invitationPolicy: 'EVERYONE',
+              muteReferrals: false,
+              profileVisibility: 'PUBLIC',
+            })
+            .onConflictDoNothing();
+
+          profileRow = await tx
+            .select({ userId: scoutProfiles.userId, username: scoutProfiles.username })
+            .from(scoutProfiles)
+            .where(eq(scoutProfiles.userId, identity.userId))
+            .limit(1);
+        }
+
+        resolvedUsername = profileRow[0]?.username ?? candidate;
+        anyCreated = true;
       }
-    }
 
-    // 1. Insert public.users
-    await tx.insert(users).values({
-      id: identity.userId,
-      email: identity.email.toLowerCase(),
-      phone: identity.phone,
-      accountStatus: 'ACTIVE',
+      // 3. Idempotent insert into public.referral_ancestry (permanent)
+      const ancestryRow = await tx
+        .select({ scoutUserId: referralAncestry.scoutUserId })
+        .from(referralAncestry)
+        .where(eq(referralAncestry.scoutUserId, identity.userId))
+        .limit(1);
+
+      let directReferrerId: string | null = null;
+      let attributionSource: 'REFERRAL_CARD' | 'REFERRAL_LINK' | 'ORGANIC' = 'ORGANIC';
+      let resolvedEventId: string | null = null;
+
+      if (ancestryRow.length === 0) {
+        if (isUuid(input?.referralEventId)) {
+          const evRows = await tx
+            .select()
+            .from(productReferralEvents)
+            .where(eq(productReferralEvents.id, input!.referralEventId!))
+            .limit(1);
+          const ev = evRows[0];
+          if (ev && ev.senderScoutId !== identity.userId) {
+            directReferrerId = ev.senderScoutId;
+            attributionSource = 'REFERRAL_CARD';
+            resolvedEventId = ev.id;
+          }
+        }
+
+        if (!directReferrerId && input?.referralScoutUsername?.trim()) {
+          const refSlug = input.referralScoutUsername.trim().toLowerCase();
+          const refRows = await tx
+            .select({ userId: scoutProfiles.userId })
+            .from(scoutProfiles)
+            .where(eq(scoutProfiles.username, refSlug))
+            .limit(1);
+          if (refRows[0] && refRows[0].userId !== identity.userId) {
+            directReferrerId = refRows[0].userId;
+            attributionSource = 'REFERRAL_LINK';
+          }
+        }
+
+        await tx
+          .insert(referralAncestry)
+          .values({
+            scoutUserId: identity.userId,
+            directReferrerId,
+            attributionSource,
+            referralEventId: resolvedEventId,
+          })
+          .onConflictDoNothing();
+
+        anyCreated = true;
+      }
+
+      // 4. Idempotent initial CONTACT verification (verified via Supabase Auth)
+      const existingContactVerif = await tx
+        .select({ id: verificationRecords.id })
+        .from(verificationRecords)
+        .where(
+          and(
+            eq(verificationRecords.userId, identity.userId),
+            eq(verificationRecords.category, 'CONTACT')
+          )
+        )
+        .limit(1);
+
+      if (existingContactVerif.length === 0) {
+        await tx
+          .insert(verificationRecords)
+          .values({
+            userId: identity.userId,
+            category: 'CONTACT',
+            status: 'VERIFIED',
+            evidencePaths: [],
+            reviewerNotes: 'Verified via Supabase Auth',
+            submittedAt: new Date(),
+            reviewedAt: new Date(),
+          })
+          .onConflictDoNothing();
+      }
+
+      // 5. Audit log entry in public.audit_logs (if newly provisioned or missing)
+      if (anyCreated) {
+        await tx
+          .insert(auditLogs)
+          .values({
+            actorId: identity.userId,
+            affectedUserId: identity.userId,
+            action: 'USER_PROVISIONED',
+            entityType: 'users',
+            entityId: identity.userId,
+            newValue: {
+              email: normalizedEmail,
+              username: resolvedUsername,
+              attributionSource,
+              directReferrerId,
+              referralEventId: resolvedEventId,
+            },
+            reason: 'Atomic Scout identity provisioned via Supabase Auth',
+          })
+          .onConflictDoNothing();
+
+        // 6. Welcome notification
+        await tx
+          .insert(platformNotifications)
+          .values({
+            userId: identity.userId,
+            category: 'trust',
+            title: 'Free Scout Account Provisioned',
+            body: directReferrerId
+              ? `Your permanent referral ancestry (${attributionSource}) is locked. You can refer products or activate Seller capabilities anytime.`
+              : 'Welcome to NairaScout. Browse the marketplace, connect on Scouts List, or activate Seller capabilities anytime.',
+          })
+          .onConflictDoNothing();
+      }
+
+      return anyCreated;
     });
 
-    // 2. Insert public.scout_profiles
-    await tx.insert(scoutProfiles).values({
-      userId: identity.userId,
-      username: candidate,
-      displayName: rawDisplayName,
-      locationState,
-      preferredCategories: [],
-      invitationPolicy: 'EVERYONE',
-      muteReferrals: false,
-      profileVisibility: 'PUBLIC',
-    });
-
-    // 3. Insert public.referral_ancestry (permanent)
-    await tx.insert(referralAncestry).values({
-      scoutUserId: identity.userId,
-      directReferrerId,
-      attributionSource,
-      referralEventId: resolvedEventId,
-    });
-
-    // 4. Insert initial CONTACT verification (verified via Supabase Auth)
-    await tx.insert(verificationRecords).values({
-      userId: identity.userId,
-      category: 'CONTACT',
-      status: 'VERIFIED',
-      evidencePaths: [],
-      reviewerNotes: 'Verified via Supabase Auth',
-      submittedAt: new Date(),
-      reviewedAt: new Date(),
-    });
-
-    // 5. Insert audit log entry in public.audit_logs
-    await tx.insert(auditLogs).values({
-      actorId: identity.userId,
-      affectedUserId: identity.userId,
-      action: 'USER_PROVISIONED',
-      entityType: 'users',
-      entityId: identity.userId,
-      newValue: {
-        email: identity.email.toLowerCase(),
-        username: candidate,
-        attributionSource,
-        directReferrerId,
-        referralEventId: resolvedEventId,
-      },
-      reason: 'Atomic Scout identity provisioned via Supabase Auth',
-    });
-
-    // 6. Welcome notification
-    await tx.insert(platformNotifications).values({
-      userId: identity.userId,
-      category: 'trust',
-      title: 'Free Scout Account Provisioned',
-      body: directReferrerId
-        ? `Your permanent referral ancestry (${attributionSource}) is locked. You can refer products or activate Seller capabilities anytime.`
-        : 'Welcome to NairaScout. Browse the marketplace, connect on Scouts List, or activate Seller capabilities anytime.',
-    });
-
-    return true;
-  });
-
-  return { createdNew: created, userId: identity.userId };
+    return { createdNew: created, userId: identity.userId };
+  } catch (err) {
+    const formatted = formatPostgresError(err);
+    console.error('[ensureUserProvisionedInDb] Transaction failed:', formatted, err);
+    throw err;
+  }
 }
 
 // ============================================================================
@@ -1171,6 +1322,7 @@ export async function getNairaScoutSnapshot(
     email: viewerUser.email,
     handle: viewerScout.username,
     displayName: viewerScout.displayName,
+    avatarUrl: viewerScout.avatarUrl ?? null,
     bio: viewerScout.bio,
     city: viewerScout.locationState || 'Lagos',
     preferredCategories: viewerScout.preferredCategories,
@@ -1247,6 +1399,7 @@ export async function getNairaScoutSnapshot(
       scoutId: c.contactUserId,
       handle: cs?.username || 'scout',
       displayName: cs?.displayName || 'Scout',
+      avatarUrl: cs?.avatarUrl ?? null,
       city: cs?.locationState || 'Nigeria',
       addedAt: c.createdAt.toISOString().slice(0, 10),
       blocked: blockedSet.has(c.contactUserId),
@@ -1279,6 +1432,7 @@ export async function getNairaScoutSnapshot(
       otherScoutId: otherId,
       otherHandle: os?.username || 'scout',
       otherDisplayName: os?.displayName || 'Scout',
+      otherAvatarUrl: os?.avatarUrl ?? null,
       otherCity: os?.locationState || 'Nigeria',
       status: (expired ? 'expired' : i.status.toLowerCase()) as ScoutsListInvitation['status'],
       createdAt: i.createdAt.toISOString(),
@@ -3354,6 +3508,7 @@ export async function getAdminConsoleSnapshot(actorUserId: string) {
       reviewedAt: v.reviewedAt?.toISOString() ?? null,
       username: scout?.username || 'unknown',
       displayName: scout?.displayName || 'Unknown User',
+      avatarUrl: scout?.avatarUrl ?? null,
       email: userMap.get(v.userId)?.email || '',
       sellerName: seller?.sellerName || null,
       sellerType: seller?.sellerType || null,
@@ -3371,6 +3526,7 @@ export async function getAdminConsoleSnapshot(actorUserId: string) {
       email: u.email,
       username: scout?.username || '',
       displayName: scout?.displayName || '',
+      avatarUrl: scout?.avatarUrl ?? null,
       accountStatus: normalizeAccountStatus(u.accountStatus),
       restrictionReason: u.restrictionReason,
       closedAt: u.closedAt?.toISOString() ?? null,

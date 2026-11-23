@@ -10,19 +10,27 @@ import {
 } from '@/lib/supabase/client';
 import { ThemeToggle } from './layout/ThemeToggle';
 
-async function provisionPostgreSqlProfile(payload?: {
-  displayName?: string;
-  username?: string;
-  locationState?: string;
-  referralEventId?: string | null;
-  referralScoutUsername?: string | null;
-}) {
+async function provisionPostgreSqlProfile(
+  payload?: {
+    displayName?: string;
+    username?: string;
+    locationState?: string;
+    referralEventId?: string | null;
+    referralScoutUsername?: string | null;
+  },
+  accessToken?: string | null
+) {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Requested-With': 'NairaScout',
+  };
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+
   const res = await fetch('/api/auth/provision', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Requested-With': 'NairaScout',
-    },
+    headers,
     body: JSON.stringify(payload ?? {}),
   });
   const data = await res.json();
@@ -32,14 +40,14 @@ async function provisionPostgreSqlProfile(payload?: {
   return data;
 }
 
-export function LoginForm() {
+export function LoginForm({ initialError = null }: { initialError?: string | null }) {
   const router = useRouter();
   const [mode, setMode] = useState<'otp' | 'password'>('otp');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [otpStep, setOtpStep] = useState<'request' | 'verify'>('request');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -58,7 +66,7 @@ export function LoginForm() {
 
     setBusy(true);
     try {
-      const { error: authError } = await supabase.auth.signInWithPassword({
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
       });
@@ -67,7 +75,7 @@ export function LoginForm() {
         return;
       }
 
-      await provisionPostgreSqlProfile();
+      await provisionPostgreSqlProfile(undefined, data.session?.access_token);
       router.push('/');
       router.refresh();
     } catch (err) {
@@ -121,7 +129,7 @@ export function LoginForm() {
 
     setBusy(true);
     try {
-      const { error: verifyError } = await supabase.auth.verifyOtp({
+      const { data, error: verifyError } = await supabase.auth.verifyOtp({
         email: email.trim(),
         token: otpCode.trim(),
         type: 'email',
@@ -131,7 +139,7 @@ export function LoginForm() {
         return;
       }
 
-      await provisionPostgreSqlProfile();
+      await provisionPostgreSqlProfile(undefined, data.session?.access_token);
       router.push('/');
       router.refresh();
     } catch (err) {
@@ -397,13 +405,16 @@ export function RegisterForm({ capturedRefEvent, capturedRefScout }: RegisterFor
       }
 
       if (data.session) {
-        await provisionPostgreSqlProfile({
-          displayName: displayName.trim(),
-          username: username.trim() || undefined,
-          locationState,
-          referralEventId: refEvent.trim() || null,
-          referralScoutUsername: refScout.trim() || null,
-        });
+        await provisionPostgreSqlProfile(
+          {
+            displayName: displayName.trim(),
+            username: username.trim() || undefined,
+            locationState,
+            referralEventId: refEvent.trim() || null,
+            referralScoutUsername: refScout.trim() || null,
+          },
+          data.session.access_token
+        );
         router.push('/');
         router.refresh();
         return;
@@ -432,7 +443,7 @@ export function RegisterForm({ capturedRefEvent, capturedRefScout }: RegisterFor
 
     setBusy(true);
     try {
-      const { error: verifyError } = await supabase.auth.verifyOtp({
+      const { data, error: verifyError } = await supabase.auth.verifyOtp({
         email: email.trim(),
         token: signupCode.trim(),
         type: 'signup',
@@ -442,13 +453,16 @@ export function RegisterForm({ capturedRefEvent, capturedRefScout }: RegisterFor
         return;
       }
 
-      await provisionPostgreSqlProfile({
-        displayName: displayName.trim(),
-        username: username.trim() || undefined,
-        locationState,
-        referralEventId: refEvent.trim() || null,
-        referralScoutUsername: refScout.trim() || null,
-      });
+      await provisionPostgreSqlProfile(
+        {
+          displayName: displayName.trim(),
+          username: username.trim() || undefined,
+          locationState,
+          referralEventId: refEvent.trim() || null,
+          referralScoutUsername: refScout.trim() || null,
+        },
+        data.session?.access_token
+      );
       router.push('/');
       router.refresh();
     } catch (err) {
@@ -600,7 +614,7 @@ export function RegisterForm({ capturedRefEvent, capturedRefScout }: RegisterFor
                     id="reg-state"
                     value={locationState}
                     onChange={(e) => setLocationState(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
+                    className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                   >
                     <option value="Lagos">Lagos</option>
                     <option value="Abuja">Abuja (FCT)</option>

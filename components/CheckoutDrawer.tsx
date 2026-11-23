@@ -74,6 +74,7 @@ export default function CheckoutDrawer({
         email: otpEmail.trim(),
         options: {
           shouldCreateUser: true,
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
           data: otpDisplayName.trim() ? { display_name: otpDisplayName.trim() } : undefined,
         },
       });
@@ -101,7 +102,7 @@ export default function CheckoutDrawer({
 
     setOtpBusy(true);
     try {
-      const { error } = await supabase.auth.verifyOtp({
+      const { data: verifyData, error } = await supabase.auth.verifyOtp({
         email: otpEmail.trim(),
         token: otpCode.trim(),
         type: 'email',
@@ -111,12 +112,17 @@ export default function CheckoutDrawer({
         return;
       }
 
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'NairaScout',
+      };
+      if (verifyData.session?.access_token) {
+        headers.Authorization = `Bearer ${verifyData.session.access_token}`;
+      }
+
       const res = await fetch('/api/auth/provision', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'NairaScout',
-        },
+        headers,
         body: JSON.stringify({
           displayName: otpDisplayName.trim() || undefined,
           referralEventId: referralEvent?.id ?? null,

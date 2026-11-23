@@ -193,7 +193,7 @@ export default function TrustGuideDrawer({
                     id="sup-topic"
                     value={topic}
                     onChange={(e) => setTopic(e.target.value as SupportCase['topic'])}
-                    className="w-full px-3 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
+                    className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                   >
                     <option value="commission">Commission Calculation / Ancestry</option>
                     <option value="attribution">Referral-Card Attribution</option>

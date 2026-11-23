@@ -35,11 +35,13 @@ import type {
   MakerCheckerRequestDTO,
   VerificationRecord,
 } from '@/lib/nairascout-store';
+import { UserIdentityRow } from './shared/UserIdentityRow';
 import { ThemeToggle } from './layout/ThemeToggle';
 
 export interface AdminVerificationRow extends VerificationRecord {
   username: string;
   displayName: string;
+  avatarUrl?: string | null;
   email: string;
   sellerName: string | null;
   sellerType: 'INDIVIDUAL' | 'BUSINESS' | null;
@@ -52,6 +54,7 @@ export interface AdminManagedUserRow {
   email: string;
   username: string;
   displayName: string;
+  avatarUrl?: string | null;
   accountStatus: AccountStatus;
   restrictionReason: string | null;
   closedAt: string | null;
@@ -739,13 +742,17 @@ export default function AdminConsoleView({
                   return (
                     <div key={v.id} className="p-5 space-y-4">
                       <div className="flex flex-wrap items-start justify-between gap-4">
-                        <div>
+                        <div className="space-y-2 min-w-0">
                           <p className="font-sans text-xs font-semibold text-success">
                             {v.id} · {v.category} · {v.status}
                           </p>
-                          <h3 className="mt-1 font-sans text-base font-bold text-foreground">
-                            {v.displayName} (@{v.username}) — {v.email}
-                          </h3>
+                          <UserIdentityRow
+                            avatarUrl={v.avatarUrl}
+                            displayName={v.displayName}
+                            username={v.username}
+                            size="md"
+                            subtitle={v.email}
+                          />
                           {v.sellerName && (
                             <p className="text-xs text-muted-foreground">
                               Seller Profile: {v.sellerName} ({v.sellerType}) · Seller Status:{' '}
@@ -881,14 +888,13 @@ export default function AdminConsoleView({
                           }`}
                         >
                           <td className="py-3 px-4">
-                            <p className="font-semibold text-foreground">
-                              {u.displayName}{' '}
-                              <span className="font-sans text-muted-foreground">@{u.username}</span>
-                            </p>
-                            <p className="text-[11px] text-muted-foreground">
-                              {u.email}
-                              {u.adminRole ? ` · ${u.adminRole}` : ''}
-                            </p>
+                            <UserIdentityRow
+                              avatarUrl={u.avatarUrl}
+                              displayName={u.displayName || u.email}
+                              username={u.username || 'user'}
+                              size="sm"
+                              subtitle={`${u.email}${u.adminRole ? ` · ${u.adminRole}` : ''}`}
+                            />
                           </td>
                           <td className="py-3 px-4 font-sans font-semibold text-foreground">
                             {u.accountStatus}
@@ -968,11 +974,14 @@ export default function AdminConsoleView({
               <div className="lg:col-span-5 space-y-6">
                 {selectedUser && (
                   <div className="bg-card border border-border rounded-2xl p-5 space-y-4">
-                    <div>
+                    <div className="space-y-2">
                       <p className="text-xs text-muted-foreground">Selected Identity</p>
-                      <h3 className="font-sans text-lg font-bold text-foreground">
-                        {selectedUser.displayName} (@{selectedUser.username})
-                      </h3>
+                      <UserIdentityRow
+                        avatarUrl={selectedUser.avatarUrl}
+                        displayName={selectedUser.displayName || selectedUser.email}
+                        username={selectedUser.username || 'user'}
+                        size="md"
+                      />
                       <p className="text-xs text-muted-foreground mt-0.5">
                         Account: <strong className="text-foreground">{selectedUser.accountStatus}</strong> · Seller:{' '}
                         <strong className="text-foreground">{selectedUser.sellerStatus || 'None'}</strong>
@@ -1006,7 +1015,7 @@ export default function AdminConsoleView({
                           onChange={(e) =>
                             setRestrictionCapability(e.target.value as CapabilityCode)
                           }
-                          className="px-2.5 py-1.5 text-xs border border-input rounded-lg bg-background text-foreground font-sans"
+                          className="pl-3.5 pr-10 py-1.5 text-xs border border-input rounded-lg bg-background text-foreground font-sans"
                         >
                           <option value="CREATE_REFERRAL">CREATE_REFERRAL</option>
                           <option value="PUBLISH_LISTING">PUBLISH_LISTING</option>
@@ -1019,7 +1028,7 @@ export default function AdminConsoleView({
                           onChange={(e) =>
                             setRestrictionScope(e.target.value as RestrictionScope)
                           }
-                          className="px-2.5 py-1.5 text-xs border border-input rounded-lg bg-background text-foreground font-sans"
+                          className="pl-3.5 pr-10 py-1.5 text-xs border border-input rounded-lg bg-background text-foreground font-sans"
                         >
                           <option value="CAPABILITY">CAPABILITY</option>
                           <option value="ROLE">ROLE</option>
@@ -1244,7 +1253,7 @@ export default function AdminConsoleView({
                   <select
                     value={mcActionType}
                     onChange={(e) => setMcActionType(e.target.value as MakerCheckerActionType)}
-                    className="w-full px-3 py-2 text-xs font-sans border border-input rounded-xl bg-background text-foreground"
+                    className="w-full pl-3.5 pr-10 py-2 text-xs font-sans border border-input rounded-xl bg-background text-foreground"
                   >
                     <option value="COMMISSION_ADJUSTMENT">COMMISSION_ADJUSTMENT</option>
                     <option value="WALLET_CORRECTION">WALLET_CORRECTION</option>
@@ -1262,7 +1271,7 @@ export default function AdminConsoleView({
                   <select
                     value={mcTargetUserId}
                     onChange={(e) => setMcTargetUserId(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-input rounded-xl bg-background text-foreground"
+                    className="w-full pl-3.5 pr-10 py-2 text-xs border border-input rounded-xl bg-background text-foreground"
                   >
                     {adminData.users.map((u) => (
                       <option key={u.userId} value={u.userId}>
@@ -1280,7 +1289,7 @@ export default function AdminConsoleView({
                     <select
                       value={mcAdminRole}
                       onChange={(e) => setMcAdminRole(e.target.value as AdminRole)}
-                      className="w-full px-3 py-2 text-xs font-sans border border-input rounded-xl bg-background text-foreground"
+                      className="w-full pl-3.5 pr-10 py-2 text-xs font-sans border border-input rounded-xl bg-background text-foreground"
                     >
                       {ALL_PLATFORM_ADMIN_ROLES.map((role) => (
                         <option key={role} value={role}>

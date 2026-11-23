@@ -4,6 +4,7 @@ import {
   extractSessionIdentityFromRequest,
   verifyMutationOrigin,
 } from '@/lib/auth/session';
+import { formatPostgresError } from '@/lib/db';
 import {
   ensureUserProvisionedInDb,
   getNairaScoutSnapshot,
@@ -56,8 +57,18 @@ export async function POST(req: NextRequest) {
     if (err instanceof AuthorizationError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: err.statusCode });
     }
+    const formatted = formatPostgresError(err);
+    console.error('[POST /api/auth/provision] PostgreSQL provisioning failed:', formatted, err);
     return NextResponse.json(
-      { error: 'Could not provision account in PostgreSQL.' },
+      {
+        error: `PostgreSQL provisioning failed: ${formatted.summary}`,
+        code: formatted.code ?? 'PROVISIONING_ERROR',
+        detail: formatted.detail,
+        hint: formatted.hint,
+        constraint: formatted.constraint,
+        table: formatted.table,
+        column: formatted.column,
+      },
       { status: 500 }
     );
   }

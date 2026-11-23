@@ -18,6 +18,7 @@ import type {
 } from '@/lib/nairascout-store';
 import { SELLER_PLANS, SELLER_TEAM_ROLE_LABELS } from '@/lib/seller-plans';
 import { formatKoboToNaira, formatWholeNaira } from '@/lib/commission-engine';
+import { UserIdentityRow } from './shared/UserIdentityRow';
 import type { SellerTeamPermissions } from '@/lib/db/schema';
 import {
   MAX_SELLER_TEAM_SEATS,
@@ -266,7 +267,7 @@ export default function SellerHubView({
                   <select
                     value={bizCat}
                     onChange={(e) => setBizCat(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
+                    className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                   >
                     <option value="Home & Craft">Home &amp; Craft</option>
                     <option value="Kitchen & Pantry">Kitchen &amp; Pantry</option>
@@ -798,7 +799,7 @@ export default function SellerHubView({
                       id="lst-cat"
                       value={category}
                       onChange={(e) => setCategory(e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-input rounded-xl bg-background text-foreground focus:outline-none focus:border-ring"
+                      className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground focus:outline-none focus:border-ring"
                     >
                       <option value="Home & Craft">Home &amp; Craft</option>
                       <option value="Kitchen & Pantry">Kitchen &amp; Pantry</option>
@@ -1002,17 +1003,12 @@ export default function SellerHubView({
                 </div>
                 {scout.teamMembers.map((m) => (
                   <div key={m.id} className="p-4 flex items-center justify-between gap-4">
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">
-                        {m.displayName}{' '}
-                        <span className="font-sans text-xs text-muted-foreground">
-                          @{m.username}
-                        </span>
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {SELLER_TEAM_ROLE_LABELS[m.role]?.label || m.role} ({m.role}) · {m.email}
-                      </p>
-                    </div>
+                    <UserIdentityRow
+                      displayName={m.displayName}
+                      username={m.username}
+                      size="sm"
+                      subtitle={`${SELLER_TEAM_ROLE_LABELS[m.role]?.label || m.role} (${m.role}) · ${m.email}`}
+                    />
                     {m.role !== 'BUSINESS_OWNER' && (
                       <button
                         type="button"
@@ -1051,7 +1047,7 @@ export default function SellerHubView({
                       setMemberRole(nextRole);
                       setMemberPerms(SELLER_TEAM_ROLE_PERMISSIONS[nextRole]);
                     }}
-                    className="w-full px-3 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
+                    className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                   >
                     {(
                       [

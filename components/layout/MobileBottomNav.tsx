@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import type { ActiveScoutDTO } from '@/lib/nairascout-store';
 import type { NavTab } from '@/components/HeaderNav';
+import { UserAvatar } from '@/components/shared/UserAvatar';
 import { ThemeToggle } from './ThemeToggle';
 
 interface MobileBottomNavProps {
@@ -142,16 +143,24 @@ export function MobileBottomNav({
                 <div className="w-12 h-1.5 rounded-full bg-muted-foreground/30" />
               </div>
 
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-sans text-base font-bold text-foreground">
-                    {authenticated && activeScout ? activeScout.displayName : 'Guest Scout'}
-                  </p>
-                  <p className="font-sans text-xs text-muted-foreground">
-                    {authenticated && activeScout
-                      ? `@${activeScout.handle}`
-                      : 'Sign in for full access'}
-                  </p>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <UserAvatar
+                    avatarUrl={activeScout?.avatarUrl}
+                    displayName={authenticated && activeScout ? activeScout.displayName : 'Guest Scout'}
+                    username={authenticated && activeScout ? activeScout.handle : 'GS'}
+                    size="md"
+                  />
+                  <div className="min-w-0">
+                    <p className="font-sans text-base font-bold text-foreground truncate">
+                      {authenticated && activeScout ? activeScout.displayName : 'Guest Scout'}
+                    </p>
+                    <p className="font-sans text-xs text-muted-foreground truncate">
+                      {authenticated && activeScout
+                        ? `@${activeScout.handle}`
+                        : 'Sign in for full access'}
+                    </p>
+                  </div>
                 </div>
                 <button
                   type="button"

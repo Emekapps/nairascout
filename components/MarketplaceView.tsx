@@ -99,14 +99,14 @@ export default function MarketplaceView({
 
           <div className="relative shrink-0">
             <MapPin
-              className="w-3.5 h-3.5 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+              className="w-3.5 h-3.5 text-muted-foreground absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
               aria-hidden="true"
             />
             <select
               value={cityFilter}
               onChange={(e) => setCityFilter(e.target.value)}
               aria-label="Filter by Seller location"
-              className="w-full sm:w-auto h-10 pl-8 pr-3.5 text-xs sm:text-sm bg-card text-foreground border border-border rounded-xl focus:outline-none focus:border-ring cursor-pointer"
+              className="w-full sm:w-auto h-10 pl-9 pr-10 text-xs sm:text-sm bg-card text-foreground border border-border rounded-xl focus:outline-none focus:border-ring cursor-pointer"
             >
               {cities.map((city) => (
                 <option key={city} value={city}>

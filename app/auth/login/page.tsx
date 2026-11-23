@@ -2,6 +2,11 @@ import { LoginForm } from '@/components/AuthForms';
 
 export const dynamic = 'force-dynamic';
 
-export default function LoginPage() {
-  return <LoginForm />;
+interface LoginPageProps {
+  searchParams: Promise<{ error?: string }>;
+}
+
+export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const params = await searchParams;
+  return <LoginForm initialError={params.error ?? null} />;
 }

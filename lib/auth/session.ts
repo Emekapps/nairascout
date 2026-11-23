@@ -197,7 +197,7 @@ export async function extractSessionIdentityFromRequest(
   return {
     userId: data.user.id,
     email: data.user.email,
-    phone: data.user.phone ?? null,
+    phone: data.user.phone?.trim() ? data.user.phone.trim() : null,
     userMetadata: (data.user.user_metadata as Record<string, unknown>) || {},
   };
 }

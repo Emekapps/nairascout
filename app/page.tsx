@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { extractSessionIdentityFromRequest } from '@/lib/auth/session';
-import { isPostgresConfigured } from '@/lib/db';
+import { formatPostgresError, isPostgresConfigured } from '@/lib/db';
 import { ensureUserProvisionedInDb, getNairaScoutSnapshot } from '@/lib/nairascout-store';
 import NairaScoutApp from '@/components/NairaScoutApp';
 
@@ -23,8 +23,8 @@ export default async function HomePage({ searchParams }: HomePageProps) {
         referralEventId: refEvent,
         referralScoutUsername: refScout,
       });
-    } catch {
-      // Snapshot handles DB availability status cleanly
+    } catch (err) {
+      console.error('[HomePage] PostgreSQL provisioning failed:', formatPostgresError(err), err);
     }
   }
 

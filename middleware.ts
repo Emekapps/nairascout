@@ -8,11 +8,24 @@ export async function middleware(req: NextRequest) {
     },
   });
 
+  const forwardedProto = req.headers.get('x-forwarded-proto');
+  const isHttps = forwardedProto === 'https' || req.nextUrl.protocol === 'https:';
+
   if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       {
+        cookieOptions: isHttps
+          ? {
+              sameSite: 'none',
+              secure: true,
+              path: '/',
+            }
+          : {
+              sameSite: 'lax',
+              path: '/',
+            },
         cookies: {
           getAll() {
             return req.cookies.getAll();
@@ -25,7 +38,10 @@ export async function middleware(req: NextRequest) {
               },
             });
             cookiesToSet.forEach(({ name, value, options }) =>
-              res.cookies.set(name, value, options)
+              res.cookies.set(name, value, {
+                ...options,
+                ...(isHttps ? { sameSite: 'none', secure: true } : {}),
+              })
             );
           },
         },
@@ -42,8 +58,8 @@ export async function middleware(req: NextRequest) {
     res.cookies.set('ns_ref_event', refEvent, {
       path: '/',
       httpOnly: true,
-      secure: true,
-      sameSite: 'none',
+      secure: isHttps,
+      sameSite: isHttps ? 'none' : 'lax',
       maxAge: 60 * 60 * 24 * 30,
     });
   }
@@ -51,8 +67,8 @@ export async function middleware(req: NextRequest) {
     res.cookies.set('ns_ref_scout', refScout, {
       path: '/',
       httpOnly: true,
-      secure: true,
-      sameSite: 'none',
+      secure: isHttps,
+      sameSite: isHttps ? 'none' : 'lax',
       maxAge: 60 * 60 * 24 * 30,
     });
   }

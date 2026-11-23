@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { extractSessionIdentityFromRequest } from '@/lib/auth/session';
-import { isPostgresConfigured } from '@/lib/db';
+import { formatPostgresError, isPostgresConfigured } from '@/lib/db';
 import { ensureUserProvisionedInDb, getNairaScoutSnapshot } from '@/lib/nairascout-store';
 import ClosureView from '@/components/ClosureView';
 
@@ -16,8 +16,8 @@ export default async function SettingsClosurePage() {
         referralEventId: cookieStore.get('ns_ref_event')?.value || null,
         referralScoutUsername: cookieStore.get('ns_ref_scout')?.value || null,
       });
-    } catch {
-      // ClosureView handles snapshot cleanly
+    } catch (err) {
+      console.error('[SettingsClosurePage] PostgreSQL provisioning failed:', formatPostgresError(err), err);
     }
   }
 

@@ -1,6 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 
 export function isSupabaseConfigured(): boolean {
   return Boolean(
@@ -14,11 +14,24 @@ export async function createSupabaseServerClient() {
     return null;
   }
   const cookieStore = await cookies();
+  const headerStore = await headers();
+  const forwardedProto = headerStore.get('x-forwarded-proto');
+  const isHttps = forwardedProto === 'https';
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      cookieOptions: isHttps
+        ? {
+            sameSite: 'none',
+            secure: true,
+            path: '/',
+          }
+        : {
+            sameSite: 'lax',
+            path: '/',
+          },
       cookies: {
         getAll() {
           return cookieStore.getAll();
@@ -26,7 +39,10 @@ export async function createSupabaseServerClient() {
         setAll(cookiesToSet) {
           try {
             cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
+              cookieStore.set(name, value, {
+                ...options,
+                ...(isHttps ? { sameSite: 'none', secure: true } : {}),
+              })
             );
           } catch {
             // Ignore when invoked from a Server Component

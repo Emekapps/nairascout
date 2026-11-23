@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { extractSessionIdentityFromRequest } from '@/lib/auth/session';
-import { isPostgresConfigured } from '@/lib/db';
+import { formatPostgresError, isPostgresConfigured } from '@/lib/db';
 import {
   ensureUserProvisionedInDb,
   getAdminConsoleSnapshot,
@@ -18,8 +18,8 @@ export async function renderAdminPage(section: AdminSection) {
         referralEventId: cookieStore.get('ns_ref_event')?.value || null,
         referralScoutUsername: cookieStore.get('ns_ref_scout')?.value || null,
       });
-    } catch {
-      // Admin loader handles unavailable DB cleanly
+    } catch (err) {
+      console.error('[renderAdminPage] PostgreSQL provisioning failed:', formatPostgresError(err), err);
     }
   }
 

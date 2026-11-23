@@ -5,7 +5,6 @@ import Link from 'next/link';
 import {
   Bell,
   BookOpen,
-  ChevronDown,
   LogIn,
   LogOut,
   Search,
@@ -14,6 +13,8 @@ import {
   X,
 } from 'lucide-react';
 import type { ActiveScoutDTO, PlatformNotification } from '@/lib/nairascout-store';
+import { UserAvatar } from '@/components/shared/UserAvatar';
+import { UserIdentityRow } from '@/components/shared/UserIdentityRow';
 import { ThemeToggle } from './ThemeToggle';
 
 interface TopUtilityBarProps {
@@ -162,20 +163,29 @@ export function TopUtilityBar({
                     setMenuOpen((prev) => !prev);
                     setNoticesOpen(false);
                   }}
+                  aria-label={`Account menu for ${activeScout.displayName}`}
+                  title={activeScout.displayName}
                   aria-expanded={menuOpen}
-                  className="inline-flex items-center gap-1.5 h-10 px-3 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-lg hover:bg-primary/90 transition-colors whitespace-nowrap cursor-pointer"
+                  className="inline-flex items-center justify-center rounded-full hover:ring-2 hover:ring-ring/40 focus-visible:outline-2 focus-visible:outline-ring transition-all cursor-pointer"
                 >
-                  <span className="font-sans">@{activeScout.handle}</span>
-                  <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
+                  <UserAvatar
+                    avatarUrl={activeScout.avatarUrl}
+                    displayName={activeScout.displayName}
+                    username={activeScout.handle}
+                    size="md"
+                  />
                 </button>
 
                 {menuOpen && (
-                  <div className="absolute right-0 mt-2 w-56 bg-popover text-popover-foreground border border-border rounded-xl shadow-lg py-1.5 z-50">
-                    <div className="px-3.5 py-2 border-b border-border">
-                      <p className="text-xs font-semibold text-foreground truncate">
-                        {activeScout.displayName}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground truncate">
+                  <div className="absolute right-0 mt-2 w-60 bg-popover text-popover-foreground border border-border rounded-xl shadow-lg py-1.5 z-50">
+                    <div className="px-3.5 py-2.5 border-b border-border space-y-1">
+                      <UserIdentityRow
+                        avatarUrl={activeScout.avatarUrl}
+                        displayName={activeScout.displayName}
+                        username={activeScout.handle}
+                        size="sm"
+                      />
+                      <p className="text-[11px] text-muted-foreground truncate pl-10">
                         {activeScout.email}
                       </p>
                     </div>

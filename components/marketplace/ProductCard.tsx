@@ -4,6 +4,7 @@ import { ShieldCheck, Share2, ShoppingBag, Store } from 'lucide-react';
 import type { ProductListing } from '@/lib/nairascout-store';
 import { formatWholeNaira } from '@/lib/commission-engine';
 import ProductImage from '@/components/ProductImage';
+import { UserAvatar } from '@/components/shared/UserAvatar';
 
 interface ProductCardProps {
   product: ProductListing;
@@ -18,21 +19,16 @@ export function ProductCard({
   onBuyDirect,
   onRefer,
 }: ProductCardProps) {
-  const sellerInitials = product.sellerName
-    .split(' ')
-    .map((s) => s[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-
   return (
     <article className="group rounded-2xl border border-border bg-card overflow-hidden flex flex-col transition-all duration-200 hover:-translate-y-0.5 hover:border-foreground/30">
       {/* Seller Attribution Strip */}
       <div className="px-4 pt-3.5 pb-2.5 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="w-7 h-7 rounded-full bg-secondary text-secondary-foreground font-sans text-[11px] font-bold flex items-center justify-center shrink-0">
-            {sellerInitials}
-          </span>
+          <UserAvatar
+            displayName={product.sellerName}
+            size="sm"
+            className="bg-secondary text-secondary-foreground border-border"
+          />
           <div className="min-w-0">
             <p className="text-xs font-semibold text-foreground truncate">{product.sellerName}</p>
             <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">

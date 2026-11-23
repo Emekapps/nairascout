@@ -4,7 +4,7 @@ import {
   extractSessionIdentityFromRequest,
   verifyMutationOrigin,
 } from '@/lib/auth/session';
-import { isPostgresConfigured } from '@/lib/db';
+import { formatPostgresError, isPostgresConfigured } from '@/lib/db';
 import {
   ensureUserProvisionedInDb,
   getNairaScoutSnapshot,
@@ -22,8 +22,8 @@ export async function GET(req: NextRequest) {
         referralEventId: refEvent,
         referralScoutUsername: refScout,
       });
-    } catch {
-      // Allow snapshot to return cleanly if DB is temporarily unreachable
+    } catch (err) {
+      console.error('[GET /api/auth/session] PostgreSQL provisioning failed:', formatPostgresError(err), err);
     }
   }
 
