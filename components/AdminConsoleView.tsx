@@ -35,6 +35,7 @@ import type {
   MakerCheckerRequestDTO,
   VerificationRecord,
 } from '@/lib/nairascout-store';
+import { ThemeToggle } from './layout/ThemeToggle';
 
 export interface AdminVerificationRow extends VerificationRecord {
   username: string;
@@ -261,7 +262,8 @@ export default function AdminConsoleView({
       | { operation: 'IMPOSE'; targetUserId: string }
       | { operation: 'LIFT'; restrictionId: string }
   ) => {
-    const reason = govReason.trim() || (payload.operation === 'LIFT' ? 'Restriction cleared after review' : '');
+    const reason =
+      govReason.trim() || (payload.operation === 'LIFT' ? 'Restriction cleared after review' : '');
     if (!reason) {
       setFeedback({
         type: 'err',
@@ -349,7 +351,8 @@ export default function AdminConsoleView({
       setMcReason('');
       setFeedback({
         type: 'ok',
-        message: 'Maker-Checker request queued. A second distinct Checker officer must approve execution.',
+        message:
+          'Maker-Checker request queued. A second distinct Checker officer must approve execution.',
       });
     } finally {
       setBusy(false);
@@ -465,13 +468,13 @@ export default function AdminConsoleView({
 
   if (!adminData) {
     return (
-      <div className="min-h-screen bg-[#FAFAF8] flex items-center justify-center p-6">
-        <div className="bg-white border border-[#E4E4DE] rounded-xl max-w-md w-full p-8 text-center space-y-4">
-          <Lock className="w-8 h-8 text-[#B91C1C] mx-auto" aria-hidden="true" />
-          <h1 className="font-display text-2xl font-bold text-[#111814]">
+      <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-6">
+        <div className="bg-card border border-border rounded-2xl max-w-md w-full p-8 text-center space-y-4">
+          <Lock className="w-8 h-8 text-destructive mx-auto" aria-hidden="true" />
+          <h1 className="font-sans text-2xl font-bold text-foreground">
             403 · Admin Governance Access Required
           </h1>
-          <p className="text-sm text-[#5C665E]">
+          <p className="text-sm text-muted-foreground">
             {authenticated
               ? 'Your current session does not hold a platform administrator role in public.platform_admin_roles.'
               : 'Sign in with an administrator account granted in public.platform_admin_roles to access NairaScout governance.'}
@@ -480,14 +483,14 @@ export default function AdminConsoleView({
             {!authenticated && (
               <Link
                 href="/auth/login"
-                className="px-4 py-2 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg"
+                className="px-4 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90"
               >
                 Sign In
               </Link>
             )}
             <Link
               href="/"
-              className="px-4 py-2 text-xs font-semibold text-[#111814] border border-[#D8D8D0] rounded-lg"
+              className="px-4 py-2 text-xs font-semibold text-foreground border border-border rounded-xl"
             >
               Return to Marketplace
             </Link>
@@ -513,18 +516,18 @@ export default function AdminConsoleView({
   const selectedUser = adminData.users.find((u) => u.userId === selectedUserId) ?? null;
 
   return (
-    <div className="min-h-screen bg-[#FAFAF8]">
-      <header className="bg-white border-b border-[#E4E4DE] sticky top-0 z-20">
-        <div className="max-w-[1280px] mx-auto px-4 sm:px-8 h-16 flex items-center justify-between gap-4 overflow-x-auto">
+    <div className="min-h-screen bg-background text-foreground">
+      <header className="bg-card/85 backdrop-blur-md border-b border-border sticky top-0 z-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 h-16 flex items-center justify-between gap-4 overflow-x-auto">
           <div className="flex items-center gap-4 shrink-0">
             <Link
               href="/"
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-[#5C665E] hover:text-[#111814]"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
             >
               <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
               Workspace
             </Link>
-            <span className="font-display text-lg font-bold text-[#111814]">
+            <span className="font-sans text-base sm:text-lg font-bold text-foreground">
               NairaScout Governance
             </span>
           </div>
@@ -557,8 +560,8 @@ export default function AdminConsoleView({
                 href={nav.href}
                 className={`py-2 border-b-2 transition-colors whitespace-nowrap ${
                   initialSection === nav.id
-                    ? 'border-[#0B6E4F] text-[#0B6E4F]'
-                    : 'border-transparent text-[#556158] hover:text-[#111814]'
+                    ? 'border-foreground text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}
               >
                 {nav.label}
@@ -566,20 +569,23 @@ export default function AdminConsoleView({
             ))}
           </nav>
 
-          <span className="font-mono text-xs font-semibold text-[#0B6E4F] shrink-0">
-            {adminData.adminRole}
-          </span>
+          <div className="flex items-center gap-3 shrink-0">
+            <span className="font-sans text-xs font-semibold text-success">
+              {adminData.adminRole}
+            </span>
+            <ThemeToggle />
+          </div>
         </div>
       </header>
 
-      <main className="max-w-[1280px] mx-auto px-4 sm:px-8 py-8 space-y-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-8 py-8 space-y-8">
         {feedback && (
           <div
             role="status"
             className={`p-3.5 rounded-xl border text-xs font-medium ${
               feedback.type === 'ok'
-                ? 'bg-[#F3F8F6] border-[#CBE2D8] text-[#0B6E4F]'
-                : 'bg-[#FEF2F2] border-[#FECACA] text-[#B91C1C]'
+                ? 'bg-accent border-border text-accent-foreground'
+                : 'bg-destructive/10 border-destructive/30 text-destructive'
             }`}
           >
             {feedback.message}
@@ -588,11 +594,11 @@ export default function AdminConsoleView({
 
         {initialSection === 'overview' && (
           <div className="space-y-8">
-            <div className="border-b border-[#E4E4DE] pb-6">
-              <h1 className="font-display text-3xl font-bold text-[#111814]">
+            <div className="border-b border-border pb-6">
+              <h1 className="font-sans text-2xl md:text-3xl font-bold text-foreground">
                 Platform Governance Overview
               </h1>
-              <p className="mt-1.5 text-sm text-[#4B554E]">
+              <p className="mt-1.5 text-sm text-muted-foreground">
                 Separation-of-duties governance console backed directly by PostgreSQL. Supports 9
                 platform roles, Maker-Checker dual control, granular capability restrictions, and an
                 independent Appeals Desk.
@@ -600,62 +606,62 @@ export default function AdminConsoleView({
             </div>
 
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-              <div className="bg-white border border-[#E4E4DE] rounded-xl p-5">
-                <p className="text-xs text-[#5C665E]">Verification Queue</p>
-                <p className="mt-1 font-mono text-3xl font-bold text-[#B45309] tabular-nums">
+              <div className="bg-card border border-border rounded-2xl p-5">
+                <p className="text-xs text-muted-foreground">Verification Queue</p>
+                <p className="mt-1 font-numeric text-3xl font-bold text-amber-600 dark:text-amber-400 tabular-nums">
                   {pendingVerificationsCount}
                 </p>
                 <Link
                   href="/admin/verifications"
-                  className="mt-3 inline-block text-xs font-semibold text-[#0B6E4F] hover:underline"
+                  className="mt-3 inline-block text-xs font-semibold text-foreground hover:underline"
                 >
                   Open Queue →
                 </Link>
               </div>
-              <div className="bg-white border border-[#E4E4DE] rounded-xl p-5">
-                <p className="text-xs text-[#5C665E]">Maker-Checker Pending</p>
-                <p className="mt-1 font-mono text-3xl font-bold text-[#111814] tabular-nums">
+              <div className="bg-card border border-border rounded-2xl p-5">
+                <p className="text-xs text-muted-foreground">Maker-Checker Pending</p>
+                <p className="mt-1 font-numeric text-3xl font-bold text-foreground tabular-nums">
                   {pendingMakerCheckerCount}
                 </p>
                 <Link
                   href="/admin/approvals"
-                  className="mt-3 inline-block text-xs font-semibold text-[#0B6E4F] hover:underline"
+                  className="mt-3 inline-block text-xs font-semibold text-foreground hover:underline"
                 >
                   Open Dual Control →
                 </Link>
               </div>
-              <div className="bg-white border border-[#E4E4DE] rounded-xl p-5">
-                <p className="text-xs text-[#5C665E]">Open Appeals</p>
-                <p className="mt-1 font-mono text-3xl font-bold text-[#0B6E4F] tabular-nums">
+              <div className="bg-card border border-border rounded-2xl p-5">
+                <p className="text-xs text-muted-foreground">Open Appeals</p>
+                <p className="mt-1 font-numeric text-3xl font-bold text-success tabular-nums">
                   {openAppealsCount}
                 </p>
                 <Link
                   href="/admin/appeals"
-                  className="mt-3 inline-block text-xs font-semibold text-[#0B6E4F] hover:underline"
+                  className="mt-3 inline-block text-xs font-semibold text-foreground hover:underline"
                 >
                   Open Appeals Desk →
                 </Link>
               </div>
-              <div className="bg-white border border-[#E4E4DE] rounded-xl p-5">
-                <p className="text-xs text-[#5C665E]">Open Abuse Reports</p>
-                <p className="mt-1 font-mono text-3xl font-bold text-[#B91C1C] tabular-nums">
+              <div className="bg-card border border-border rounded-2xl p-5">
+                <p className="text-xs text-muted-foreground">Open Abuse Reports</p>
+                <p className="mt-1 font-numeric text-3xl font-bold text-destructive tabular-nums">
                   {openAbuseCount}
                 </p>
                 <Link
                   href="/admin/users"
-                  className="mt-3 inline-block text-xs font-semibold text-[#0B6E4F] hover:underline"
+                  className="mt-3 inline-block text-xs font-semibold text-foreground hover:underline"
                 >
                   Trust &amp; Safety →
                 </Link>
               </div>
-              <div className="bg-white border border-[#E4E4DE] rounded-xl p-5">
-                <p className="text-xs text-[#5C665E]">Audit Log Events</p>
-                <p className="mt-1 font-mono text-3xl font-bold text-[#111814] tabular-nums">
+              <div className="bg-card border border-border rounded-2xl p-5">
+                <p className="text-xs text-muted-foreground">Audit Log Events</p>
+                <p className="mt-1 font-numeric text-3xl font-bold text-foreground tabular-nums">
                   {adminData.auditLogs.length}
                 </p>
                 <Link
                   href="/admin/audit-logs"
-                  className="mt-3 inline-block text-xs font-semibold text-[#0B6E4F] hover:underline"
+                  className="mt-3 inline-block text-xs font-semibold text-foreground hover:underline"
                 >
                   View Audit Trail →
                 </Link>
@@ -668,12 +674,12 @@ export default function AdminConsoleView({
           <section className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <FileCheck className="w-5 h-5 text-[#0B6E4F]" aria-hidden="true" />
-                <h2 className="font-display text-2xl font-bold text-[#111814]">
+                <FileCheck className="w-5 h-5 text-success" aria-hidden="true" />
+                <h2 className="font-sans text-xl md:text-2xl font-bold text-foreground">
                   8-State Verification Queue
                 </h2>
               </div>
-              <div className="flex flex-wrap items-center gap-1 p-1 bg-[#EFEFE9] rounded-lg text-xs font-semibold">
+              <div className="flex flex-wrap items-center gap-1 p-1 bg-muted rounded-xl text-xs font-semibold">
                 {(
                   [
                     'SUBMITTED',
@@ -688,8 +694,10 @@ export default function AdminConsoleView({
                     key={st}
                     type="button"
                     onClick={() => setVerifFilter(st)}
-                    className={`px-2.5 py-1.5 rounded-md cursor-pointer ${
-                      verifFilter === st ? 'bg-white text-[#111814]' : 'text-[#556158]'
+                    className={`px-2.5 py-1.5 rounded-lg cursor-pointer ${
+                      verifFilter === st
+                        ? 'bg-card text-foreground shadow-xs'
+                        : 'text-muted-foreground hover:text-foreground'
                     }`}
                   >
                     {st}
@@ -699,17 +707,17 @@ export default function AdminConsoleView({
             </div>
 
             {signedPreview && (
-              <div className="p-4 bg-[#F3F8F6] border border-[#CBE2D8] rounded-xl flex items-center justify-between gap-4 text-xs text-[#0B6E4F]">
+              <div className="p-4 bg-accent border border-border rounded-2xl flex items-center justify-between gap-4 text-xs text-accent-foreground">
                 <div>
                   <p className="font-semibold">60-Second Short-Lived Signed Document Access</p>
-                  <p className="font-mono mt-0.5">{signedPreview.path}</p>
+                  <p className="font-sans mt-0.5">{signedPreview.path}</p>
                 </div>
                 {signedPreview.signedUrl && (
                   <a
                     href={signedPreview.signedUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 px-3 py-1.5 font-semibold text-white bg-[#0B6E4F] rounded-md"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 font-semibold text-primary-foreground bg-primary border border-primary-border rounded-lg hover:bg-primary/90"
                   >
                     Open Signed Document
                     <ExternalLink className="w-3.5 h-3.5" />
@@ -718,9 +726,9 @@ export default function AdminConsoleView({
               </div>
             )}
 
-            <div className="bg-white border border-[#E4E4DE] rounded-xl divide-y divide-[#ECECE6]">
+            <div className="bg-card border border-border rounded-2xl divide-y divide-border">
               {filteredVerifications.length === 0 ? (
-                <div className="p-8 text-center text-sm text-[#5C665E]">
+                <div className="p-8 text-center text-sm text-muted-foreground">
                   No verification records matching filter &ldquo;{verifFilter}&rdquo;.
                 </div>
               ) : (
@@ -732,16 +740,16 @@ export default function AdminConsoleView({
                     <div key={v.id} className="p-5 space-y-4">
                       <div className="flex flex-wrap items-start justify-between gap-4">
                         <div>
-                          <p className="font-mono text-xs font-semibold text-[#0B6E4F]">
+                          <p className="font-sans text-xs font-semibold text-success">
                             {v.id} · {v.category} · {v.status}
                           </p>
-                          <h3 className="mt-1 font-display text-base font-bold text-[#111814]">
+                          <h3 className="mt-1 font-sans text-base font-bold text-foreground">
                             {v.displayName} (@{v.username}) — {v.email}
                           </h3>
                           {v.sellerName && (
-                            <p className="text-xs text-[#4B554E]">
+                            <p className="text-xs text-muted-foreground">
                               Seller Profile: {v.sellerName} ({v.sellerType}) · Seller Status:{' '}
-                              <strong>{v.sellerStatus}</strong>
+                              <strong className="text-foreground">{v.sellerStatus}</strong>
                             </p>
                           )}
                         </div>
@@ -752,9 +760,9 @@ export default function AdminConsoleView({
                               key={p}
                               type="button"
                               onClick={() => handleSignDocument(p)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono border border-[#D8D8D0] rounded-md text-[#111814] hover:bg-[#FAFAF8] cursor-pointer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-sans border border-border rounded-lg text-foreground hover:bg-muted cursor-pointer"
                             >
-                              <FileText className="w-3.5 h-3.5 text-[#0B6E4F]" />
+                              <FileText className="w-3.5 h-3.5 text-foreground" />
                               Inspect (60s URL): {p.split('/').pop()}
                             </button>
                           ))}
@@ -762,19 +770,19 @@ export default function AdminConsoleView({
                       </div>
 
                       {v.reviewerNotes && (
-                        <p className="text-xs text-[#4B554E] bg-[#FAFAF8] p-2.5 rounded border border-[#ECECE6]">
+                        <p className="text-xs text-muted-foreground bg-muted/50 p-2.5 rounded-xl border border-border">
                           Last Reviewer Note: {v.reviewerNotes}
                         </p>
                       )}
 
                       {isSelfRecord && (
-                        <div className="text-xs text-[#B45309] bg-[#FFFBEB] border border-[#E5CFA3] rounded-lg px-3 py-2">
+                        <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
                           Own verification record — separation of duties prohibits self-review or
                           self-approval. A second Verification Officer must decide this record.
                         </div>
                       )}
 
-                      <div className="flex flex-col sm:flex-row gap-3 pt-2 border-t border-[#F2F2EC]">
+                      <div className="flex flex-col sm:flex-row gap-3 pt-2 border-t border-border">
                         <input
                           type="text"
                           value={notesByVerif[v.id] || ''}
@@ -783,7 +791,7 @@ export default function AdminConsoleView({
                           }
                           placeholder="Mandatory reviewer notes (logged in audit_logs)..."
                           disabled={isSelfRecord}
-                          className="flex-1 px-3 py-2 text-xs border border-[#D8D8D0] rounded-lg disabled:bg-[#FAFAF8]"
+                          className="flex-1 px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl disabled:bg-muted"
                         />
                         <div className="flex flex-wrap items-center gap-2 shrink-0">
                           {v.status === 'SUBMITTED' && (
@@ -791,7 +799,7 @@ export default function AdminConsoleView({
                               type="button"
                               disabled={busy || isSelfRecord}
                               onClick={() => handleVerificationDecision(v.id, 'UNDER_REVIEW')}
-                              className="px-3 py-2 text-xs font-semibold text-[#111814] border border-[#D8D8D0] rounded-lg hover:bg-[#FAFAF8] disabled:opacity-40 cursor-pointer"
+                              className="px-3 py-2 text-xs font-semibold text-foreground border border-border rounded-xl hover:bg-muted disabled:opacity-40 cursor-pointer"
                             >
                               Claim Review
                             </button>
@@ -800,7 +808,7 @@ export default function AdminConsoleView({
                             type="button"
                             disabled={busy || isSelfRecord}
                             onClick={() => handleVerificationDecision(v.id, 'VERIFIED')}
-                            className="px-3.5 py-2 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg hover:bg-[#09583F] disabled:opacity-40 cursor-pointer"
+                            className="px-3.5 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-40 cursor-pointer"
                           >
                             Verify (VERIFIED)
                           </button>
@@ -808,7 +816,7 @@ export default function AdminConsoleView({
                             type="button"
                             disabled={busy || isSelfRecord}
                             onClick={() => handleVerificationDecision(v.id, 'ACTION_REQUIRED')}
-                            className="px-3.5 py-2 text-xs font-semibold text-[#B45309] border border-[#E5CFA3] rounded-lg hover:bg-[#FFFBEB] disabled:opacity-40 cursor-pointer"
+                            className="px-3.5 py-2 text-xs font-semibold text-amber-600 dark:text-amber-400 border border-amber-500/40 rounded-xl hover:bg-amber-500/10 disabled:opacity-40 cursor-pointer"
                           >
                             Request Action
                           </button>
@@ -816,7 +824,7 @@ export default function AdminConsoleView({
                             type="button"
                             disabled={busy || isSelfRecord}
                             onClick={() => handleVerificationDecision(v.id, 'REJECTED')}
-                            className="px-3.5 py-2 text-xs font-semibold text-[#B91C1C] border border-[#E8D0D0] rounded-lg hover:bg-[#FEF2F2] disabled:opacity-40 cursor-pointer"
+                            className="px-3.5 py-2 text-xs font-semibold text-destructive border border-destructive/30 rounded-xl hover:bg-destructive/10 disabled:opacity-40 cursor-pointer"
                           >
                             Reject
                           </button>
@@ -834,61 +842,63 @@ export default function AdminConsoleView({
           <section className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <Users className="w-5 h-5 text-[#0B6E4F]" aria-hidden="true" />
-                <h2 className="font-display text-2xl font-bold text-[#111814]">
+                <Users className="w-5 h-5 text-foreground" aria-hidden="true" />
+                <h2 className="font-sans text-xl md:text-2xl font-bold text-foreground">
                   User, Seller &amp; Granular Capability Governance
                 </h2>
               </div>
               <div className="relative">
-                <Search className="w-3.5 h-3.5 text-[#6C776E] absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="w-3.5 h-3.5 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={userSearch}
                   onChange={(e) => setUserSearch(e.target.value)}
                   placeholder="Filter users or sellers..."
-                  className="pl-8 pr-3 py-2 text-xs bg-white border border-[#D8D8D0] rounded-lg w-60"
+                  className="pl-8 pr-3 py-2 text-xs bg-card text-foreground border border-border rounded-xl w-60"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               <div className="lg:col-span-7 space-y-6">
-                <div className="bg-white border border-[#E4E4DE] rounded-xl overflow-x-auto">
+                <div className="bg-card border border-border rounded-2xl overflow-x-auto">
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
-                      <tr className="border-b border-[#E4E4DE] text-[#5C665E]">
+                      <tr className="border-b border-border text-muted-foreground">
                         <th className="py-3 px-4 font-medium">Identity</th>
                         <th className="py-3 px-4 font-medium">Account Status</th>
                         <th className="py-3 px-4 font-medium">Seller / Plan</th>
                         <th className="py-3 px-4 font-medium text-right">Ledger</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#ECECE6]">
+                    <tbody className="divide-y divide-border">
                       {filteredUsers.map((u) => (
                         <tr
                           key={u.userId}
                           onClick={() => setSelectedUserId(u.userId)}
-                          className={`cursor-pointer hover:bg-[#FAFAF8] ${
-                            selectedUserId === u.userId ? 'bg-[#F3F8F6]' : ''
+                          className={`cursor-pointer hover:bg-muted/40 ${
+                            selectedUserId === u.userId ? 'bg-accent/70' : ''
                           }`}
                         >
                           <td className="py-3 px-4">
-                            <p className="font-semibold text-[#111814]">
+                            <p className="font-semibold text-foreground">
                               {u.displayName}{' '}
-                              <span className="font-mono text-[#5C665E]">@{u.username}</span>
+                              <span className="font-sans text-muted-foreground">@{u.username}</span>
                             </p>
-                            <p className="text-[11px] text-[#5C665E]">
+                            <p className="text-[11px] text-muted-foreground">
                               {u.email}
                               {u.adminRole ? ` · ${u.adminRole}` : ''}
                             </p>
                           </td>
-                          <td className="py-3 px-4 font-mono font-semibold">{u.accountStatus}</td>
-                          <td className="py-3 px-4 font-mono">
+                          <td className="py-3 px-4 font-sans font-semibold text-foreground">
+                            {u.accountStatus}
+                          </td>
+                          <td className="py-3 px-4 font-sans text-muted-foreground">
                             {u.sellerStatus
                               ? `${u.sellerStatus} (${u.subscriptionPlan} · ${u.subscriptionStatus})`
                               : '—'}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono tabular-nums">
+                          <td className="py-3 px-4 text-right font-numeric tabular-nums text-foreground">
                             {u.ledgerEntriesCount} rows
                           </td>
                         </tr>
@@ -898,32 +908,40 @@ export default function AdminConsoleView({
                 </div>
 
                 {/* Active Capability Restrictions Ledger */}
-                <div className="bg-white border border-[#E4E4DE] rounded-xl p-5 space-y-3">
+                <div className="bg-card border border-border rounded-2xl p-5 space-y-3">
                   <div className="flex items-center gap-2">
-                    <ShieldAlert className="w-4 h-4 text-[#B45309]" aria-hidden="true" />
-                    <h3 className="font-display text-base font-bold text-[#111814]">
+                    <ShieldAlert
+                      className="w-4 h-4 text-amber-600 dark:text-amber-400"
+                      aria-hidden="true"
+                    />
+                    <h3 className="font-sans text-base font-bold text-foreground">
                       Granular Capability Restrictions ({adminData.restrictions.length})
                     </h3>
                   </div>
                   {adminData.restrictions.length === 0 ? (
-                    <p className="text-xs text-[#5C665E]">No capability restrictions imposed yet.</p>
+                    <p className="text-xs text-muted-foreground">
+                      No capability restrictions imposed yet.
+                    </p>
                   ) : (
-                    <div className="divide-y divide-[#ECECE6]">
+                    <div className="divide-y divide-border">
                       {adminData.restrictions.map((r) => (
-                        <div key={r.id} className="py-3 first:pt-0 flex items-center justify-between gap-3 text-xs">
+                        <div
+                          key={r.id}
+                          className="py-3 first:pt-0 flex items-center justify-between gap-3 text-xs"
+                        >
                           <div>
-                            <p className="font-mono font-semibold text-[#111814]">
+                            <p className="font-sans font-semibold text-foreground">
                               @{r.userHandle} · {r.capabilityCode} ({r.scope}) ·{' '}
                               <span
                                 className={
-                                  r.status === 'ACTIVE' ? 'text-[#B91C1C]' : 'text-[#0B6E4F]'
+                                  r.status === 'ACTIVE' ? 'text-destructive' : 'text-success'
                                 }
                               >
                                 {r.status}
                               </span>
                             </p>
-                            <p className="text-[#4B554E] mt-0.5">{r.reason}</p>
-                            <p className="font-mono text-[11px] text-[#5C665E]">
+                            <p className="text-muted-foreground mt-0.5">{r.reason}</p>
+                            <p className="font-sans text-[11px] text-muted-foreground">
                               By @{r.imposedByHandle}
                               {r.expiresAt ? ` · Expires ${r.expiresAt.slice(0, 10)}` : ''}
                             </p>
@@ -935,7 +953,7 @@ export default function AdminConsoleView({
                               onClick={() =>
                                 handleManageRestriction({ operation: 'LIFT', restrictionId: r.id })
                               }
-                              className="px-3 py-1.5 text-xs font-semibold text-[#0B6E4F] border border-[#CBE2D8] rounded-md hover:bg-[#F3F8F6] cursor-pointer shrink-0"
+                              className="px-3 py-1.5 text-xs font-semibold text-foreground border border-border rounded-lg hover:bg-muted cursor-pointer shrink-0"
                             >
                               Lift Restriction
                             </button>
@@ -949,15 +967,15 @@ export default function AdminConsoleView({
 
               <div className="lg:col-span-5 space-y-6">
                 {selectedUser && (
-                  <div className="bg-white border border-[#E4E4DE] rounded-xl p-5 space-y-4">
+                  <div className="bg-card border border-border rounded-2xl p-5 space-y-4">
                     <div>
-                      <p className="text-xs text-[#5C665E]">Selected Identity</p>
-                      <h3 className="font-display text-lg font-bold text-[#111814]">
+                      <p className="text-xs text-muted-foreground">Selected Identity</p>
+                      <h3 className="font-sans text-lg font-bold text-foreground">
                         {selectedUser.displayName} (@{selectedUser.username})
                       </h3>
-                      <p className="text-xs text-[#5C665E] mt-0.5">
-                        Account: <strong>{selectedUser.accountStatus}</strong> · Seller:{' '}
-                        <strong>{selectedUser.sellerStatus || 'None'}</strong>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Account: <strong className="text-foreground">{selectedUser.accountStatus}</strong> · Seller:{' '}
+                        <strong className="text-foreground">{selectedUser.sellerStatus || 'None'}</strong>
                         {selectedUser.subscriptionStatus
                           ? ` · Billing: ${selectedUser.subscriptionStatus}`
                           : ''}
@@ -965,7 +983,7 @@ export default function AdminConsoleView({
                     </div>
 
                     <div>
-                      <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">
                         Documented Governance Reason (Required)
                       </label>
                       <input
@@ -973,13 +991,13 @@ export default function AdminConsoleView({
                         value={govReason}
                         onChange={(e) => setGovReason(e.target.value)}
                         placeholder="e.g., Referral spam rate trigger — restrict referrals only"
-                        className="w-full px-3 py-2 text-xs border border-[#D8D8D0] rounded-lg"
+                        className="w-full px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl"
                       />
                     </div>
 
                     {/* Granular Restriction Composer */}
-                    <div className="space-y-2.5 pt-2 border-t border-[#ECECE6]">
-                      <p className="text-xs font-semibold text-[#111814]">
+                    <div className="space-y-2.5 pt-2 border-t border-border">
+                      <p className="text-xs font-semibold text-foreground">
                         Impose Granular Capability Restriction (Least-Privilege)
                       </p>
                       <div className="grid grid-cols-2 gap-2">
@@ -988,7 +1006,7 @@ export default function AdminConsoleView({
                           onChange={(e) =>
                             setRestrictionCapability(e.target.value as CapabilityCode)
                           }
-                          className="px-2.5 py-1.5 text-xs border border-[#D8D8D0] rounded-lg bg-white font-mono"
+                          className="px-2.5 py-1.5 text-xs border border-input rounded-lg bg-background text-foreground font-sans"
                         >
                           <option value="CREATE_REFERRAL">CREATE_REFERRAL</option>
                           <option value="PUBLISH_LISTING">PUBLISH_LISTING</option>
@@ -1001,7 +1019,7 @@ export default function AdminConsoleView({
                           onChange={(e) =>
                             setRestrictionScope(e.target.value as RestrictionScope)
                           }
-                          className="px-2.5 py-1.5 text-xs border border-[#D8D8D0] rounded-lg bg-white font-mono"
+                          className="px-2.5 py-1.5 text-xs border border-input rounded-lg bg-background text-foreground font-sans"
                         >
                           <option value="CAPABILITY">CAPABILITY</option>
                           <option value="ROLE">ROLE</option>
@@ -1015,7 +1033,7 @@ export default function AdminConsoleView({
                           value={restrictionDays}
                           onChange={(e) => setRestrictionDays(e.target.value)}
                           placeholder="Days (optional)"
-                          className="w-28 px-2.5 py-1.5 text-xs font-mono border border-[#D8D8D0] rounded-lg"
+                          className="w-28 px-2.5 py-1.5 text-xs font-numeric tabular-nums bg-background text-foreground border border-input rounded-lg"
                         />
                         <button
                           type="button"
@@ -1026,7 +1044,7 @@ export default function AdminConsoleView({
                               targetUserId: selectedUser.userId,
                             })
                           }
-                          className="flex-1 py-1.5 px-3 text-xs font-semibold text-white bg-[#111814] rounded-lg hover:bg-[#26332B] cursor-pointer"
+                          className="flex-1 py-1.5 px-3 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-lg hover:bg-primary/90 cursor-pointer"
                         >
                           Impose Capability Restriction
                         </button>
@@ -1034,9 +1052,9 @@ export default function AdminConsoleView({
                     </div>
 
                     {selectedUser.sellerProfileId && (
-                      <div className="space-y-3 pt-2 border-t border-[#ECECE6]">
+                      <div className="space-y-3 pt-2 border-t border-border">
                         <div>
-                          <p className="text-xs font-semibold text-[#111814] mb-1.5">
+                          <p className="text-xs font-semibold text-foreground mb-1.5">
                             Seller-Only Status (Scout role stays independent)
                           </p>
                           <div className="flex flex-wrap gap-1.5">
@@ -1052,7 +1070,7 @@ export default function AdminConsoleView({
                                     sellerStatus: st,
                                   })
                                 }
-                                className="px-2.5 py-1.5 text-xs font-medium border border-[#D8D8D0] rounded-md hover:bg-[#FAFAF8] cursor-pointer"
+                                className="px-2.5 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted cursor-pointer"
                               >
                                 Seller → {st}
                               </button>
@@ -1061,7 +1079,7 @@ export default function AdminConsoleView({
                         </div>
 
                         <div>
-                          <p className="text-xs font-semibold text-[#111814] mb-1.5">
+                          <p className="text-xs font-semibold text-foreground mb-1.5">
                             Subscription Status (EXPIRED downgrades excess listings)
                           </p>
                           <div className="flex flex-wrap gap-1.5">
@@ -1079,7 +1097,7 @@ export default function AdminConsoleView({
                                     subscriptionStatus: subSt,
                                   })
                                 }
-                                className="px-2 py-1 text-[11px] font-mono border border-[#D8D8D0] rounded-md hover:bg-[#FAFAF8] cursor-pointer"
+                                className="px-2 py-1 text-[11px] font-sans border border-border rounded-lg hover:bg-muted cursor-pointer"
                               >
                                 {subSt}
                               </button>
@@ -1089,8 +1107,8 @@ export default function AdminConsoleView({
                       </div>
                     )}
 
-                    <div className="space-y-2 pt-2 border-t border-[#ECECE6]">
-                      <p className="text-xs font-semibold text-[#111814]">
+                    <div className="space-y-2 pt-2 border-t border-border">
+                      <p className="text-xs font-semibold text-foreground">
                         Account Status &amp; Financial Holds
                       </p>
                       <div className="flex flex-wrap gap-1.5">
@@ -1106,7 +1124,7 @@ export default function AdminConsoleView({
                                 accountStatus: st,
                               })
                             }
-                            className="px-2.5 py-1.5 text-xs font-medium border border-[#D8D8D0] rounded-md hover:bg-[#FAFAF8] cursor-pointer"
+                            className="px-2.5 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted cursor-pointer"
                           >
                             Account → {st}
                           </button>
@@ -1120,7 +1138,7 @@ export default function AdminConsoleView({
                               actionType: 'HOLD_PENDING_COMMISSIONS',
                             })
                           }
-                          className="px-2.5 py-1.5 text-xs font-semibold text-[#B45309] border border-[#E5CFA3] rounded-md hover:bg-[#FFFBEB] cursor-pointer"
+                          className="px-2.5 py-1.5 text-xs font-semibold text-amber-600 dark:text-amber-400 border border-amber-500/40 rounded-lg hover:bg-amber-500/10 cursor-pointer"
                         >
                           Hold Pending Commissions
                         </button>
@@ -1129,28 +1147,28 @@ export default function AdminConsoleView({
                   </div>
                 )}
 
-                <div className="bg-white border border-[#E4E4DE] rounded-xl p-5 space-y-3">
+                <div className="bg-card border border-border rounded-2xl p-5 space-y-3">
                   <div className="flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-[#B91C1C]" aria-hidden="true" />
-                    <h3 className="font-display text-base font-bold text-[#111814]">
+                    <AlertTriangle className="w-4 h-4 text-destructive" aria-hidden="true" />
+                    <h3 className="font-sans text-base font-bold text-foreground">
                       Abuse Reports ({adminData.abuseReports.length})
                     </h3>
                   </div>
                   {adminData.abuseReports.length === 0 ? (
-                    <p className="text-xs text-[#5C665E]">No abuse reports filed.</p>
+                    <p className="text-xs text-muted-foreground">No abuse reports filed.</p>
                   ) : (
-                    <div className="divide-y divide-[#ECECE6]">
+                    <div className="divide-y divide-border">
                       {adminData.abuseReports.map((rep) => (
                         <div key={rep.id} className="py-3 first:pt-0 space-y-1.5 text-xs">
-                          <div className="flex justify-between font-mono">
-                            <span className="font-semibold text-[#111814]">{rep.id}</span>
-                            <span className="text-[#B45309]">{rep.status}</span>
+                          <div className="flex justify-between font-sans">
+                            <span className="font-semibold text-foreground">{rep.id}</span>
+                            <span className="text-amber-600 dark:text-amber-400">{rep.status}</span>
                           </div>
                           <p>
                             @{rep.reporterHandle} reported <strong>@{rep.reportedHandle}</strong>:{' '}
                             {rep.reason}
                           </p>
-                          <p className="text-[#5C665E]">{rep.description}</p>
+                          <p className="text-muted-foreground">{rep.description}</p>
                           {rep.status === 'OPEN' && (
                             <div className="flex gap-2 pt-1">
                               <button
@@ -1164,7 +1182,7 @@ export default function AdminConsoleView({
                                     reasonOverride: 'Trust & Safety investigation resolved report',
                                   })
                                 }
-                                className="px-2.5 py-1 text-xs font-semibold text-white bg-[#0B6E4F] rounded cursor-pointer"
+                                className="px-2.5 py-1 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-lg hover:bg-primary/90 cursor-pointer"
                               >
                                 Resolve
                               </button>
@@ -1179,7 +1197,7 @@ export default function AdminConsoleView({
                                     reasonOverride: 'Dismissed after review',
                                   })
                                 }
-                                className="px-2.5 py-1 text-xs font-medium border border-[#D8D8D0] rounded cursor-pointer"
+                                className="px-2.5 py-1 text-xs font-medium border border-border rounded-lg cursor-pointer"
                               >
                                 Dismiss
                               </button>
@@ -1198,14 +1216,14 @@ export default function AdminConsoleView({
         {(initialSection === 'overview' || initialSection === 'approvals') && (
           <section className="space-y-6">
             <div className="flex items-center gap-2">
-              <Scale className="w-5 h-5 text-[#0B6E4F]" aria-hidden="true" />
+              <Scale className="w-5 h-5 text-foreground" aria-hidden="true" />
               <div>
-                <h2 className="font-display text-2xl font-bold text-[#111814]">
+                <h2 className="font-sans text-xl md:text-2xl font-bold text-foreground">
                   Maker-Checker Dual-Control Queue
                 </h2>
-                <p className="text-xs text-[#5C665E]">
+                <p className="text-xs text-muted-foreground">
                   High-impact financial, role, and ancestry operations require two distinct officers
-                  (<span className="font-mono">maker_id !== checker_id</span>).
+                  (<span className="font-sans font-medium">maker_id !== checker_id</span>).
                 </p>
               </div>
             </div>
@@ -1213,20 +1231,20 @@ export default function AdminConsoleView({
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               <form
                 onSubmit={handleCreateMakerChecker}
-                className="lg:col-span-5 bg-white border border-[#E4E4DE] rounded-xl p-5 space-y-4 self-start"
+                className="lg:col-span-5 bg-card border border-border rounded-2xl p-5 space-y-4 self-start"
               >
-                <h3 className="font-display text-lg font-bold text-[#111814]">
+                <h3 className="font-sans text-base font-bold text-foreground">
                   Submit Maker Request
                 </h3>
 
                 <div>
-                  <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
                     Dual-Control Action Type
                   </label>
                   <select
                     value={mcActionType}
                     onChange={(e) => setMcActionType(e.target.value as MakerCheckerActionType)}
-                    className="w-full px-3 py-2 text-xs font-mono border border-[#D8D8D0] rounded-lg bg-white"
+                    className="w-full px-3 py-2 text-xs font-sans border border-input rounded-xl bg-background text-foreground"
                   >
                     <option value="COMMISSION_ADJUSTMENT">COMMISSION_ADJUSTMENT</option>
                     <option value="WALLET_CORRECTION">WALLET_CORRECTION</option>
@@ -1238,13 +1256,13 @@ export default function AdminConsoleView({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
                     Target Account
                   </label>
                   <select
                     value={mcTargetUserId}
                     onChange={(e) => setMcTargetUserId(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-[#D8D8D0] rounded-lg bg-white"
+                    className="w-full px-3 py-2 text-xs border border-input rounded-xl bg-background text-foreground"
                   >
                     {adminData.users.map((u) => (
                       <option key={u.userId} value={u.userId}>
@@ -1256,13 +1274,13 @@ export default function AdminConsoleView({
 
                 {mcActionType === 'ROLE_ASSIGNMENT' ? (
                   <div>
-                    <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
                       Platform Role (9 Operational Roles)
                     </label>
                     <select
                       value={mcAdminRole}
                       onChange={(e) => setMcAdminRole(e.target.value as AdminRole)}
-                      className="w-full px-3 py-2 text-xs font-mono border border-[#D8D8D0] rounded-lg bg-white"
+                      className="w-full px-3 py-2 text-xs font-sans border border-input rounded-xl bg-background text-foreground"
                     >
                       {ALL_PLATFORM_ADMIN_ROLES.map((role) => (
                         <option key={role} value={role}>
@@ -1273,7 +1291,7 @@ export default function AdminConsoleView({
                   </div>
                 ) : mcActionType === 'ANCESTRY_OVERRIDE' ? (
                   <div>
-                    <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
                       New Direct Referrer User UUID (blank for Organic)
                     </label>
                     <input
@@ -1281,12 +1299,12 @@ export default function AdminConsoleView({
                       value={mcDirectReferrerId}
                       onChange={(e) => setMcDirectReferrerId(e.target.value)}
                       placeholder="UUID..."
-                      className="w-full px-3 py-2 text-xs font-mono border border-[#D8D8D0] rounded-lg"
+                      className="w-full px-3 py-2 text-xs font-sans bg-background text-foreground border border-input rounded-xl"
                     />
                   </div>
                 ) : (
                   <div>
-                    <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
                       Amount (₦, negative for debit/reversal)
                     </label>
                     <input
@@ -1294,13 +1312,13 @@ export default function AdminConsoleView({
                       required
                       value={mcAmountNaira}
                       onChange={(e) => setMcAmountNaira(e.target.value)}
-                      className="w-full px-3 py-2 text-xs font-mono border border-[#D8D8D0] rounded-lg"
+                      className="w-full px-3 py-2 text-xs font-numeric tabular-nums bg-background text-foreground border border-input rounded-xl"
                     />
                   </div>
                 )}
 
                 <div>
-                  <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
                     Maker Justification (Required)
                   </label>
                   <textarea
@@ -1309,22 +1327,22 @@ export default function AdminConsoleView({
                     value={mcReason}
                     onChange={(e) => setMcReason(e.target.value)}
                     placeholder="Document audit evidence and justification..."
-                    className="w-full px-3 py-2 text-xs border border-[#D8D8D0] rounded-lg"
+                    className="w-full px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl"
                   />
                 </div>
 
                 <button
                   type="submit"
                   disabled={busy}
-                  className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#111814] rounded-lg hover:bg-[#26332B] cursor-pointer"
+                  className="w-full py-2.5 px-4 text-xs font-semibold text-commerce-foreground bg-commerce rounded-xl hover:bg-commerce/90 cursor-pointer"
                 >
                   Submit Maker Request for Checker Approval
                 </button>
               </form>
 
-              <div className="lg:col-span-7 bg-white border border-[#E4E4DE] rounded-xl divide-y divide-[#ECECE6]">
+              <div className="lg:col-span-7 bg-card border border-border rounded-2xl divide-y divide-border">
                 {adminData.makerCheckerRequests.length === 0 ? (
-                  <div className="p-8 text-center text-sm text-[#5C665E]">
+                  <div className="p-8 text-center text-sm text-muted-foreground">
                     No Maker-Checker dual-control requests yet.
                   </div>
                 ) : (
@@ -1333,30 +1351,30 @@ export default function AdminConsoleView({
                     return (
                       <div key={m.id} className="p-5 space-y-3 text-xs">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="font-mono font-semibold text-[#111814]">
+                          <span className="font-sans font-semibold text-foreground">
                             {m.actionType} → @{m.targetHandle}
                           </span>
                           <span
-                            className={`px-2 py-0.5 rounded font-mono font-semibold ${
+                            className={`px-2 py-0.5 rounded-md font-sans font-semibold ${
                               m.status === 'EXECUTED'
-                                ? 'bg-[#F3F8F6] text-[#0B6E4F]'
+                                ? 'bg-accent text-accent-foreground'
                                 : m.status === 'REJECTED'
-                                  ? 'bg-[#FEF2F2] text-[#B91C1C]'
-                                  : 'bg-[#FFFBEB] text-[#B45309]'
+                                  ? 'bg-destructive/15 text-destructive'
+                                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                             }`}
                           >
                             {m.status}
                           </span>
                         </div>
-                        <p className="text-[#4B554E]">{m.reason}</p>
-                        <p className="font-mono text-[11px] text-[#5C665E]">
+                        <p className="text-muted-foreground">{m.reason}</p>
+                        <p className="font-sans text-[11px] text-muted-foreground">
                           Maker: @{m.makerHandle} · Payload: {JSON.stringify(m.payload)}
                         </p>
 
                         {m.status === 'PENDING' && (
-                          <div className="pt-2 border-t border-[#F2F2EC] space-y-2">
+                          <div className="pt-2 border-t border-border space-y-2">
                             {isSelfMaker ? (
-                              <p className="text-[#B45309] bg-[#FFFBEB] border border-[#E5CFA3] rounded px-3 py-2">
+                              <p className="text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
                                 Dual-control enforcement: you created this Maker request. A second
                                 distinct officer must act as Checker.
                               </p>
@@ -1372,13 +1390,13 @@ export default function AdminConsoleView({
                                     }))
                                   }
                                   placeholder="Mandatory Checker verification notes..."
-                                  className="flex-1 px-3 py-1.5 text-xs border border-[#D8D8D0] rounded-lg"
+                                  className="flex-1 px-3 py-1.5 text-xs bg-background text-foreground border border-input rounded-xl"
                                 />
                                 <button
                                   type="button"
                                   disabled={busy}
                                   onClick={() => handleDecideMakerChecker(m.id, 'APPROVED')}
-                                  className="px-3 py-1.5 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg cursor-pointer"
+                                  className="px-3 py-1.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
                                 >
                                   Approve &amp; Execute
                                 </button>
@@ -1386,7 +1404,7 @@ export default function AdminConsoleView({
                                   type="button"
                                   disabled={busy}
                                   onClick={() => handleDecideMakerChecker(m.id, 'REJECTED')}
-                                  className="px-3 py-1.5 text-xs font-semibold text-[#B91C1C] border border-[#E8D0D0] rounded-lg cursor-pointer"
+                                  className="px-3 py-1.5 text-xs font-semibold text-destructive border border-destructive/30 rounded-xl cursor-pointer"
                                 >
                                   Reject
                                 </button>
@@ -1406,12 +1424,12 @@ export default function AdminConsoleView({
         {(initialSection === 'overview' || initialSection === 'appeals') && (
           <section className="space-y-4">
             <div className="flex items-center gap-2">
-              <Gavel className="w-5 h-5 text-[#0B6E4F]" aria-hidden="true" />
+              <Gavel className="w-5 h-5 text-foreground" aria-hidden="true" />
               <div>
-                <h2 className="font-display text-2xl font-bold text-[#111814]">
+                <h2 className="font-sans text-xl md:text-2xl font-bold text-foreground">
                   Independent Appeals Desk
                 </h2>
-                <p className="text-xs text-[#5C665E]">
+                <p className="text-xs text-muted-foreground">
                   Adjudicates appeals on Verification rejections, capability restrictions, and
                   suspensions. Original decision officers are blocked from reviewing their own
                   decisions.
@@ -1419,9 +1437,9 @@ export default function AdminConsoleView({
               </div>
             </div>
 
-            <div className="bg-white border border-[#E4E4DE] rounded-xl divide-y divide-[#ECECE6]">
+            <div className="bg-card border border-border rounded-2xl divide-y divide-border">
               {adminData.governanceAppeals.length === 0 ? (
-                <div className="p-8 text-center text-sm text-[#5C665E]">
+                <div className="p-8 text-center text-sm text-muted-foreground">
                   No governance appeals submitted yet.
                 </div>
               ) : (
@@ -1432,32 +1450,32 @@ export default function AdminConsoleView({
                   return (
                     <div key={a.id} className="p-5 space-y-3 text-xs">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="font-mono font-semibold text-[#111814]">
+                        <span className="font-sans font-semibold text-foreground">
                           @{a.appellantHandle} · {a.targetType} ({a.targetRecordId.slice(0, 8)}…)
                         </span>
                         <span
-                          className={`px-2 py-0.5 rounded font-mono font-semibold ${
+                          className={`px-2 py-0.5 rounded-md font-sans font-semibold ${
                             a.status === 'OVERTURNED'
-                              ? 'bg-[#F3F8F6] text-[#0B6E4F]'
+                              ? 'bg-accent text-accent-foreground'
                               : a.status === 'UPHELD'
-                                ? 'bg-[#FEF2F2] text-[#B91C1C]'
-                                : 'bg-[#FFFBEB] text-[#B45309]'
+                                ? 'bg-destructive/15 text-destructive'
+                                : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                           }`}
                         >
                           {a.status}
                         </span>
                       </div>
-                      <p className="text-[#4B554E]">{a.appealReason}</p>
-                      <p className="font-mono text-[11px] text-[#5C665E]">
+                      <p className="text-muted-foreground">{a.appealReason}</p>
+                      <p className="font-sans text-[11px] text-muted-foreground">
                         Original Officer:{' '}
                         {a.originalReviewerHandle ? `@${a.originalReviewerHandle}` : 'Unassigned'}
                         {a.appealsOfficerHandle ? ` · Adjudicated by @${a.appealsOfficerHandle}` : ''}
                       </p>
 
                       {(a.status === 'OPEN' || a.status === 'UNDER_REVIEW') && (
-                        <div className="pt-2 border-t border-[#F2F2EC] space-y-2">
+                        <div className="pt-2 border-t border-border space-y-2">
                           {conflict ? (
-                            <p className="text-[#B45309] bg-[#FFFBEB] border border-[#E5CFA3] rounded px-3 py-2">
+                            <p className="text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
                               Independent review conflict: the original reviewer or appellant cannot
                               adjudicate this appeal.
                             </p>
@@ -1470,14 +1488,14 @@ export default function AdminConsoleView({
                                   setAppealNotesById((p) => ({ ...p, [a.id]: e.target.value }))
                                 }
                                 placeholder="Independent Appeals Officer rationale..."
-                                className="flex-1 px-3 py-1.5 text-xs border border-[#D8D8D0] rounded-lg"
+                                className="flex-1 px-3 py-1.5 text-xs bg-background text-foreground border border-input rounded-xl"
                               />
                               {a.status === 'OPEN' && (
                                 <button
                                   type="button"
                                   disabled={busy}
                                   onClick={() => handleDecideAppeal(a.id, 'UNDER_REVIEW')}
-                                  className="px-3 py-1.5 text-xs font-medium border border-[#D8D8D0] rounded-lg cursor-pointer"
+                                  className="px-3 py-1.5 text-xs font-medium border border-border rounded-xl cursor-pointer"
                                 >
                                   Start Review
                                 </button>
@@ -1486,7 +1504,7 @@ export default function AdminConsoleView({
                                 type="button"
                                 disabled={busy}
                                 onClick={() => handleDecideAppeal(a.id, 'UPHELD')}
-                                className="px-3 py-1.5 text-xs font-semibold text-[#B91C1C] border border-[#E8D0D0] rounded-lg cursor-pointer"
+                                className="px-3 py-1.5 text-xs font-semibold text-destructive border border-destructive/30 rounded-xl cursor-pointer"
                               >
                                 Uphold
                               </button>
@@ -1494,7 +1512,7 @@ export default function AdminConsoleView({
                                 type="button"
                                 disabled={busy}
                                 onClick={() => handleDecideAppeal(a.id, 'OVERTURNED')}
-                                className="px-3 py-1.5 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg cursor-pointer"
+                                className="px-3 py-1.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
                               >
                                 Overturn &amp; Lift
                               </button>
@@ -1514,32 +1532,32 @@ export default function AdminConsoleView({
           <section className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-[#0B6E4F]" aria-hidden="true" />
-                <h2 className="font-display text-2xl font-bold text-[#111814]">
+                <CheckCircle2 className="w-5 h-5 text-success" aria-hidden="true" />
+                <h2 className="font-sans text-xl md:text-2xl font-bold text-foreground">
                   Immutable Audit Logs
                 </h2>
               </div>
               <div className="relative">
-                <Search className="w-3.5 h-3.5 text-[#6C776E] absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="w-3.5 h-3.5 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={auditQuery}
                   onChange={(e) => setAuditQuery(e.target.value)}
                   placeholder="Filter action, handle, or reason..."
-                  className="pl-8 pr-3 py-2 text-xs bg-white border border-[#D8D8D0] rounded-lg w-64"
+                  className="pl-8 pr-3 py-2 text-xs bg-card text-foreground border border-border rounded-xl w-64"
                 />
               </div>
             </div>
 
-            <div className="bg-white border border-[#E4E4DE] rounded-xl overflow-x-auto">
+            <div className="bg-card border border-border rounded-2xl overflow-x-auto">
               {filteredAuditLogs.length === 0 ? (
-                <div className="p-8 text-center text-sm text-[#5C665E]">
+                <div className="p-8 text-center text-sm text-muted-foreground">
                   No audit log entries recorded yet.
                 </div>
               ) : (
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
-                    <tr className="border-b border-[#E4E4DE] text-[#5C665E]">
+                    <tr className="border-b border-border text-muted-foreground">
                       <th className="py-3 px-4 font-medium">Timestamp</th>
                       <th className="py-3 px-4 font-medium">Actor</th>
                       <th className="py-3 px-4 font-medium">Action</th>
@@ -1547,18 +1565,18 @@ export default function AdminConsoleView({
                       <th className="py-3 px-4 font-medium">Change / Reason</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#ECECE6]">
+                  <tbody className="divide-y divide-border">
                     {filteredAuditLogs.map((log) => (
-                      <tr key={log.id} className="hover:bg-[#FAFAF8]">
-                        <td className="py-2.5 px-4 font-mono text-[#5C665E] whitespace-nowrap">
+                      <tr key={log.id} className="hover:bg-muted/40">
+                        <td className="py-2.5 px-4 font-numeric text-muted-foreground whitespace-nowrap tabular-nums">
                           {log.createdAt.slice(0, 19).replace('T', ' ')}
                         </td>
-                        <td className="py-2.5 px-4 font-mono">@{log.actorHandle}</td>
-                        <td className="py-2.5 px-4 font-mono font-semibold text-[#111814]">
+                        <td className="py-2.5 px-4 font-sans text-foreground">@{log.actorHandle}</td>
+                        <td className="py-2.5 px-4 font-sans font-semibold text-foreground">
                           {log.action}
                         </td>
-                        <td className="py-2.5 px-4 font-mono">@{log.affectedHandle}</td>
-                        <td className="py-2.5 px-4 text-[#4B554E]">
+                        <td className="py-2.5 px-4 font-sans text-foreground">@{log.affectedHandle}</td>
+                        <td className="py-2.5 px-4 text-muted-foreground">
                           {log.reason || JSON.stringify(log.newValue)}
                         </td>
                       </tr>

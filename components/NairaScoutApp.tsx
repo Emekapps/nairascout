@@ -13,7 +13,8 @@ import type {
   SupportCase,
 } from '@/lib/nairascout-store';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
-import HeaderNav, { NavTab } from './HeaderNav';
+import type { NavTab } from './HeaderNav';
+import { AppShell } from './layout/AppShell';
 import MarketplaceView from './MarketplaceView';
 import ReferralsView from './ReferralsView';
 import NetworkView from './NetworkView';
@@ -37,6 +38,7 @@ export default function NairaScoutApp({
   const [activeTab, setActiveTab] = useState<NavTab>(
     initialRefEvent ? 'referrals' : 'marketplace'
   );
+  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [checkoutSession, setCheckoutSession] = useState<{
     product: ProductListing;
     referralEvent: ProductReferralEvent | null;
@@ -244,26 +246,16 @@ export default function NairaScoutApp({
 
   const activeInboxCount = snapshot.referralsInbox.filter((r) => r.status === 'active').length;
 
-  return (
-    <div className="min-h-screen flex flex-col">
-      <HeaderNav
-        activeTab={activeTab}
-        onSelectTab={setActiveTab}
-        onOpenGuide={() => setGuideOpen(true)}
-        inboxCount={activeInboxCount}
-        authenticated={snapshot.authenticated}
-        activeScout={snapshot.activeScout}
-        onLogout={handleLogout}
-      />
-
+  const banners = (
+    <>
       {feedback && (
         <div
           role="status"
           aria-live="polite"
           className={`border-b px-4 py-2.5 text-xs font-medium text-center ${
             feedback.type === 'ok'
-              ? 'bg-[#F3F8F6] border-[#CBE2D8] text-[#0B6E4F]'
-              : 'bg-[#FEF2F2] border-[#FECACA] text-[#B91C1C]'
+              ? 'bg-accent border-border text-accent-foreground'
+              : 'bg-destructive/10 border-destructive/30 text-destructive'
           }`}
         >
           {feedback.message}
@@ -272,9 +264,9 @@ export default function NairaScoutApp({
 
       {snapshot.activeScout?.activeRestrictions &&
         snapshot.activeScout.activeRestrictions.some((r) => r.status === 'ACTIVE') && (
-          <div className="bg-[#FEF2F2] border-b border-[#FECACA] px-4 py-2.5 text-xs text-[#991B1B] text-center">
+          <div className="bg-destructive/10 border-b border-destructive/30 px-4 py-2.5 text-xs text-destructive text-center">
             Active capability restriction(s):{' '}
-            <span className="font-mono font-semibold">
+            <span className="font-sans font-semibold">
               {snapshot.activeScout.activeRestrictions
                 .filter((r) => r.status === 'ACTIVE')
                 .map((r) => r.capabilityCode)
@@ -288,18 +280,75 @@ export default function NairaScoutApp({
         )}
 
       {(!snapshot.dbConfigured || !snapshot.supabaseConfigured) && (
-        <div className="bg-[#FFFBEB] border-b border-[#FDE68A] px-4 py-2.5 text-xs text-[#92400E] text-center">
+        <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2.5 text-xs text-amber-700 dark:text-amber-300 text-center">
           Live database and authentication require environment configuration:{' '}
-          {!snapshot.dbConfigured && <span className="font-mono font-semibold">DATABASE_URL </span>}
+          {!snapshot.dbConfigured && <span className="font-sans font-semibold">DATABASE_URL </span>}
           {!snapshot.supabaseConfigured && (
-            <span className="font-mono font-semibold">
+            <span className="font-sans font-semibold">
               NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY
             </span>
           )}
         </div>
       )}
+    </>
+  );
 
-      <main className="flex-1 max-w-[1280px] w-full mx-auto px-4 sm:px-8 py-8 sm:py-10">
+  const footer = (
+    <footer className="border-t border-border bg-card/70 pb-20 md:pb-0">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-muted-foreground">
+        <p>
+          NairaScout · Thirteen-generation referral marketing &amp; social commerce. No income is
+          guaranteed; commissions arise strictly from genuine qualifying product sales.
+        </p>
+        <div className="flex items-center gap-5 shrink-0">
+          <button
+            type="button"
+            onClick={() => setGuideOpen(true)}
+            className="hover:text-foreground transition-colors cursor-pointer"
+          >
+            Programme Rules
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('network')}
+            className="hover:text-foreground transition-colors cursor-pointer"
+          >
+            Commission Calculator
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('wallet')}
+            className="hover:text-foreground transition-colors cursor-pointer"
+          >
+            Payout Policy
+          </button>
+        </div>
+      </div>
+    </footer>
+  );
+
+  return (
+    <>
+      <AppShell
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+        onOpenGuide={() => setGuideOpen(true)}
+        inboxCount={activeInboxCount}
+        notifications={snapshot.notifications}
+        authenticated={snapshot.authenticated}
+        activeScout={snapshot.activeScout}
+        onLogout={handleLogout}
+        searchQuery={globalSearchQuery}
+        onSearchChange={(q) => {
+          setGlobalSearchQuery(q);
+          if (q.trim() && activeTab !== 'marketplace') {
+            setActiveTab('marketplace');
+          }
+        }}
+        onSearchSubmit={() => setActiveTab('marketplace')}
+        banners={banners}
+        footer={footer}
+      >
         <motion.div
           key={activeTab}
           initial={{ opacity: 0, y: 6 }}
@@ -309,6 +358,8 @@ export default function NairaScoutApp({
           {activeTab === 'marketplace' && (
             <MarketplaceView
               snapshot={snapshot}
+              externalSearchQuery={globalSearchQuery}
+              onExternalSearchChange={setGlobalSearchQuery}
               onStartDirectCheckout={(product) =>
                 setCheckoutSession({ product, referralEvent: null })
               }
@@ -352,39 +403,7 @@ export default function NairaScoutApp({
             />
           )}
         </motion.div>
-      </main>
-
-      <footer className="border-t border-[#E4E4DE] bg-white">
-        <div className="max-w-[1280px] mx-auto px-4 sm:px-8 py-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-[#5C665E]">
-          <p>
-            NairaScout · Thirteen-generation referral marketing &amp; social commerce. No income
-            is guaranteed; commissions arise strictly from genuine qualifying product sales.
-          </p>
-          <div className="flex items-center gap-5 shrink-0">
-            <button
-              type="button"
-              onClick={() => setGuideOpen(true)}
-              className="hover:text-[#111814] cursor-pointer"
-            >
-              Programme Rules
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('network')}
-              className="hover:text-[#111814] cursor-pointer"
-            >
-              Commission Calculator
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('wallet')}
-              className="hover:text-[#111814] cursor-pointer"
-            >
-              Payout Policy
-            </button>
-          </div>
-        </div>
-      </footer>
+      </AppShell>
 
       <CheckoutDrawer
         authenticated={snapshot.authenticated}
@@ -411,6 +430,6 @@ export default function NairaScoutApp({
         onClose={() => setGuideOpen(false)}
         onSubmitSupport={handleSubmitSupport}
       />
-    </div>
+    </>
   );
 }

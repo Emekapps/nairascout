@@ -41,7 +41,6 @@ export default function CheckoutDrawer({
   const [submitting, setSubmitting] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState<MarketplaceOrder | null>(null);
 
-  // Inline Email OTP state via @supabase/ssr
   const [otpEmail, setOtpEmail] = useState('');
   const [otpDisplayName, setOtpDisplayName] = useState('');
   const [otpCode, setOtpCode] = useState('');
@@ -162,15 +161,15 @@ export default function CheckoutDrawer({
       role="dialog"
       aria-modal="true"
       aria-label="Checkout Session"
-      className="fixed inset-0 z-50 bg-black/45 flex justify-end"
+      className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex justify-end"
     >
-      <div className="bg-white w-full max-w-lg h-full overflow-y-auto border-l border-[#E4E4DE] p-6 flex flex-col justify-between gap-6">
+      <div className="bg-card text-card-foreground w-full max-w-lg h-full overflow-y-auto border-l border-border p-6 flex flex-col justify-between gap-6">
         {confirmedOrder ? (
           <div className="space-y-6">
             <div className="flex items-start justify-between">
-              <div className="flex items-center gap-2 text-[#0B6E4F]">
+              <div className="flex items-center gap-2 text-success">
                 <CheckCircle2 className="w-5 h-5" aria-hidden="true" />
-                <span className="text-xs font-semibold uppercase tracking-wider">
+                <span className="font-sans text-xs font-semibold uppercase tracking-wider">
                   Order Confirmed
                 </span>
               </div>
@@ -178,68 +177,68 @@ export default function CheckoutDrawer({
                 type="button"
                 onClick={handleResetAndClose}
                 aria-label="Close receipt"
-                className="p-1 text-[#5C665E] hover:text-[#111814] cursor-pointer"
+                className="p-1 text-muted-foreground hover:text-foreground cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div>
-              <h2 className="font-display text-2xl font-bold text-[#111814]">
+              <h2 className="font-sans text-xl font-bold text-foreground">
                 {confirmedOrder.id} — Payment Recorded
               </h2>
-              <p className="mt-1 text-sm text-[#4B554E]">
+              <p className="mt-1 text-sm text-muted-foreground">
                 Seller fulfilment SLA: 10 calendar days. Commissions remain Pending until delivery
                 confirmation and dispute checks pass.
               </p>
             </div>
 
-            <div className="bg-[#FAFAF8] border border-[#E4E4DE] rounded-xl p-5 space-y-3 text-sm">
+            <div className="bg-muted/50 border border-border rounded-2xl p-5 space-y-3 text-sm">
               <div className="flex justify-between">
-                <span className="text-[#5C665E]">Attribution Classification</span>
-                <span className="font-semibold text-[#111814]">
+                <span className="text-muted-foreground">Attribution Classification</span>
+                <span className="font-numeric font-semibold text-foreground">
                   {confirmedOrder.attributionType === 'referral_card'
-                    ? `Referral-Generated (${confirmedOrder.referralEventId})`
+                    ? `Referral (${confirmedOrder.referralEventId})`
                     : 'Direct Marketplace'}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#5C665E]">Eligible Merchandise</span>
-                <span className="font-mono font-medium tabular-nums">
+                <span className="text-muted-foreground">Eligible Merchandise</span>
+                <span className="font-numeric font-medium tabular-nums">
                   {formatKoboToNaira(confirmedOrder.eligibleMerchandiseKobo)}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#5C665E]">Delivery (Excluded from pool)</span>
-                <span className="font-mono font-medium tabular-nums">
+                <span className="text-muted-foreground">Delivery (Excluded from pool)</span>
+                <span className="font-numeric font-medium tabular-nums">
                   {formatKoboToNaira(confirmedOrder.deliveryFeeKobo)}
                 </span>
               </div>
-              <div className="flex justify-between pt-2 border-t border-[#E4E4DE] font-semibold">
+              <div className="flex justify-between pt-2 border-t border-border font-bold">
                 <span>Total Paid</span>
-                <span className="font-mono tabular-nums">
+                <span className="font-numeric tabular-nums">
                   {formatKoboToNaira(confirmedOrder.totalChargedKobo)}
                 </span>
               </div>
             </div>
 
-            <div className="bg-white border border-[#E4E4DE] rounded-xl p-5 space-y-2.5 text-xs">
-              <p className="font-semibold text-[#111814]">
+            <div className="bg-card border border-border rounded-2xl p-5 space-y-2.5 text-xs">
+              <p className="font-sans font-semibold text-foreground">
                 Server-Side Commission Snapshot ({confirmedOrder.commissionSnapshot.ruleVersion})
               </p>
-              <p className="text-[#4B554E]">
+              <p className="text-muted-foreground">
                 Schedule: {confirmedOrder.commissionSnapshot.scheduleName}
               </p>
               <div className="grid grid-cols-2 gap-3 pt-2">
                 <div>
-                  <p className="text-[#5C665E]">10% Marketplace Fee</p>
-                  <p className="font-mono font-semibold text-[#111814] tabular-nums">
+                  <p className="text-muted-foreground">10% Marketplace Fee</p>
+                  <p className="font-numeric font-semibold text-foreground tabular-nums">
                     {formatKoboToNaira(confirmedOrder.commissionSnapshot.marketplaceCommissionKobo)}
                   </p>
                 </div>
                 <div>
-                  <p className="text-[#5C665E]">20% Referral Pool</p>
-                  <p className="font-mono font-semibold text-[#0B6E4F] tabular-nums">
+                  <p className="text-muted-foreground">20% Referral Pool</p>
+                  <p className="font-numeric font-semibold text-success tabular-nums">
                     {formatKoboToNaira(confirmedOrder.commissionSnapshot.referralPoolKobo)}
                   </p>
                 </div>
@@ -249,7 +248,7 @@ export default function CheckoutDrawer({
             <button
               type="button"
               onClick={handleResetAndClose}
-              className="w-full py-3 px-4 text-xs font-semibold text-white bg-[#111814] rounded-lg hover:bg-[#26332B] cursor-pointer"
+              className="w-full py-3 px-4 text-xs font-bold uppercase tracking-wider text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
             >
               Done &amp; Return to Workspace
             </button>
@@ -257,12 +256,10 @@ export default function CheckoutDrawer({
         ) : (
           <>
             <div className="space-y-6">
-              <div className="flex items-center justify-between border-b border-[#ECECE6] pb-4">
+              <div className="flex items-center justify-between border-b border-border pb-4">
                 <div>
-                  <h2 className="font-display text-xl font-bold text-[#111814]">
-                    Checkout Session
-                  </h2>
-                  <p className="text-xs text-[#5C665E] mt-0.5">
+                  <h2 className="font-sans text-xl font-bold text-foreground">Checkout Session</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">
                     {isReferral
                       ? `Attributed to Referral Card ${referralEvent?.id}`
                       : 'Direct Marketplace Listing Purchase'}
@@ -272,7 +269,7 @@ export default function CheckoutDrawer({
                   type="button"
                   onClick={handleResetAndClose}
                   aria-label="Close checkout"
-                  className="p-1 text-[#5C665E] hover:text-[#111814] cursor-pointer"
+                  className="p-1 text-muted-foreground hover:text-foreground cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -280,13 +277,13 @@ export default function CheckoutDrawer({
 
               {/* Attribution Banner */}
               <div
-                className={`p-4 rounded-xl border text-xs space-y-1 ${
+                className={`p-4 rounded-2xl border text-xs space-y-1 ${
                   isReferral
-                    ? 'bg-[#F3F8F6] border-[#CBE2D8] text-[#0B6E4F]'
-                    : 'bg-[#F5F5F0] border-[#E4E4DE] text-[#4B554E]'
+                    ? 'bg-accent border-primary-border/40 text-accent-foreground'
+                    : 'bg-muted/60 border-border text-muted-foreground'
                 }`}
               >
-                <p className="font-semibold">
+                <p className="font-sans font-semibold">
                   {isReferral
                     ? `Referral-Card Attribution Active (${referralEvent?.id})`
                     : 'Direct Marketplace Purchase (₦0 Referral Pool)'}
@@ -300,7 +297,7 @@ export default function CheckoutDrawer({
 
               {/* Product Item */}
               <div className="flex gap-4 items-center">
-                <div className="w-24 h-20 rounded-lg overflow-hidden shrink-0">
+                <div className="w-24 h-20 rounded-xl overflow-hidden shrink-0">
                   <ProductImage
                     src={product.imageUrl}
                     alt={product.title}
@@ -309,36 +306,36 @@ export default function CheckoutDrawer({
                   />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-display text-base font-semibold text-[#111814] truncate">
+                  <h3 className="font-sans text-base font-semibold text-foreground truncate">
                     {product.title}
                   </h3>
-                  <p className="text-xs text-[#5C665E]">Seller: {product.sellerName}</p>
-                  <p className="mt-1 font-mono text-sm font-semibold text-[#111814] tabular-nums">
+                  <p className="text-xs text-muted-foreground">Seller: {product.sellerName}</p>
+                  <p className="mt-1 font-numeric text-sm font-bold text-foreground tabular-nums">
                     {formatKoboToNaira(product.priceKobo)} each
                   </p>
                 </div>
               </div>
 
               {/* Quantity Stepper */}
-              <div className="flex items-center justify-between py-3 border-y border-[#ECECE6]">
-                <span className="text-sm font-medium text-[#111814]">Quantity</span>
+              <div className="flex items-center justify-between py-3 border-y border-border">
+                <span className="text-sm font-medium text-foreground">Quantity</span>
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
                     onClick={() => setQuantity((q) => Math.max(1, q - 1))}
                     aria-label="Decrease quantity"
-                    className="w-8 h-8 flex items-center justify-center border border-[#D8D8D0] rounded-md hover:bg-[#F3F3EF] cursor-pointer"
+                    className="w-9 h-9 flex items-center justify-center border border-border rounded-lg hover:bg-muted cursor-pointer"
                   >
                     <Minus className="w-3.5 h-3.5" />
                   </button>
-                  <span className="font-mono text-sm font-semibold w-6 text-center tabular-nums">
+                  <span className="font-numeric text-sm font-semibold w-6 text-center tabular-nums">
                     {quantity}
                   </span>
                   <button
                     type="button"
                     onClick={() => setQuantity((q) => Math.min(product.stock, q + 1))}
                     aria-label="Increase quantity"
-                    className="w-8 h-8 flex items-center justify-center border border-[#D8D8D0] rounded-md hover:bg-[#F3F3EF] cursor-pointer"
+                    className="w-9 h-9 flex items-center justify-center border border-border rounded-lg hover:bg-muted cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
                   </button>
@@ -347,31 +344,31 @@ export default function CheckoutDrawer({
 
               {/* Inline Email OTP Gate via @supabase/ssr */}
               {!authenticated && (
-                <div className="bg-[#FAFAF8] border border-[#E4E4DE] rounded-xl p-4 space-y-3">
+                <div className="bg-muted/50 border border-border rounded-2xl p-4 space-y-3">
                   <div className="flex items-center gap-2">
-                    <Mail className="w-4 h-4 text-[#0B6E4F]" aria-hidden="true" />
-                    <p className="text-xs font-semibold text-[#111814]">
+                    <Mail className="w-4 h-4 text-foreground" aria-hidden="true" />
+                    <p className="text-xs font-semibold text-foreground">
                       Quick Email OTP Verification to Complete Order
                     </p>
                   </div>
-                  <p className="text-xs text-[#5C665E]">
+                  <p className="text-xs text-muted-foreground">
                     Verify your email via Supabase Auth to provision your free Scout identity while
                     preserving{' '}
                     {isReferral ? `referral card ${referralEvent?.id}` : 'this checkout session'}.
                   </p>
 
                   {!supabaseConfigured && (
-                    <p className="text-xs text-[#92400E] bg-[#FFFBEB] border border-[#FDE68A] p-2 rounded">
+                    <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 p-2 rounded-lg">
                       Supabase Auth is not configured in environment variables yet.
                     </p>
                   )}
 
                   {otpError && (
-                    <p className="text-xs text-[#B91C1C] font-medium">{otpError}</p>
+                    <p className="text-xs text-destructive font-medium">{otpError}</p>
                   )}
 
                   {otpInfo && (
-                    <p className="text-xs text-[#0B6E4F] font-medium">{otpInfo}</p>
+                    <p className="text-xs text-success font-medium">{otpInfo}</p>
                   )}
 
                   {otpStep === 'email' ? (
@@ -383,7 +380,7 @@ export default function CheckoutDrawer({
                         onChange={(e) => setOtpEmail(e.target.value)}
                         placeholder="you@example.com"
                         aria-label="Email address for OTP"
-                        className="w-full px-3 py-2 text-sm bg-white border border-[#D8D8D0] rounded-lg"
+                        className="w-full px-3 py-2 text-sm bg-background border border-input rounded-xl text-foreground"
                       />
                       <input
                         type="text"
@@ -391,12 +388,12 @@ export default function CheckoutDrawer({
                         onChange={(e) => setOtpDisplayName(e.target.value)}
                         placeholder="Your full name (for new accounts)"
                         aria-label="Full name"
-                        className="w-full px-3 py-2 text-sm bg-white border border-[#D8D8D0] rounded-lg"
+                        className="w-full px-3 py-2 text-sm bg-background border border-input rounded-xl text-foreground"
                       />
                       <button
                         type="submit"
                         disabled={otpBusy || !supabaseConfigured}
-                        className="w-full py-2 px-3 text-xs font-semibold text-white bg-[#111814] rounded-lg disabled:opacity-50 cursor-pointer"
+                        className="w-full py-2.5 px-3 text-xs font-semibold text-commerce-foreground bg-commerce rounded-xl disabled:opacity-50 cursor-pointer"
                       >
                         {otpBusy ? 'Sending OTP...' : 'Send Email Verification Code'}
                       </button>
@@ -411,13 +408,13 @@ export default function CheckoutDrawer({
                         onChange={(e) => setOtpCode(e.target.value)}
                         placeholder="Enter 6-digit code"
                         aria-label="OTP code"
-                        className="w-full px-3 py-2 font-mono text-sm bg-white border border-[#D8D8D0] rounded-lg"
+                        className="w-full px-3 py-2 font-numeric text-sm bg-background border border-input rounded-xl text-foreground tabular-nums"
                       />
                       <div className="flex gap-2">
                         <button
                           type="submit"
                           disabled={otpBusy}
-                          className="flex-1 py-2 px-3 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg cursor-pointer"
+                          className="flex-1 py-2.5 px-3 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl cursor-pointer"
                         >
                           {otpBusy ? 'Verifying...' : 'Verify & Continue'}
                         </button>
@@ -427,7 +424,7 @@ export default function CheckoutDrawer({
                             setOtpStep('email');
                             setOtpInfo(null);
                           }}
-                          className="px-3 py-2 text-xs text-[#4B554E] border border-[#D8D8D0] rounded-lg cursor-pointer"
+                          className="px-3 py-2 text-xs text-muted-foreground border border-border rounded-xl cursor-pointer"
                         >
                           Change Email
                         </button>
@@ -439,28 +436,30 @@ export default function CheckoutDrawer({
 
               {/* Totals */}
               <div className="space-y-2.5 text-sm">
-                <div className="flex justify-between text-[#4B554E]">
+                <div className="flex justify-between text-muted-foreground">
                   <span>Eligible Merchandise Subtotal</span>
-                  <span className="font-mono tabular-nums">{formatKoboToNaira(merchTotalKobo)}</span>
+                  <span className="font-numeric tabular-nums">
+                    {formatKoboToNaira(merchTotalKobo)}
+                  </span>
                 </div>
-                <div className="flex justify-between text-[#4B554E]">
+                <div className="flex justify-between text-muted-foreground">
                   <span>Delivery Charge (Excluded from commission)</span>
-                  <span className="font-mono tabular-nums">
+                  <span className="font-numeric tabular-nums">
                     {formatKoboToNaira(product.deliveryFeeKobo)}
                   </span>
                 </div>
-                <div className="flex justify-between pt-3 border-t border-[#E4E4DE] text-base font-bold text-[#111814]">
+                <div className="flex justify-between pt-3 border-t border-border text-base font-bold text-foreground">
                   <span>Total Due</span>
-                  <span className="font-mono tabular-nums">
+                  <span className="font-numeric tabular-nums">
                     {formatKoboToNaira(totalChargedKobo)}
                   </span>
                 </div>
               </div>
             </div>
 
-            <div className="space-y-3 pt-4 border-t border-[#ECECE6]">
-              <div className="flex items-center gap-2 text-xs text-[#5C665E]">
-                <ShieldCheck className="w-4 h-4 text-[#0B6E4F] shrink-0" aria-hidden="true" />
+            <div className="space-y-3 pt-4 border-t border-border">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <ShieldCheck className="w-4 h-4 text-success shrink-0" aria-hidden="true" />
                 <span>
                   10-day Seller fulfilment window · Commission calculations executed strictly
                   server-side
@@ -470,13 +469,13 @@ export default function CheckoutDrawer({
                 type="button"
                 disabled={submitting || !authenticated}
                 onClick={handleCheckout}
-                className="w-full py-3 px-4 text-sm font-semibold text-white bg-[#0B6E4F] rounded-lg hover:bg-[#09583F] disabled:opacity-45 cursor-pointer"
+                className="w-full h-11 px-4 text-xs sm:text-sm font-bold uppercase tracking-wider text-commerce-foreground bg-commerce rounded-xl hover:bg-commerce/90 disabled:opacity-45 cursor-pointer"
               >
                 {!authenticated
                   ? 'Verify Email OTP Above to Place Order'
                   : submitting
-                  ? 'Processing Order...'
-                  : `Complete Order · ${formatKoboToNaira(totalChargedKobo)}`}
+                    ? 'Processing Order...'
+                    : `Complete Order · ${formatKoboToNaira(totalChargedKobo)}`}
               </button>
             </div>
           </>

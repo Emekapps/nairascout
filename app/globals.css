@@ -1,25 +1,154 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  /* LIGHT MODE — Crisp Alabaster + Black BUY + Charcoal Black (#292D2F) REFER */
+  --background: 220 20% 98%;          /* #F8F9FB */
+  --foreground: 222 47% 11%;          /* #0F172A */
+
+  --card: 0 0% 100%;                  /* #FFFFFF */
+  --card-foreground: 222 47% 11%;     /* #0F172A */
+
+  --popover: 0 0% 100%;               /* #FFFFFF */
+  --popover-foreground: 222 47% 11%;
+
+  --sidebar: 0 0% 100%;               /* #FFFFFF */
+  --sidebar-foreground: 215 25% 27%;  /* #334155 */
+  --sidebar-border: 214 32% 91%;      /* #E2E8F0 */
+
+  /* Primary Brand Action (REFER & Primary CTAs): Charcoal Black (#292D2F) */
+  --primary: 200 7% 17%;              /* #292D2F */
+  --primary-foreground: 0 0% 100%;    /* #FFFFFF */
+  --primary-border: 200 7% 17%;       /* #292D2F */
+
+  /* Commerce Action (BUY buttons): Pure Black (#000000) in Light Mode */
+  --commerce: 0 0% 0%;                /* #000000 */
+  --commerce-foreground: 0 0% 100%;   /* #FFFFFF */
+
+  --secondary: 210 40% 96%;           /* #F1F5F9 */
+  --secondary-foreground: 222 47% 11%;
+
+  --muted: 210 40% 96%;               /* #F1F5F9 */
+  --muted-foreground: 215 16% 47%;    /* #64748B */
+
+  --accent: 210 20% 94%;              /* #ECEFF2 — Soft Charcoal Tint */
+  --accent-foreground: 200 7% 17%;    /* #292D2F */
+
+  --destructive: 0 84% 60%;           /* #EF4444 */
+  --destructive-foreground: 0 0% 100%;
+
+  --success: 160 84% 39%;             /* #10B981 */
+  --warning: 38 92% 50%;              /* #F59E0B */
+
+  --border: 214 32% 91%;              /* #E2E8F0 */
+  --input: 214 32% 91%;
+  --ring: 200 7% 17%;                 /* #292D2F */
+  --radius: 0.875rem;                 /* 14px rounded cards */
+}
+
+.dark {
+  /* DARK MODE — Midnight Obsidian (#101010) + Charcoal Black (#292D2F) Buttons */
+  --background: 0 0% 6.3%;            /* #101010 — Midnight Obsidian */
+  --foreground: 210 40% 98%;          /* #F8FAFC */
+
+  --card: 0 0% 9.5%;                  /* #181818 — Elevated Midnight Card */
+  --card-foreground: 210 40% 98%;
+
+  --popover: 0 0% 11%;                /* #1C1C1C */
+  --popover-foreground: 210 40% 98%;
+
+  --sidebar: 0 0% 8%;                 /* #141414 — Midnight Sidebar */
+  --sidebar-foreground: 215 20% 75%;  /* #94A3B8 */
+  --sidebar-border: 0 0% 16%;         /* #292929 */
+
+  /* Primary Brand Action (REFER & Primary CTAs): Charcoal Black (#292D2F) */
+  --primary: 200 7% 17%;              /* #292D2F */
+  --primary-foreground: 0 0% 100%;    /* #FFFFFF */
+  --primary-border: 204 6% 26%;       /* #3E4346 */
+
+  /* Commerce Action (BUY buttons): Pure White (#FFFFFF) in Dark Mode */
+  --commerce: 0 0% 100%;              /* #FFFFFF */
+  --commerce-foreground: 0 0% 0%;     /* #000000 */
+
+  --secondary: 0 0% 14%;              /* #242424 */
+  --secondary-foreground: 210 40% 98%;
+
+  --muted: 0 0% 14%;                  /* #242424 */
+  --muted-foreground: 0 0% 62%;       /* #9E9E9E */
+
+  --accent: 200 7% 17%;               /* #292D2F */
+  --accent-foreground: 210 40% 98%;
+
+  --destructive: 0 72% 51%;           /* #DC2626 */
+  --destructive-foreground: 0 0% 100%;
+
+  --success: 158 64% 52%;             /* #34D399 */
+  --warning: 38 92% 50%;              /* #F59E0B */
+
+  --border: 0 0% 16%;                 /* #292929 */
+  --input: 0 0% 18%;                  /* #2E2E2E */
+  --ring: 204 6% 35%;
+}
+
 @theme inline {
-  --font-display: var(--font-display), ui-sans-serif, system-ui, sans-serif;
-  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, monospace;
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-primary-border: hsl(var(--primary-border));
+  --color-commerce: hsl(var(--commerce));
+  --color-commerce-foreground: hsl(var(--commerce-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-success: hsl(var(--success));
+  --color-warning: hsl(var(--warning));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --font-sans: var(--font-sans), system-ui, sans-serif;
+  --font-numeric: var(--font-numeric), var(--font-sans), system-ui, sans-serif;
+  --font-brand: var(--font-brand), sans-serif;
 }
 
 @layer base {
-  body {
-    background-color: #FAFAF8;
-    color: #111814;
-    font-family: var(--font-sans);
+  * {
+    @apply border-border;
   }
 
-  h1, h2, h3, .font-display {
-    font-family: var(--font-display);
+  body {
+    @apply bg-background text-foreground font-sans antialiased selection:bg-primary/20 selection:text-foreground;
+  }
+
+  h1, h2, h3, h4, .font-heading {
+    @apply font-sans tracking-tight;
   }
 }
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 @media (prefers-reduced-motion: reduce) {

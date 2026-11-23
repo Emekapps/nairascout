@@ -1,25 +1,26 @@
 import type { Metadata } from 'next';
-import { Bricolage_Grotesque, Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google';
+import { Plus_Jakarta_Sans, Inter, Lexend } from 'next/font/google';
+import { ThemeProvider } from '@/components/layout/ThemeProvider';
 import './globals.css';
 
-const bricolage = Bricolage_Grotesque({
+const plusJakarta = Plus_Jakarta_Sans({
   subsets: ['latin'],
-  weight: ['500', '600', '700'],
-  variable: '--font-display',
-  display: 'swap',
-});
-
-const jakarta = Plus_Jakarta_Sans({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
+  weight: ['400', '500', '600', '700', '800'],
   variable: '--font-sans',
   display: 'swap',
 });
 
-const jetbrains = JetBrains_Mono({
+const inter = Inter({
   subsets: ['latin'],
-  weight: ['400', '500', '600'],
-  variable: '--font-mono',
+  weight: ['500', '600', '700'],
+  variable: '--font-numeric',
+  display: 'swap',
+});
+
+const lexend = Lexend({
+  subsets: ['latin'],
+  weight: ['800'],
+  variable: '--font-brand',
   display: 'swap',
 });
 
@@ -43,12 +44,16 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${bricolage.variable} ${jakarta.variable} ${jetbrains.variable}`}>
+    <html
+      lang="en"
+      className={`${plusJakarta.variable} ${inter.variable} ${lexend.variable}`}
+      suppressHydrationWarning
+    >
       <body
         suppressHydrationWarning
-        className="min-h-screen bg-[#FAFAF8] text-[#111814] font-sans antialiased selection:bg-[#0B6E4F]/15 selection:text-[#0B6E4F]"
+        className="min-h-screen bg-background text-foreground font-sans antialiased selection:bg-primary/20 selection:text-foreground"
       >
-        {children}
+        <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
   );

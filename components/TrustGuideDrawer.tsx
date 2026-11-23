@@ -46,15 +46,15 @@ export default function TrustGuideDrawer({
       role="dialog"
       aria-modal="true"
       aria-label="Trust, Programme Guide and Support"
-      className="fixed inset-0 z-50 bg-black/45 flex justify-end"
+      className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex justify-end"
     >
-      <div className="bg-white w-full max-w-lg h-full overflow-y-auto border-l border-[#E4E4DE] p-6 space-y-6">
-        <div className="flex items-center justify-between border-b border-[#ECECE6] pb-4">
+      <div className="bg-card text-card-foreground w-full max-w-lg h-full overflow-y-auto border-l border-border p-6 space-y-6">
+        <div className="flex items-center justify-between border-b border-border pb-4">
           <div>
-            <h2 className="font-display text-xl font-bold text-[#111814]">
+            <h2 className="font-sans text-xl font-bold text-foreground">
               Programme Guide &amp; Trust
             </h2>
-            <p className="text-xs text-[#5C665E]">
+            <p className="text-xs text-muted-foreground">
               {snapshot.activeScout
                 ? `Signed in as ${snapshot.activeScout.displayName} (@${snapshot.activeScout.handle})`
                 : 'Browsing as guest'}
@@ -64,18 +64,20 @@ export default function TrustGuideDrawer({
             type="button"
             onClick={onClose}
             aria-label="Close guide"
-            className="p-1 text-[#5C665E] hover:text-[#111814] cursor-pointer"
+            className="p-1 text-muted-foreground hover:text-foreground cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="flex items-center gap-1 p-1 bg-[#EFEFE9] rounded-lg">
+        <div className="flex items-center gap-1 p-1 bg-muted rounded-xl">
           <button
             type="button"
             onClick={() => setSection('guide')}
-            className={`flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-md cursor-pointer ${
-              section === 'guide' ? 'bg-white text-[#111814] shadow-xs' : 'text-[#556158]'
+            className={`flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-lg cursor-pointer transition-colors ${
+              section === 'guide'
+                ? 'bg-card text-foreground shadow-xs'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             <BookOpen className="w-3.5 h-3.5" />
@@ -84,18 +86,22 @@ export default function TrustGuideDrawer({
           <button
             type="button"
             onClick={() => setSection('notifications')}
-            className={`flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-md cursor-pointer ${
-              section === 'notifications' ? 'bg-white text-[#111814] shadow-xs' : 'text-[#556158]'
+            className={`flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-lg cursor-pointer transition-colors ${
+              section === 'notifications'
+                ? 'bg-card text-foreground shadow-xs'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             <Bell className="w-3.5 h-3.5" />
-            Notices ({snapshot.notifications.length})
+            Notices (<span className="font-numeric tabular-nums">{snapshot.notifications.length}</span>)
           </button>
           <button
             type="button"
             onClick={() => setSection('support')}
-            className={`flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-md cursor-pointer ${
-              section === 'support' ? 'bg-white text-[#111814] shadow-xs' : 'text-[#556158]'
+            className={`flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-lg cursor-pointer transition-colors ${
+              section === 'support'
+                ? 'bg-card text-foreground shadow-xs'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             <LifeBuoy className="w-3.5 h-3.5" />
@@ -104,12 +110,12 @@ export default function TrustGuideDrawer({
         </div>
 
         {section === 'guide' && (
-          <div className="space-y-5 text-sm text-[#3B443E] leading-relaxed">
+          <div className="space-y-5 text-sm text-foreground/90 leading-relaxed">
             <div>
-              <h3 className="font-display font-semibold text-[#111814]">
+              <h3 className="font-sans font-semibold text-foreground">
                 1. One Primary Identity, Scout-First Participation
               </h3>
-              <p className="mt-1 text-xs text-[#556158]">
+              <p className="mt-1 text-xs text-muted-foreground">
                 Every registered user receives a free Scout account. Seller capabilities attach to
                 the same identity and require Seller verification approval before publishing
                 listings.
@@ -117,10 +123,10 @@ export default function TrustGuideDrawer({
             </div>
 
             <div>
-              <h3 className="font-display font-semibold text-[#111814]">
+              <h3 className="font-sans font-semibold text-foreground">
                 2. Referral-Card Attribution vs Direct Buys
               </h3>
-              <p className="mt-1 text-xs text-[#556158]">
+              <p className="mt-1 text-xs text-muted-foreground">
                 A purchase initiated from the general marketplace is a direct order (₦0 referral
                 pool). A purchase initiated from a valid product referral card or event link
                 attributes the order to the Seller Scout’s permanent ancestry.
@@ -128,10 +134,10 @@ export default function TrustGuideDrawer({
             </div>
 
             <div>
-              <h3 className="font-display font-semibold text-[#111814]">
+              <h3 className="font-sans font-semibold text-foreground">
                 3. 20% Pool &amp; Thirteen-Generation Schedules
               </h3>
-              <p className="mt-1 text-xs text-[#556158]">
+              <p className="mt-1 text-xs text-muted-foreground">
                 Sellers receive 90% and NairaScout earns 10% of eligible merchandise revenue. Up to
                 20% of NairaScout’s commission forms the referral pool. Actual ancestry depth
                 selects the schedule. Ineligible ancestors receive ₦0 and are never skipped.
@@ -139,10 +145,10 @@ export default function TrustGuideDrawer({
             </div>
 
             <div>
-              <h3 className="font-display font-semibold text-[#111814]">
+              <h3 className="font-sans font-semibold text-foreground">
                 4. Fulfilment, Reversals &amp; Monthly Payouts
               </h3>
-              <p className="mt-1 text-xs text-[#556158]">
+              <p className="mt-1 text-xs text-muted-foreground">
                 Available balances from the preceding month are paid on the 15th (₦5,000 minimum,
                 KYC + verified Nigerian bank required).
               </p>
@@ -151,18 +157,20 @@ export default function TrustGuideDrawer({
         )}
 
         {section === 'notifications' && (
-          <div className="divide-y divide-[#ECECE6]">
+          <div className="divide-y divide-border">
             {snapshot.notifications.length === 0 ? (
-              <p className="text-xs text-[#5C665E] py-4">No notifications.</p>
+              <p className="text-xs text-muted-foreground py-4">No notifications.</p>
             ) : (
               snapshot.notifications.map((n) => (
                 <div key={n.id} className="py-3.5 first:pt-0 space-y-1">
-                  <div className="flex items-center justify-between text-xs text-[#5C665E]">
-                    <span className="uppercase tracking-wider font-medium">{n.category}</span>
-                    <span className="font-mono">{n.createdAt.slice(0, 10)}</span>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span className="font-sans uppercase tracking-wider font-semibold">
+                      {n.category}
+                    </span>
+                    <span className="font-numeric tabular-nums">{n.createdAt.slice(0, 10)}</span>
                   </div>
-                  <p className="text-sm font-semibold text-[#111814]">{n.title}</p>
-                  <p className="text-xs text-[#4B554E] leading-relaxed">{n.body}</p>
+                  <p className="text-sm font-semibold text-foreground">{n.title}</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{n.body}</p>
                 </div>
               ))
             )}
@@ -172,20 +180,20 @@ export default function TrustGuideDrawer({
         {section === 'support' && (
           <div className="space-y-6">
             {!snapshot.authenticated ? (
-              <p className="text-xs text-[#5C665E]">
+              <p className="text-xs text-muted-foreground">
                 Please sign in to submit or track a support or appeal case.
               </p>
             ) : (
               <form onSubmit={handleSupportSubmit} className="space-y-3.5">
                 <div>
-                  <label htmlFor="sup-topic" className="block text-xs font-medium text-[#4B554E] mb-1">
+                  <label htmlFor="sup-topic" className="block text-xs font-medium text-muted-foreground mb-1">
                     Appeal or Inquiry Topic
                   </label>
                   <select
                     id="sup-topic"
                     value={topic}
                     onChange={(e) => setTopic(e.target.value as SupportCase['topic'])}
-                    className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg bg-white"
+                    className="w-full px-3 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                   >
                     <option value="commission">Commission Calculation / Ancestry</option>
                     <option value="attribution">Referral-Card Attribution</option>
@@ -195,7 +203,7 @@ export default function TrustGuideDrawer({
                   </select>
                 </div>
                 <div>
-                  <label htmlFor="sup-subj" className="block text-xs font-medium text-[#4B554E] mb-1">
+                  <label htmlFor="sup-subj" className="block text-xs font-medium text-muted-foreground mb-1">
                     Subject
                   </label>
                   <input
@@ -205,11 +213,11 @@ export default function TrustGuideDrawer({
                     value={subject}
                     onChange={(e) => setSubject(e.target.value)}
                     placeholder="Order ID or ledger reference..."
-                    className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
+                    className="w-full px-3 py-2 text-sm bg-background border border-input rounded-xl text-foreground"
                   />
                 </div>
                 <div>
-                  <label htmlFor="sup-det" className="block text-xs font-medium text-[#4B554E] mb-1">
+                  <label htmlFor="sup-det" className="block text-xs font-medium text-muted-foreground mb-1">
                     Details &amp; Evidence
                   </label>
                   <textarea
@@ -219,13 +227,13 @@ export default function TrustGuideDrawer({
                     value={details}
                     onChange={(e) => setDetails(e.target.value)}
                     placeholder="Describe the transaction or attribution issue..."
-                    className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
+                    className="w-full px-3 py-2 text-sm bg-background border border-input rounded-xl text-foreground"
                   />
                 </div>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg cursor-pointer"
+                  className="w-full py-2.5 px-4 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
                 >
                   {submitting ? 'Submitting...' : 'Submit Support Case'}
                 </button>
@@ -233,15 +241,15 @@ export default function TrustGuideDrawer({
             )}
 
             {snapshot.supportCases.length > 0 && (
-              <div className="space-y-2 border-t border-[#ECECE6] pt-4">
-                <p className="text-xs font-semibold text-[#111814]">Submitted Cases</p>
+              <div className="space-y-2 border-t border-border pt-4">
+                <p className="text-xs font-semibold text-foreground">Submitted Cases</p>
                 {snapshot.supportCases.map((c) => (
-                  <div key={c.id} className="p-3 bg-[#FAFAF8] border border-[#E4E4DE] rounded-lg">
+                  <div key={c.id} className="p-3 bg-muted/50 border border-border rounded-xl">
                     <div className="flex justify-between text-xs">
-                      <span className="font-mono font-semibold text-[#0B6E4F]">{c.id}</span>
-                      <span className="text-[#5C665E]">{c.status}</span>
+                      <span className="font-numeric font-semibold text-foreground">{c.id}</span>
+                      <span className="text-muted-foreground">{c.status}</span>
                     </div>
-                    <p className="text-sm font-medium text-[#111814] mt-1">{c.subject}</p>
+                    <p className="text-sm font-medium text-foreground mt-1">{c.subject}</p>
                   </div>
                 ))}
               </div>

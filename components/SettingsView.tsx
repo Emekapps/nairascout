@@ -19,6 +19,7 @@ import type {
 } from '@/lib/nairascout-store';
 import { formatKoboToNaira } from '@/lib/commission-engine';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { ThemeToggle } from './layout/ThemeToggle';
 
 interface SettingsViewProps {
   initialSnapshot: NairaScoutSnapshot;
@@ -79,26 +80,26 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
 
   if (!snapshot.authenticated || !scout) {
     return (
-      <div className="min-h-screen bg-[#FAFAF8] flex items-center justify-center p-6">
-        <div className="bg-white border border-[#E4E4DE] rounded-xl max-w-md w-full p-8 text-center space-y-4">
-          <Lock className="w-8 h-8 text-[#0B6E4F] mx-auto" aria-hidden="true" />
-          <h1 className="font-display text-2xl font-bold text-[#111814]">
+      <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-6">
+        <div className="bg-card border border-border rounded-2xl max-w-md w-full p-8 text-center space-y-4">
+          <Lock className="w-8 h-8 text-foreground mx-auto" aria-hidden="true" />
+          <h1 className="font-sans text-2xl font-bold text-foreground">
             Sign In to Access Account Settings
           </h1>
-          <p className="text-sm text-[#5C665E]">
+          <p className="text-sm text-muted-foreground">
             Manage your Scout profile, Scouts List privacy controls, verification documents, and
             account lifecycle.
           </p>
           <div className="flex justify-center gap-3 pt-2">
             <Link
               href="/auth/login"
-              className="px-4 py-2 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg"
+              className="px-4 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90"
             >
               Sign In
             </Link>
             <Link
               href="/"
-              className="px-4 py-2 text-xs font-semibold text-[#111814] border border-[#D8D8D0] rounded-lg"
+              className="px-4 py-2 text-xs font-semibold text-foreground border border-border rounded-xl"
             >
               Back to Marketplace
             </Link>
@@ -236,30 +237,35 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
   ).length;
 
   return (
-    <div className="min-h-screen bg-[#FAFAF8]">
-      <header className="bg-white border-b border-[#E4E4DE]">
-        <div className="max-w-[1040px] mx-auto px-4 sm:px-8 h-16 flex items-center justify-between">
+    <div className="min-h-screen bg-background text-foreground">
+      <header className="bg-card/85 backdrop-blur-md border-b border-border sticky top-0 z-20">
+        <div className="max-w-5xl mx-auto px-4 sm:px-8 h-16 flex items-center justify-between">
           <Link
             href="/"
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#111814] hover:text-[#0B6E4F]"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground hover:text-muted-foreground"
           >
             <ArrowLeft className="w-4 h-4" aria-hidden="true" />
             Back to NairaScout Workspace
           </Link>
-          <span className="font-mono text-xs text-[#5C665E]">@{scout.handle}</span>
+          <div className="flex items-center gap-3">
+            <span className="font-sans text-xs text-muted-foreground">@{scout.handle}</span>
+            <ThemeToggle />
+          </div>
         </div>
       </header>
 
-      <main className="max-w-[1040px] mx-auto px-4 sm:px-8 py-8 space-y-8">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-[#E4E4DE] pb-6">
+      <main className="max-w-5xl mx-auto px-4 sm:px-8 py-8 space-y-8">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-border pb-6">
           <div>
-            <h1 className="font-display text-3xl font-bold text-[#111814]">Account Settings</h1>
-            <p className="mt-1 text-sm text-[#4B554E]">
-              Primary Identity: <span className="font-mono">{scout.email}</span> · Account Status:{' '}
-              <strong>{scout.accountStatus}</strong>
+            <h1 className="font-sans text-2xl md:text-3xl font-bold text-foreground">
+              Account Settings
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Primary Identity: <span className="font-sans">{scout.email}</span> · Account Status:{' '}
+              <strong className="font-sans text-foreground">{scout.accountStatus}</strong>
             </p>
           </div>
-          <div className="flex flex-wrap gap-1 p-1 bg-[#EFEFE9] rounded-lg text-xs font-semibold">
+          <div className="flex flex-wrap gap-1 p-1 bg-muted rounded-xl text-xs font-semibold">
             {(
               [
                 { id: 'profile', label: 'Profile' },
@@ -275,8 +281,10 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                   setTab(t.id);
                   setFeedback(null);
                 }}
-                className={`px-3 py-2 rounded-md cursor-pointer ${
-                  tab === t.id ? 'bg-white text-[#111814] shadow-xs' : 'text-[#556158]'
+                className={`px-3 py-2 rounded-lg cursor-pointer transition-colors ${
+                  tab === t.id
+                    ? 'bg-card text-foreground shadow-xs'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 {t.label}
@@ -290,8 +298,8 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
             role="status"
             className={`p-3.5 rounded-xl border text-xs font-medium ${
               feedback.type === 'ok'
-                ? 'bg-[#F3F8F6] border-[#CBE2D8] text-[#0B6E4F]'
-                : 'bg-[#FEF2F2] border-[#FECACA] text-[#B91C1C]'
+                ? 'bg-accent border-border text-accent-foreground'
+                : 'bg-destructive/10 border-destructive/30 text-destructive'
             }`}
           >
             {feedback.message}
@@ -315,52 +323,56 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                 'Scout profile updated.'
               );
             }}
-            className="bg-white border border-[#E4E4DE] rounded-xl p-6 space-y-5 max-w-2xl"
+            className="bg-card border border-border rounded-2xl p-6 space-y-5 max-w-2xl"
           >
             <div className="flex items-center gap-2">
-              <User className="w-4 h-4 text-[#0B6E4F]" aria-hidden="true" />
-              <h2 className="font-display text-lg font-bold text-[#111814]">
+              <User className="w-4 h-4 text-foreground" aria-hidden="true" />
+              <h2 className="font-sans text-lg font-bold text-foreground">
                 Public Scout Profile
               </h2>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-[#4B554E] mb-1">Display Name</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Display Name
+                </label>
                 <input
                   type="text"
                   required
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
+                  className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#4B554E] mb-1">Username</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Username
+                </label>
                 <input
                   type="text"
                   required
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="w-full px-3 py-2 font-mono text-sm border border-[#D8D8D0] rounded-lg"
+                  className="w-full px-3 py-2 font-sans text-sm bg-background text-foreground border border-input rounded-xl"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
                   Location State
                 </label>
                 <input
                   type="text"
                   value={locationState}
                   onChange={(e) => setLocationState(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
+                  className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
                   Profile Visibility
                 </label>
                 <select
@@ -370,7 +382,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                       e.target.value === 'NETWORK_ONLY' ? 'NETWORK_ONLY' : 'PUBLIC'
                     )
                   }
-                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg bg-white"
+                  className="w-full px-3 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                 >
                   <option value="PUBLIC">Public Sanitized Directory</option>
                   <option value="NETWORK_ONLY">Scouts List &amp; Network Only</option>
@@ -379,17 +391,17 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-[#4B554E] mb-1">Bio</label>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Bio</label>
               <textarea
                 rows={3}
                 value={bio}
                 onChange={(e) => setBio(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
+                className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
               />
             </div>
 
             <div>
-              <p className="text-xs font-medium text-[#4B554E] mb-2">Preferred Categories</p>
+              <p className="text-xs font-medium text-muted-foreground mb-2">Preferred Categories</p>
               <div className="flex flex-wrap gap-2">
                 {CATEGORIES.map((cat) => {
                   const active = preferredCategories.includes(cat);
@@ -398,10 +410,10 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                       key={cat}
                       type="button"
                       onClick={() => toggleCategory(cat)}
-                      className={`px-3 py-1.5 text-xs rounded-lg border cursor-pointer ${
+                      className={`px-3 py-1.5 text-xs rounded-xl border cursor-pointer ${
                         active
-                          ? 'bg-[#0B6E4F] text-white border-[#0B6E4F]'
-                          : 'bg-[#FAFAF8] text-[#4B554E] border-[#D8D8D0]'
+                          ? 'bg-primary text-primary-foreground border-primary-border'
+                          : 'bg-background text-muted-foreground border-border'
                       }`}
                     >
                       {cat}
@@ -414,7 +426,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
             <button
               type="submit"
               disabled={busy}
-              className="px-5 py-2.5 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg hover:bg-[#09583F] cursor-pointer"
+              className="px-5 py-2.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
             >
               {busy ? 'Saving...' : 'Save Profile Changes'}
             </button>
@@ -436,20 +448,20 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                   'Privacy and referral preferences saved.'
                 );
               }}
-              className="lg:col-span-7 bg-white border border-[#E4E4DE] rounded-xl p-6 space-y-5"
+              className="lg:col-span-7 bg-card border border-border rounded-2xl p-6 space-y-5"
             >
-              <h2 className="font-display text-lg font-bold text-[#111814]">
+              <h2 className="font-sans text-lg font-bold text-foreground">
                 Scouts List &amp; Referral Controls
               </h2>
 
               <div className="space-y-2">
-                <label className="block text-xs font-medium text-[#4B554E]">
+                <label className="block text-xs font-medium text-muted-foreground">
                   Who can send you Scouts List invitations?
                 </label>
                 <select
                   value={invitationPolicy}
                   onChange={(e) => setInvitationPolicy(e.target.value as InvitationPolicy)}
-                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg bg-white"
+                  className="w-full px-3 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                 >
                   <option value="EVERYONE">EVERYONE — Any active Scout can invite you</option>
                   <option value="CONTACTS_ONLY">
@@ -459,16 +471,16 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                 </select>
               </div>
 
-              <label className="flex items-start gap-3 p-4 bg-[#FAFAF8] border border-[#E4E4DE] rounded-lg cursor-pointer">
+              <label className="flex items-start gap-3 p-4 bg-muted/50 border border-border rounded-xl cursor-pointer">
                 <input
                   type="checkbox"
                   checked={muteReferrals}
                   onChange={(e) => setMuteReferrals(e.target.checked)}
-                  className="mt-0.5 accent-[#0B6E4F]"
+                  className="mt-0.5 accent-foreground"
                 />
                 <div className="text-xs">
-                  <p className="font-semibold text-[#111814]">Mute Incoming Product Referrals</p>
-                  <p className="text-[#5C665E] mt-0.5">
+                  <p className="font-semibold text-foreground">Mute Incoming Product Referrals</p>
+                  <p className="text-muted-foreground mt-0.5">
                     When enabled, other Scouts cannot dispatch new product referral cards to your
                     inbox. Your permanent ancestry links remain unaffected.
                   </p>
@@ -478,30 +490,30 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
               <button
                 type="submit"
                 disabled={busy}
-                className="px-5 py-2.5 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg cursor-pointer"
+                className="px-5 py-2.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
               >
                 {busy ? 'Saving...' : 'Save Privacy Preferences'}
               </button>
             </form>
 
-            <div className="lg:col-span-5 bg-white border border-[#E4E4DE] rounded-xl p-6 space-y-4">
-              <h3 className="font-display text-lg font-bold text-[#111814]">
+            <div className="lg:col-span-5 bg-card border border-border rounded-2xl p-6 space-y-4">
+              <h3 className="font-sans text-lg font-bold text-foreground">
                 Blocked Users ({snapshot.blockedUsers.length})
               </h3>
-              <p className="text-xs text-[#5C665E]">
+              <p className="text-xs text-muted-foreground">
                 Blocked accounts cannot view your directory entry, send invitations, or refer
                 products to you.
               </p>
 
               {snapshot.blockedUsers.length === 0 ? (
-                <p className="text-xs text-[#5C665E] py-4">You have not blocked any users.</p>
+                <p className="text-xs text-muted-foreground py-4">You have not blocked any users.</p>
               ) : (
-                <div className="divide-y divide-[#ECECE6]">
+                <div className="divide-y divide-border">
                   {snapshot.blockedUsers.map((b) => (
                     <div key={b.userId} className="py-3 flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-sm font-medium text-[#111814]">{b.displayName}</p>
-                        <p className="font-mono text-xs text-[#5C665E]">@{b.username}</p>
+                        <p className="text-sm font-medium text-foreground">{b.displayName}</p>
+                        <p className="font-sans text-xs text-muted-foreground">@{b.username}</p>
                       </div>
                       <button
                         type="button"
@@ -511,7 +523,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                             `Unblocked @${b.username}.`
                           )
                         }
-                        className="px-3 py-1.5 text-xs font-semibold border border-[#D8D8D0] rounded-md text-[#111814] hover:bg-[#F3F3EF] cursor-pointer"
+                        className="px-3 py-1.5 text-xs font-semibold border border-border rounded-lg text-foreground hover:bg-muted cursor-pointer"
                       >
                         Unblock
                       </button>
@@ -525,41 +537,43 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
 
         {tab === 'verification' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-            <div className="lg:col-span-7 bg-white border border-[#E4E4DE] rounded-xl p-6 space-y-4">
+            <div className="lg:col-span-7 bg-card border border-border rounded-2xl p-6 space-y-4">
               <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-[#0B6E4F]" aria-hidden="true" />
-                <h2 className="font-display text-lg font-bold text-[#111814]">
+                <ShieldCheck className="w-4 h-4 text-success" aria-hidden="true" />
+                <h2 className="font-sans text-lg font-bold text-foreground">
                   Verification Records
                 </h2>
               </div>
 
-              <div className="divide-y divide-[#ECECE6]">
+              <div className="divide-y divide-border">
                 {scout.verifications.length === 0 ? (
-                  <p className="text-xs text-[#5C665E] py-4">
+                  <p className="text-xs text-muted-foreground py-4">
                     No verification submissions yet. Submit Identity or Bank details on the right.
                   </p>
                 ) : (
                   scout.verifications.map((v) => (
                     <div key={v.id} className="py-3.5 first:pt-0 space-y-1.5">
                       <div className="flex items-center justify-between text-xs">
-                        <span className="font-mono font-semibold text-[#111814]">{v.category}</span>
+                        <span className="font-sans font-semibold text-foreground">{v.category}</span>
                         <span
-                          className={`font-semibold ${
+                          className={`font-sans font-semibold ${
                             v.status === 'VERIFIED'
-                              ? 'text-[#0B6E4F]'
+                              ? 'text-success'
                               : v.status === 'REJECTED' || v.status === 'REVOKED'
-                              ? 'text-[#B91C1C]'
-                              : 'text-[#B45309]'
+                                ? 'text-destructive'
+                                : 'text-amber-600 dark:text-amber-400'
                           }`}
                         >
                           {v.status}
                         </span>
                       </div>
                       {v.reviewerNotes && (
-                        <p className="text-xs text-[#4B554E]">Reviewer Note: {v.reviewerNotes}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Reviewer Note: {v.reviewerNotes}
+                        </p>
                       )}
                       <div className="flex items-center justify-between gap-2">
-                        <p className="font-mono text-[11px] text-[#6C776E]">
+                        <p className="font-sans text-[11px] text-muted-foreground">
                           {v.evidencePaths.join(', ') || 'Direct check'}
                         </p>
                         {(v.status === 'REJECTED' || v.status === 'REVOKED') && (
@@ -572,7 +586,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                                 label: `${v.category} verification (${v.status})`,
                               })
                             }
-                            className="text-xs font-semibold text-[#0B6E4F] hover:underline cursor-pointer"
+                            className="text-xs font-semibold text-success hover:underline cursor-pointer"
                           >
                             Appeal Decision
                           </button>
@@ -584,17 +598,17 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
               </div>
 
               {scout.activeRestrictions && scout.activeRestrictions.length > 0 && (
-                <div className="pt-4 border-t border-[#ECECE6] space-y-2">
-                  <p className="text-xs font-semibold text-[#991B1B]">
+                <div className="pt-4 border-t border-border space-y-2">
+                  <p className="text-xs font-semibold text-destructive">
                     Active Capability Restrictions ({scout.activeRestrictions.length})
                   </p>
                   {scout.activeRestrictions.map((r) => (
                     <div
                       key={r.id}
-                      className="p-3 bg-[#FEF2F2] border border-[#FECACA] rounded-lg text-xs text-[#991B1B] flex items-center justify-between gap-3"
+                      className="p-3 bg-destructive/10 border border-destructive/30 rounded-xl text-xs text-destructive flex items-center justify-between gap-3"
                     >
                       <div>
-                        <p className="font-mono font-semibold">
+                        <p className="font-sans font-semibold">
                           {r.capabilityCode} ({r.scope})
                         </p>
                         <p className="mt-0.5">{r.reason}</p>
@@ -608,7 +622,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                             label: `${r.capabilityCode} restriction`,
                           })
                         }
-                        className="px-2.5 py-1 text-xs font-semibold bg-white border border-[#FECACA] rounded text-[#991B1B] shrink-0 cursor-pointer"
+                        className="px-2.5 py-1 text-xs font-semibold bg-card border border-destructive/30 rounded-lg text-destructive shrink-0 cursor-pointer"
                       >
                         Appeal
                       </button>
@@ -620,9 +634,9 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
               {appealTarget && (
                 <form
                   onSubmit={handleSubmitAppeal}
-                  className="p-4 bg-[#FAFAF8] border border-[#D8D8D0] rounded-lg space-y-3"
+                  className="p-4 bg-muted/50 border border-border rounded-xl space-y-3"
                 >
-                  <p className="text-xs font-semibold text-[#111814]">
+                  <p className="text-xs font-semibold text-foreground">
                     Submit Independent Appeal for {appealTarget.label}
                   </p>
                   <textarea
@@ -631,20 +645,20 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                     value={appealReason}
                     onChange={(e) => setAppealReason(e.target.value)}
                     placeholder="Provide clear context and supporting facts for an independent Appeals Officer..."
-                    className="w-full px-3 py-2 text-xs border border-[#D8D8D0] rounded-lg bg-white"
+                    className="w-full px-3 py-2 text-xs border border-input rounded-xl bg-background text-foreground"
                   />
                   <div className="flex gap-2">
                     <button
                       type="submit"
                       disabled={busy}
-                      className="px-3.5 py-1.5 text-xs font-semibold text-white bg-[#0B6E4F] rounded cursor-pointer"
+                      className="px-3.5 py-1.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-lg hover:bg-primary/90 cursor-pointer"
                     >
                       Submit Appeal
                     </button>
                     <button
                       type="button"
                       onClick={() => setAppealTarget(null)}
-                      className="px-3 py-1.5 text-xs text-[#5C665E] cursor-pointer"
+                      className="px-3 py-1.5 text-xs text-muted-foreground cursor-pointer"
                     >
                       Cancel
                     </button>
@@ -653,20 +667,20 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
               )}
 
               {scout.governanceAppeals && scout.governanceAppeals.length > 0 && (
-                <div className="pt-4 border-t border-[#ECECE6] space-y-2">
-                  <p className="text-xs font-semibold text-[#111814]">Your Appeals</p>
+                <div className="pt-4 border-t border-border space-y-2">
+                  <p className="text-xs font-semibold text-foreground">Your Appeals</p>
                   {scout.governanceAppeals.map((a) => (
                     <div
                       key={a.id}
-                      className="p-2.5 bg-[#FAFAF8] border border-[#E4E4DE] rounded-lg text-xs space-y-1"
+                      className="p-2.5 bg-muted/50 border border-border rounded-xl text-xs space-y-1"
                     >
-                      <div className="flex justify-between font-mono">
-                        <span className="font-semibold">{a.targetType}</span>
-                        <span className="text-[#0B6E4F] font-semibold">{a.status}</span>
+                      <div className="flex justify-between font-sans">
+                        <span className="font-semibold text-foreground">{a.targetType}</span>
+                        <span className="text-success font-semibold">{a.status}</span>
                       </div>
-                      <p className="text-[#4B554E]">{a.appealReason}</p>
+                      <p className="text-muted-foreground">{a.appealReason}</p>
                       {a.decisionNotes && (
-                        <p className="text-[#5C665E]">Officer Note: {a.decisionNotes}</p>
+                        <p className="text-muted-foreground">Officer Note: {a.decisionNotes}</p>
                       )}
                     </div>
                   ))}
@@ -700,20 +714,20 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                   `${verifCat} verification submitted for review.`
                 );
               }}
-              className="lg:col-span-5 bg-white border border-[#E4E4DE] rounded-xl p-6 space-y-4 self-start"
+              className="lg:col-span-5 bg-card border border-border rounded-2xl p-6 space-y-4 self-start"
             >
-              <h3 className="font-display text-lg font-bold text-[#111814]">
+              <h3 className="font-sans text-lg font-bold text-foreground">
                 Submit Verification / Bank Details
               </h3>
 
               <div>
-                <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
                   Verification Category
                 </label>
                 <select
                   value={verifCat}
                   onChange={(e) => setVerifCat(e.target.value as VerificationCategory)}
-                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg bg-white"
+                  className="w-full px-3 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                 >
                   <option value="IDENTITY">IDENTITY (NIN / Passport / Driver&apos;s License)</option>
                   <option value="PAYOUT_BANK">PAYOUT_BANK (Nigerian Naira Settlement Account)</option>
@@ -724,7 +738,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
 
               {verifCat === 'PAYOUT_BANK' && (
                 <div>
-                  <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
                     Nigerian Bank &amp; Account Summary (Same-name match)
                   </label>
                   <input
@@ -733,13 +747,13 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                     value={bankSummary}
                     onChange={(e) => setBankSummary(e.target.value)}
                     placeholder="e.g., GTBank · 0123456789"
-                    className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
+                    className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
                   />
                 </div>
               )}
 
               <div>
-                <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
                   Evidence Document
                 </label>
                 <input
@@ -751,9 +765,9 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                       setDocName(f.name);
                     }
                   }}
-                  className="block w-full text-xs text-[#4B554E] file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-[#F3F3EF] file:font-semibold"
+                  className="block w-full text-xs text-muted-foreground file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-secondary file:text-secondary-foreground file:font-semibold"
                 />
-                <p className="mt-1 font-mono text-[11px] text-[#5C665E]">
+                <p className="mt-1 font-sans text-[11px] text-muted-foreground">
                   Bucket path: verification-docs/{scout.id}/{docName}
                 </p>
               </div>
@@ -761,7 +775,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
               <button
                 type="submit"
                 disabled={busy}
-                className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg cursor-pointer"
+                className="w-full py-2.5 px-4 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
               >
                 {busy ? 'Submitting...' : 'Submit for Officer Review'}
               </button>
@@ -770,15 +784,15 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
         )}
 
         {tab === 'lifecycle' && (
-          <div className="max-w-2xl bg-white border border-[#E4E4DE] rounded-xl p-6 space-y-6">
+          <div className="max-w-2xl bg-card border border-border rounded-2xl p-6 space-y-6">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-[#B91C1C] shrink-0 mt-0.5" aria-hidden="true" />
+                <AlertTriangle className="w-5 h-5 text-destructive shrink-0 mt-0.5" aria-hidden="true" />
                 <div>
-                  <h2 className="font-display text-xl font-bold text-[#111814]">
+                  <h2 className="font-sans text-xl font-bold text-foreground">
                     Two-Track Account &amp; Seller Closure
                   </h2>
-                  <p className="mt-1 text-xs text-[#4B554E] leading-relaxed">
+                  <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
                     Choose Track 1 to close only your Seller store while keeping your Scout identity
                     and commission wallet active, or Track 2 to permanently close your full
                     NairaScout account while preserving immutable ancestry &amp; ledger history.
@@ -787,40 +801,40 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
               </div>
               <Link
                 href="/settings/closure"
-                className="px-3.5 py-2 text-xs font-semibold text-white bg-[#111814] rounded-lg shrink-0"
+                className="px-3.5 py-2 text-xs font-semibold text-commerce-foreground bg-commerce rounded-xl shrink-0"
               >
                 Open Closure Flow
               </Link>
             </div>
 
-            <div className="grid grid-cols-3 gap-4 p-4 bg-[#FAFAF8] border border-[#E4E4DE] rounded-lg text-xs">
+            <div className="grid grid-cols-3 gap-4 p-4 bg-muted/50 border border-border rounded-xl text-xs">
               <div>
-                <p className="text-[#5C665E]">Open Orders</p>
-                <p className="font-mono text-base font-bold text-[#111814] tabular-nums">
+                <p className="text-muted-foreground">Open Orders</p>
+                <p className="font-numeric text-base font-bold text-foreground tabular-nums">
                   {openOrdersCount}
                 </p>
               </div>
               <div>
-                <p className="text-[#5C665E]">Pending Commissions</p>
-                <p className="font-mono text-base font-bold text-[#B45309] tabular-nums">
+                <p className="text-muted-foreground">Pending Commissions</p>
+                <p className="font-numeric text-base font-bold text-amber-600 dark:text-amber-400 tabular-nums">
                   {formatKoboToNaira(snapshot.wallet.pendingKobo)}
                 </p>
               </div>
               <div>
-                <p className="text-[#5C665E]">Available Balance</p>
-                <p className="font-mono text-base font-bold text-[#0B6E4F] tabular-nums">
+                <p className="text-muted-foreground">Available Balance</p>
+                <p className="font-numeric text-base font-bold text-success tabular-nums">
                   {formatKoboToNaira(snapshot.wallet.availableKobo)}
                 </p>
               </div>
             </div>
 
             {scout.sellerProfile && scout.sellerProfile.sellerStatus !== 'CLOSED' && (
-              <div className="p-4 bg-[#FAFAF8] border border-[#E4E4DE] rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="p-4 bg-muted/50 border border-border rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="text-xs">
-                  <p className="font-semibold text-[#111814]">
+                  <p className="font-semibold text-foreground">
                     Track 1: Close Seller Capabilities Only ({scout.sellerProfile.sellerName})
                   </p>
-                  <p className="text-[#5C665E] mt-0.5">
+                  <p className="text-muted-foreground mt-0.5">
                     Expires active Seller listings and closes Seller Hub while preserving your
                     Scout account and commission wallet.
                   </p>
@@ -829,7 +843,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                   type="button"
                   disabled={busy}
                   onClick={handleCloseSeller}
-                  className="px-4 py-2 text-xs font-semibold text-[#B45309] border border-[#E5CFA3] bg-white rounded-lg hover:bg-[#FFFBEB] shrink-0 cursor-pointer"
+                  className="px-4 py-2 text-xs font-semibold text-amber-700 dark:text-amber-300 border border-amber-500/40 bg-card rounded-xl hover:bg-amber-500/10 shrink-0 cursor-pointer"
                 >
                   Close Seller Only
                 </button>
@@ -838,7 +852,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
 
             <form onSubmit={handleCloseAccount} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
                   Reason for Closure (Optional)
                 </label>
                 <input
@@ -846,13 +860,13 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                   value={closeReason}
                   onChange={(e) => setCloseReason(e.target.value)}
                   placeholder="Optional feedback..."
-                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
+                  className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-[#4B554E] mb-1">
-                  Track 2: Type <span className="font-mono font-bold">CLOSE MY ACCOUNT</span> to
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Track 2: Type <span className="font-sans font-bold">CLOSE MY ACCOUNT</span> to
                   confirm full closure
                 </label>
                 <input
@@ -861,22 +875,22 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                   value={confirmText}
                   onChange={(e) => setConfirmText(e.target.value)}
                   placeholder="CLOSE MY ACCOUNT"
-                  className="w-full px-3 py-2 font-mono text-sm border border-[#E8D0D0] rounded-lg"
+                  className="w-full px-3 py-2 font-sans text-sm bg-background text-foreground border border-destructive/40 rounded-xl"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={busy || confirmText.trim().toUpperCase() !== 'CLOSE MY ACCOUNT'}
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-[#B91C1C] rounded-lg hover:bg-[#991B1B] disabled:opacity-45 cursor-pointer"
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-destructive-foreground bg-destructive rounded-xl hover:bg-destructive/90 disabled:opacity-45 cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                 {busy ? 'Closing Account...' : 'Close Full Account & Preserve Ledger'}
               </button>
             </form>
 
-            <div className="flex items-center gap-2 text-xs text-[#5C665E] pt-2 border-t border-[#ECECE6]">
-              <CheckCircle2 className="w-4 h-4 text-[#0B6E4F] shrink-0" aria-hidden="true" />
+            <div className="flex items-center gap-2 text-xs text-muted-foreground pt-2 border-t border-border">
+              <CheckCircle2 className="w-4 h-4 text-success shrink-0" aria-hidden="true" />
               <span>
                 Ineligible/closed accounts keep their fixed ancestry slot while earning ₦0.00 on
                 subsequent transactions.

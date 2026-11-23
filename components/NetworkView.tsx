@@ -17,10 +17,8 @@ import {
   X,
 } from 'lucide-react';
 import type { NairaScoutSnapshot, ProductListing } from '@/lib/nairascout-store';
-import {
-  CommissionBreakdown,
-  formatKoboToNaira,
-} from '@/lib/commission-engine';
+import { CommissionBreakdown, formatKoboToNaira } from '@/lib/commission-engine';
+import { DismissibleNoticePanel } from './shared/DismissibleNoticePanel';
 
 interface NetworkViewProps {
   snapshot: NairaScoutSnapshot;
@@ -136,70 +134,76 @@ export default function NetworkView({
   };
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-[#E4E4DE] pb-6">
-        <div>
-          <h1 className="font-display text-3xl font-bold text-[#111814]">
-            Thirteen-Generation Network &amp; Scouts List
-          </h1>
-          <p className="mt-1.5 text-sm text-[#4B554E] max-w-2xl">
-            Inspect your permanent referral ancestry, manage Scouts List relationships with strict
-            privacy controls, or test the server-side kobo commission engine.
-          </p>
-        </div>
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-5">
+        <h1 className="font-sans text-2xl md:text-3xl font-bold tracking-tight text-foreground">
+          Network
+        </h1>
 
-        <div className="flex items-center gap-1 p-1 bg-[#EFEFE9] rounded-lg shrink-0 self-start">
+        <div className="flex items-center gap-1 p-1 bg-muted rounded-xl shrink-0 self-start overflow-x-auto">
           <button
             type="button"
             onClick={() => setSubTab('explorer')}
-            className={`px-3.5 py-2 text-xs font-semibold rounded-md transition-colors whitespace-nowrap cursor-pointer ${
-              subTab === 'explorer' ? 'bg-white text-[#111814] shadow-xs' : 'text-[#556158]'
+            className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+              subTab === 'explorer'
+                ? 'bg-card text-foreground shadow-xs'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            Network Explorer
+            Ancestry
           </button>
           <button
             type="button"
             onClick={() => setSubTab('scouts_list')}
-            className={`px-3.5 py-2 text-xs font-semibold rounded-md transition-colors whitespace-nowrap cursor-pointer ${
-              subTab === 'scouts_list' ? 'bg-white text-[#111814] shadow-xs' : 'text-[#556158]'
+            className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+              subTab === 'scouts_list'
+                ? 'bg-card text-foreground shadow-xs'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            Scouts List ({snapshot.scoutsList.length})
+            Scouts
           </button>
           <button
             type="button"
             onClick={() => setSubTab('simulator')}
-            className={`px-3.5 py-2 text-xs font-semibold rounded-md transition-colors whitespace-nowrap cursor-pointer ${
-              subTab === 'simulator' ? 'bg-white text-[#111814] shadow-xs' : 'text-[#556158]'
+            className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+              subTab === 'simulator'
+                ? 'bg-card text-foreground shadow-xs'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            13-Gen Calculator
+            Calculator
           </button>
         </div>
       </div>
 
+      <DismissibleNoticePanel
+        storageKey="nairascout_network_explainer_notice_v1"
+        description="Inspect your permanent referral ancestry, manage Scouts List with strict privacy controls, or calculate your Commissions"
+        ariaLabel="Network Explainer Notice"
+      />
+
       {subTab === 'explorer' && (
         !snapshot.authenticated ? (
-          <div className="bg-white border border-[#E4E4DE] rounded-xl p-10 text-center space-y-3">
-            <h2 className="font-display text-xl font-bold text-[#111814]">
+          <div className="bg-card border border-border rounded-2xl p-6 sm:p-10 text-center space-y-3">
+            <h2 className="font-sans text-xl font-bold text-foreground">
               Sign In to Inspect Your Permanent Referral Ancestry
             </h2>
-            <p className="text-sm text-[#5C665E] max-w-lg mx-auto">
+            <p className="text-sm text-muted-foreground max-w-lg mx-auto">
               Your permanent direct-referrer ancestry and downstream Gen 1–13 counts are private to
               your Scout account. You can still test the 13-Gen Commission Calculator right away.
             </p>
-            <div className="pt-2 flex justify-center gap-3">
+            <div className="pt-2 flex flex-col sm:flex-row sm:justify-center gap-3 w-full">
               <Link
                 href="/auth/login"
-                className="px-4 py-2 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg"
+                className="w-full sm:w-auto min-h-[44px] inline-flex items-center justify-center px-4 py-2.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90"
               >
-                Sign In / Join Free
+                Sign In/Join Free
               </Link>
               <button
                 type="button"
                 onClick={() => setSubTab('simulator')}
-                className="px-4 py-2 text-xs font-semibold text-[#111814] border border-[#D8D8D0] rounded-lg cursor-pointer"
+                className="w-full sm:w-auto min-h-[44px] inline-flex items-center justify-center px-4 py-2.5 text-xs font-semibold text-foreground border border-border bg-card rounded-xl hover:bg-muted cursor-pointer"
               >
                 Open Commission Calculator
               </button>
@@ -207,58 +211,58 @@ export default function NetworkView({
           </div>
         ) : (
           <div className="space-y-10">
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 border-b border-[#E4E4DE] pb-8">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 border-b border-border pb-8">
               <div>
-                <p className="text-xs text-[#5C665E]">Permanent Direct Referrer (Gen 1)</p>
-                <p className="mt-1 font-display text-lg font-semibold text-[#111814]">
+                <p className="text-xs text-muted-foreground">Permanent Direct Referrer (Gen 1)</p>
+                <p className="mt-1 font-sans text-lg font-semibold text-foreground">
                   {snapshot.upstreamAncestry[0]
                     ? snapshot.upstreamAncestry[0].displayName
                     : 'Organic Registration'}
                 </p>
-                <p className="mt-0.5 font-mono text-xs text-[#5C665E]">
+                <p className="mt-0.5 font-sans text-xs text-muted-foreground">
                   {snapshot.upstreamAncestry[0]
                     ? `@${snapshot.upstreamAncestry[0].handle} · Permanent`
                     : 'No direct referrer'}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-[#5C665E]">Upstream Ancestry Depth</p>
-                <p className="mt-1 font-mono text-2xl font-semibold text-[#111814] tabular-nums">
+                <p className="text-xs text-muted-foreground">Upstream Ancestry Depth</p>
+                <p className="mt-1 font-numeric text-2xl font-bold text-foreground tabular-nums">
                   {snapshot.upstreamAncestry.length} / 13
                 </p>
-                <p className="mt-0.5 text-xs text-[#5C665E]">Locked at registration</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">Locked at registration</p>
               </div>
               <div>
-                <p className="text-xs text-[#5C665E]">Direct Downstream Scouts (Gen 1)</p>
-                <p className="mt-1 font-mono text-2xl font-semibold text-[#111814] tabular-nums">
+                <p className="text-xs text-muted-foreground">Direct Downstream Scouts (Gen 1)</p>
+                <p className="mt-1 font-numeric text-2xl font-bold text-foreground tabular-nums">
                   {directGen1Count}
                 </p>
-                <p className="mt-0.5 text-xs text-[#5C665E]">Zero recruitment fees paid</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">Zero recruitment fees paid</p>
               </div>
               <div>
-                <p className="text-xs text-[#5C665E]">Total 13-Gen Network Reach</p>
-                <p className="mt-1 font-mono text-2xl font-semibold text-[#111814] tabular-nums">
+                <p className="text-xs text-muted-foreground">Total 13-Gen Network Reach</p>
+                <p className="mt-1 font-numeric text-2xl font-bold text-success tabular-nums">
                   {totalNetworkScouts}
                 </p>
-                <p className="mt-0.5 text-xs text-[#5C665E]">Aggregate counts only</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">Aggregate counts only</p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               <div className="lg:col-span-7 space-y-4">
-                <div className="flex items-baseline justify-between">
-                  <h2 className="font-display text-xl font-bold text-[#111814]">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 className="font-sans text-lg font-bold text-foreground">
                     Downstream Network by Generation (Gen 1–13)
                   </h2>
-                  <span className="text-xs text-[#5C665E]">
+                  <span className="text-xs text-muted-foreground">
                     Your position above downstream Seller Scouts
                   </span>
                 </div>
 
-                <div className="bg-white border border-[#E4E4DE] rounded-xl overflow-x-auto">
+                <div className="bg-card border border-border rounded-2xl overflow-x-auto">
                   <table className="w-full text-left border-collapse text-sm">
                     <thead>
-                      <tr className="border-b border-[#E4E4DE] text-xs text-[#5C665E]">
+                      <tr className="border-b border-border text-xs text-muted-foreground">
                         <th className="py-3 px-4 font-medium">Generation</th>
                         <th className="py-3 px-4 font-medium text-right">Scouts</th>
                         <th className="py-3 px-4 font-medium text-right">Eligible</th>
@@ -266,22 +270,22 @@ export default function NetworkView({
                         <th className="py-3 px-4 font-medium">Permitted Handles</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#ECECE6]">
+                    <tbody className="divide-y divide-border">
                       {snapshot.downstreamGenerations.map((row) => (
-                        <tr key={row.generation} className="hover:bg-[#FAFAF8]">
-                          <td className="py-2.5 px-4 font-mono text-xs font-semibold text-[#111814]">
+                        <tr key={row.generation} className="hover:bg-muted/40">
+                          <td className="py-2.5 px-4 font-numeric text-xs font-semibold text-foreground">
                             Gen {row.generation}
                           </td>
-                          <td className="py-2.5 px-4 font-mono text-right tabular-nums text-[#111814]">
+                          <td className="py-2.5 px-4 font-numeric text-right tabular-nums text-foreground">
                             {row.scoutCount}
                           </td>
-                          <td className="py-2.5 px-4 font-mono text-right tabular-nums text-[#0B6E4F]">
+                          <td className="py-2.5 px-4 font-numeric text-right tabular-nums text-success font-semibold">
                             {row.eligibleCount}
                           </td>
-                          <td className="py-2.5 px-4 font-mono text-right tabular-nums text-[#4B554E]">
+                          <td className="py-2.5 px-4 font-numeric text-right tabular-nums text-muted-foreground">
                             {row.scheduleFractionAtFullDepth}
                           </td>
-                          <td className="py-2.5 px-4 text-xs text-[#5C665E]">
+                          <td className="py-2.5 px-4 text-xs text-muted-foreground">
                             {row.sampleHandles.length > 0
                               ? row.sampleHandles.join(', ')
                               : 'Privacy-protected aggregate count'}
@@ -295,39 +299,41 @@ export default function NetworkView({
 
               <div className="lg:col-span-5 space-y-4">
                 <div className="flex items-center justify-between">
-                  <h2 className="font-display text-xl font-bold text-[#111814]">
+                  <h2 className="font-sans text-lg font-bold text-foreground">
                     Your Permanent Upstream Ancestry
                   </h2>
-                  <Lock className="w-4 h-4 text-[#5C665E]" aria-hidden="true" />
+                  <Lock className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
                 </div>
 
-                <div className="bg-white border border-[#E4E4DE] rounded-xl p-5 space-y-3">
-                  <p className="text-xs text-[#5C665E] leading-relaxed">
+                <div className="bg-card border border-border rounded-2xl p-5 space-y-3">
+                  <p className="text-xs text-muted-foreground leading-relaxed">
                     Private contact details, bank accounts, and individual earnings are never
                     exposed. Ineligible ancestors retain their fixed generation slot and receive
                     ₦0.00.
                   </p>
 
                   {snapshot.upstreamAncestry.length === 0 ? (
-                    <p className="text-xs text-[#5C665E] py-4">
+                    <p className="text-xs text-muted-foreground py-4">
                       Registered organically with no upstream direct referrer.
                     </p>
                   ) : (
-                    <div className="divide-y divide-[#ECECE6]">
+                    <div className="divide-y divide-border">
                       {snapshot.upstreamAncestry.map((node) => (
                         <div
                           key={node.generation}
                           className="py-2.5 flex items-center justify-between gap-3 text-sm"
                         >
                           <div className="flex items-center gap-3 min-w-0">
-                            <span className="font-mono text-xs font-semibold text-[#5C665E] w-12 shrink-0">
+                            <span className="font-numeric text-xs font-semibold text-muted-foreground w-12 shrink-0">
                               Gen {node.generation}
                             </span>
                             <div className="min-w-0">
-                              <p className="font-medium text-[#111814] truncate">
+                              <p className="font-medium text-foreground truncate">
                                 {node.displayName}
                               </p>
-                              <p className="font-mono text-xs text-[#5C665E]">@{node.handle}</p>
+                              <p className="font-numeric text-xs text-muted-foreground">
+                                @{node.handle}
+                              </p>
                             </div>
                           </div>
 
@@ -335,18 +341,20 @@ export default function NetworkView({
                             {node.eligible ? (
                               <>
                                 <CheckCircle2
-                                  className="w-3.5 h-3.5 text-[#0B6E4F]"
+                                  className="w-3.5 h-3.5 text-success"
                                   aria-hidden="true"
                                 />
-                                <span className="text-[#0B6E4F] font-medium">Eligible</span>
+                                <span className="text-success font-medium">Eligible</span>
                               </>
                             ) : (
                               <>
                                 <AlertTriangle
-                                  className="w-3.5 h-3.5 text-[#B45309]"
+                                  className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400"
                                   aria-hidden="true"
                                 />
-                                <span className="text-[#B45309] font-medium">Ineligible (₦0)</span>
+                                <span className="text-amber-600 dark:text-amber-400 font-medium">
+                                  Ineligible (₦0)
+                                </span>
                               </>
                             )}
                           </div>
@@ -363,17 +371,17 @@ export default function NetworkView({
 
       {subTab === 'scouts_list' && (
         !snapshot.authenticated ? (
-          <div className="bg-white border border-[#E4E4DE] rounded-xl p-10 text-center space-y-3">
-            <h2 className="font-display text-xl font-bold text-[#111814]">
+          <div className="bg-card border border-border rounded-2xl p-6 sm:p-10 text-center space-y-3">
+            <h2 className="font-sans text-xl font-bold text-foreground">
               Sign In to Manage Your Scouts List
             </h2>
-            <p className="text-sm text-[#5C665E] max-w-md mx-auto">
+            <p className="text-sm text-muted-foreground max-w-md mx-auto">
               Search Scouts, send Scouts List invitations, manage blocks, and report abuse once
               signed in.
             </p>
             <Link
               href="/auth/login"
-              className="inline-block px-4 py-2 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg"
+              className="w-full sm:w-auto min-h-[44px] inline-flex items-center justify-center px-4 py-2.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90"
             >
               Sign In
             </Link>
@@ -384,17 +392,17 @@ export default function NetworkView({
             <div className="lg:col-span-7 space-y-8">
               <section className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h2 className="font-display text-xl font-bold text-[#111814]">
+                  <h2 className="font-sans text-lg font-bold text-foreground">
                     Active Scouts List Contacts
                   </h2>
-                  <span className="text-xs text-[#5C665E]">
+                  <span className="text-xs text-muted-foreground">
                     INVITE is separate from product REFER
                   </span>
                 </div>
 
-                <div className="bg-white border border-[#E4E4DE] rounded-xl divide-y divide-[#ECECE6]">
+                <div className="bg-card border border-border rounded-2xl divide-y divide-border">
                   {snapshot.scoutsList.length === 0 ? (
-                    <div className="p-8 text-center text-sm text-[#5C665E]">
+                    <div className="p-8 text-center text-sm text-muted-foreground">
                       No active contacts yet. Use the sanitized Scout Search below to send an
                       invitation.
                     </div>
@@ -406,20 +414,20 @@ export default function NetworkView({
                       >
                         <div>
                           <div className="flex items-center gap-2">
-                            <p className="font-medium text-sm text-[#111814]">
+                            <p className="font-semibold text-sm text-foreground">
                               {contact.displayName}
                             </p>
-                            <span className="font-mono text-xs text-[#5C665E]">
+                            <span className="font-sans text-xs text-muted-foreground">
                               @{contact.handle}
                             </span>
                             {contact.hasActiveSellerBadge && (
-                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#0B6E4F]">
+                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-success">
                                 <Store className="w-3 h-3" />
                                 Seller
                               </span>
                             )}
                           </div>
-                          <p className="text-xs text-[#5C665E] mt-0.5">
+                          <p className="text-xs text-muted-foreground mt-0.5">
                             {contact.city} · Added {contact.addedAt}
                           </p>
                         </div>
@@ -429,10 +437,10 @@ export default function NetworkView({
                             <button
                               type="button"
                               onClick={() => onOpenReferForProduct(snapshot.products[0])}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-[#0B6E4F] bg-[#F3F8F6] border border-[#CBE2D8] rounded-md cursor-pointer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-lg hover:bg-primary/90 cursor-pointer"
                             >
                               <Send className="w-3 h-3" aria-hidden="true" />
-                              Refer Product
+                              Refer
                             </button>
                           )}
                           <button
@@ -443,7 +451,7 @@ export default function NetworkView({
                                 operation: 'remove',
                               })
                             }
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border border-[#D8D8D0] rounded-md text-[#4B554E] hover:bg-[#F3F3EF] cursor-pointer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border border-border rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
                           >
                             <X className="w-3 h-3" aria-hidden="true" />
                             Remove
@@ -456,7 +464,7 @@ export default function NetworkView({
                                 operation: 'block',
                               })
                             }
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border border-[#E8D0D0] rounded-md text-[#B91C1C] hover:bg-[#FEF2F2] cursor-pointer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border border-destructive/30 rounded-lg text-destructive hover:bg-destructive/10 cursor-pointer"
                           >
                             <Ban className="w-3 h-3" aria-hidden="true" />
                             Block
@@ -466,7 +474,7 @@ export default function NetworkView({
                             onClick={() =>
                               setAbuseTarget({ userId: contact.scoutId, handle: contact.handle })
                             }
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border border-[#D8D8D0] rounded-md text-[#5C665E] hover:text-[#111814] cursor-pointer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border border-border rounded-lg text-muted-foreground hover:text-foreground cursor-pointer"
                           >
                             <Flag className="w-3 h-3" aria-hidden="true" />
                             Report
@@ -478,32 +486,32 @@ export default function NetworkView({
                 </div>
               </section>
 
-              {/* Sanitized Scout Search (PublicScoutProfileDTO) */}
+              {/* Sanitized Scout Search */}
               <section className="space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
-                    <h2 className="font-display text-xl font-bold text-[#111814]">
+                    <h2 className="font-sans text-lg font-bold text-foreground">
                       Discover Scouts (Sanitized Directory)
                     </h2>
-                    <p className="text-xs text-[#5C665E]">
+                    <p className="text-xs text-muted-foreground">
                       Emails, phone numbers, and wallet balances are never exposed in directory
                       search.
                     </p>
                   </div>
                   <div className="relative">
-                    <Search className="w-3.5 h-3.5 text-[#6C776E] absolute left-3 top-1/2 -translate-y-1/2" />
+                    <Search className="w-3.5 h-3.5 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
                       value={scoutSearch}
                       onChange={(e) => setScoutSearch(e.target.value)}
                       placeholder="Search username or state..."
                       aria-label="Search public Scouts directory"
-                      className="pl-8 pr-3 py-2 text-xs bg-white border border-[#D8D8D0] rounded-lg w-56"
+                      className="pl-8 pr-3 py-2 text-xs bg-card text-foreground border border-border rounded-xl w-56 focus:outline-none focus:border-ring"
                     />
                   </div>
                 </div>
 
-                <div className="bg-white border border-[#E4E4DE] rounded-xl divide-y divide-[#ECECE6] max-h-[380px] overflow-y-auto">
+                <div className="bg-card border border-border rounded-2xl divide-y divide-border max-h-[380px] overflow-y-auto">
                   {filteredDirectory.map((scout) => {
                     const alreadyContact = snapshot.scoutsList.some(
                       (c) => c.scoutId === scout.userId
@@ -518,24 +526,24 @@ export default function NetworkView({
                       >
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2 text-sm">
-                            <span className="font-semibold text-[#111814]">
+                            <span className="font-semibold text-foreground">
                               {scout.displayName}
                             </span>
-                            <span className="font-mono text-xs text-[#5C665E]">
+                            <span className="font-sans text-xs text-muted-foreground">
                               @{scout.username}
                             </span>
                             {scout.hasActiveSellerBadge && (
-                              <span className="text-[11px] font-medium text-[#111814]">
+                              <span className="text-[11px] font-medium text-foreground">
                                 · Seller
                               </span>
                             )}
                             {scout.isSellerVerified && (
-                              <span className="text-[11px] font-medium text-[#0B6E4F]">
+                              <span className="text-[11px] font-semibold text-success">
                                 · KYC Verified
                               </span>
                             )}
                           </div>
-                          <p className="text-xs text-[#5C665E] mt-0.5 tabular-nums">
+                          <p className="font-sans text-xs text-muted-foreground mt-0.5 tabular-nums">
                             {scout.locationState || 'Nigeria'} · Working with{' '}
                             {scout.workingWithCount} Scouts · {scout.totalSoldUnits} units sold
                           </p>
@@ -543,9 +551,11 @@ export default function NetworkView({
 
                         <div className="shrink-0">
                           {alreadyContact ? (
-                            <span className="text-xs font-medium text-[#0B6E4F]">In Contacts</span>
+                            <span className="text-xs font-semibold text-success">In Contacts</span>
                           ) : pendingInv ? (
-                            <span className="text-xs text-[#B45309]">Pending</span>
+                            <span className="text-xs text-amber-600 dark:text-amber-400">
+                              Pending
+                            </span>
                           ) : (
                             <button
                               type="button"
@@ -555,7 +565,7 @@ export default function NetworkView({
                                 await onInviteScout(scout.userId);
                                 setBusyId(null);
                               }}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-[#0B6E4F] rounded-md hover:bg-[#09583F] cursor-pointer"
+                              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-lg hover:bg-primary/90 cursor-pointer"
                             >
                               <UserPlus className="w-3.5 h-3.5" aria-hidden="true" />
                               Invite
@@ -571,17 +581,19 @@ export default function NetworkView({
 
             {/* Right: Pending Invitations (Received / Sent) */}
             <div className="lg:col-span-5 space-y-6">
-              <div className="bg-white border border-[#E4E4DE] rounded-xl p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-display text-lg font-semibold text-[#111814]">
+              <div className="bg-card border border-border rounded-2xl p-5 space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-sans text-base font-semibold text-foreground">
                     Pending Invitations
                   </h3>
-                  <div className="flex items-center gap-1 p-0.5 bg-[#EFEFE9] rounded-md text-xs">
+                  <div className="flex items-center gap-1 p-0.5 bg-muted rounded-lg text-xs">
                     <button
                       type="button"
                       onClick={() => setInviteSubTab('received')}
-                      className={`px-2.5 py-1 rounded font-medium cursor-pointer ${
-                        inviteSubTab === 'received' ? 'bg-white text-[#111814]' : 'text-[#5C665E]'
+                      className={`px-2.5 py-1 rounded-md font-medium cursor-pointer ${
+                        inviteSubTab === 'received'
+                          ? 'bg-card text-foreground shadow-xs'
+                          : 'text-muted-foreground'
                       }`}
                     >
                       Received ({receivedInvites.length})
@@ -589,8 +601,10 @@ export default function NetworkView({
                     <button
                       type="button"
                       onClick={() => setInviteSubTab('sent')}
-                      className={`px-2.5 py-1 rounded font-medium cursor-pointer ${
-                        inviteSubTab === 'sent' ? 'bg-white text-[#111814]' : 'text-[#5C665E]'
+                      className={`px-2.5 py-1 rounded-md font-medium cursor-pointer ${
+                        inviteSubTab === 'sent'
+                          ? 'bg-card text-foreground shadow-xs'
+                          : 'text-muted-foreground'
                       }`}
                     >
                       Sent ({sentInvites.length})
@@ -600,25 +614,27 @@ export default function NetworkView({
 
                 {inviteSubTab === 'received' ? (
                   receivedInvites.length === 0 ? (
-                    <p className="text-xs text-[#5C665E] py-4">
+                    <p className="text-xs text-muted-foreground py-4">
                       No pending incoming invitations.
                     </p>
                   ) : (
-                    <div className="divide-y divide-[#ECECE6]">
+                    <div className="divide-y divide-border">
                       {receivedInvites.map((inv) => (
                         <div key={inv.id} className="py-3 first:pt-0 space-y-2">
                           <div className="flex justify-between text-sm">
-                            <span className="font-medium text-[#111814]">
+                            <span className="font-medium text-foreground">
                               {inv.otherDisplayName} (@{inv.otherHandle})
                             </span>
-                            <span className="text-xs text-[#5C665E]">{inv.otherCity}</span>
+                            <span className="text-xs text-muted-foreground">{inv.otherCity}</span>
                           </div>
-                          <p className="text-xs text-[#5C665E]">Expires {inv.expiresAt}</p>
+                          <p className="font-numeric text-xs text-muted-foreground">
+                            Expires {inv.expiresAt}
+                          </p>
                           <div className="flex gap-2">
                             <button
                               type="button"
                               onClick={() => onRespondInvite(inv.id, 'accept')}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-[#0B6E4F] rounded-md cursor-pointer"
+                              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-lg hover:bg-primary/90 cursor-pointer"
                             >
                               <Check className="w-3.5 h-3.5" />
                               Accept
@@ -626,7 +642,7 @@ export default function NetworkView({
                             <button
                               type="button"
                               onClick={() => onRespondInvite(inv.id, 'reject')}
-                              className="px-3 py-1.5 text-xs font-medium border border-[#D8D8D0] rounded-md text-[#4B554E] cursor-pointer"
+                              className="px-3 py-1.5 text-xs font-medium border border-border rounded-lg text-muted-foreground hover:text-foreground cursor-pointer"
                             >
                               Reject
                             </button>
@@ -636,25 +652,27 @@ export default function NetworkView({
                     </div>
                   )
                 ) : sentInvites.length === 0 ? (
-                  <p className="text-xs text-[#5C665E] py-4">No outgoing invitations.</p>
+                  <p className="text-xs text-muted-foreground py-4">No outgoing invitations.</p>
                 ) : (
-                  <div className="divide-y divide-[#ECECE6]">
+                  <div className="divide-y divide-border">
                     {sentInvites.map((inv) => (
                       <div key={inv.id} className="py-3 first:pt-0 space-y-2">
                         <div className="flex justify-between text-sm">
-                          <span className="font-medium text-[#111814]">
+                          <span className="font-medium text-foreground">
                             {inv.otherDisplayName} (@{inv.otherHandle})
                           </span>
-                          <span className="text-xs capitalize text-[#5C665E]">{inv.status}</span>
+                          <span className="text-xs capitalize text-muted-foreground">
+                            {inv.status}
+                          </span>
                         </div>
-                        <p className="text-xs text-[#5C665E]">
+                        <p className="font-numeric text-xs text-muted-foreground">
                           {inv.otherCity} · Expires {inv.expiresAt}
                         </p>
                         {inv.status === 'pending' && (
                           <button
                             type="button"
                             onClick={() => onRespondInvite(inv.id, 'withdraw')}
-                            className="px-3 py-1.5 text-xs font-medium border border-[#D8D8D0] rounded-md text-[#4B554E] cursor-pointer"
+                            className="px-3 py-1.5 text-xs font-medium border border-border rounded-lg text-muted-foreground hover:text-foreground cursor-pointer"
                           >
                             Withdraw
                           </button>
@@ -665,17 +683,17 @@ export default function NetworkView({
                 )}
               </div>
 
-              <div className="bg-white border border-[#E4E4DE] rounded-xl p-5 space-y-2">
-                <p className="text-xs font-semibold text-[#111814]">
+              <div className="bg-card border border-border rounded-2xl p-5 space-y-2">
+                <p className="text-xs font-semibold text-foreground">
                   Your Privacy &amp; Block Controls
                 </p>
-                <p className="text-xs text-[#5C665E]">
-                  Invitation policy: <strong>{snapshot.activeScout?.invitePolicy}</strong> · Blocked
-                  users: <strong>{snapshot.blockedUsers.length}</strong>
+                <p className="text-xs text-muted-foreground">
+                  Invitation policy: <strong className="text-foreground">{snapshot.activeScout?.invitePolicy}</strong> · Blocked
+                  users: <strong className="font-numeric text-foreground">{snapshot.blockedUsers.length}</strong>
                 </p>
                 <Link
                   href="/settings"
-                  className="inline-block text-xs font-semibold text-[#0B6E4F] hover:underline"
+                  className="inline-block text-xs font-semibold text-foreground hover:underline"
                 >
                   Configure privacy &amp; unblock users in Settings →
                 </Link>
@@ -687,16 +705,16 @@ export default function NetworkView({
 
       {subTab === 'simulator' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          <div className="lg:col-span-5 bg-white border border-[#E4E4DE] rounded-xl p-6 space-y-6 self-start">
+          <div className="lg:col-span-5 bg-card border border-border rounded-2xl p-6 space-y-6 self-start">
             <div className="flex items-center gap-2">
-              <GitBranch className="w-4 h-4 text-[#0B6E4F]" aria-hidden="true" />
-              <h2 className="font-display text-lg font-bold text-[#111814]">
+              <GitBranch className="w-4 h-4 text-foreground" aria-hidden="true" />
+              <h2 className="font-sans text-base font-bold text-foreground">
                 Commission Engine Parameters
               </h2>
             </div>
 
             <div className="space-y-2">
-              <label htmlFor="sim-merch" className="block text-xs font-medium text-[#4B554E]">
+              <label htmlFor="sim-merch" className="block text-xs font-medium text-muted-foreground">
                 Eligible Merchandise Revenue (₦, excl. delivery &amp; tax)
               </label>
               <input
@@ -706,7 +724,7 @@ export default function NetworkView({
                 step={5000}
                 value={merchNaira}
                 onChange={(e) => setMerchNaira(Math.max(0, Number(e.target.value)))}
-                className="w-full px-3.5 py-2.5 font-mono text-sm bg-white border border-[#D8D8D0] rounded-lg focus:outline-none focus:border-[#0B6E4F] tabular-nums"
+                className="w-full px-3.5 py-2.5 font-numeric text-sm bg-background text-foreground border border-input rounded-xl focus:outline-none focus:border-ring tabular-nums"
               />
               <div className="flex items-center gap-2 pt-1">
                 {[25000, 100000, 250000].map((preset) => (
@@ -714,7 +732,7 @@ export default function NetworkView({
                     key={preset}
                     type="button"
                     onClick={() => setMerchNaira(preset)}
-                    className="px-2.5 py-1 text-xs font-mono bg-[#F3F3EF] hover:bg-[#E4E4DC] rounded text-[#111814] cursor-pointer"
+                    className="px-2.5 py-1 text-xs font-numeric bg-secondary hover:bg-muted rounded-lg text-secondary-foreground cursor-pointer"
                   >
                     ₦{preset.toLocaleString('en-NG')}
                   </button>
@@ -724,10 +742,10 @@ export default function NetworkView({
 
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <label htmlFor="sim-depth" className="font-medium text-[#4B554E]">
+                <label htmlFor="sim-depth" className="font-medium text-muted-foreground">
                   Actual Seller Ancestry Depth
                 </label>
-                <span className="font-mono font-semibold text-[#111814]">
+                <span className="font-numeric font-semibold text-foreground">
                   {depth} {depth === 1 ? 'generation' : 'generations'}
                 </span>
               </div>
@@ -738,9 +756,9 @@ export default function NetworkView({
                 max={13}
                 value={depth}
                 onChange={(e) => setDepth(Number(e.target.value))}
-                className="w-full accent-[#0B6E4F] cursor-pointer"
+                className="w-full accent-foreground cursor-pointer"
               />
-              <div className="flex justify-between text-[11px] font-mono text-[#6C776E]">
+              <div className="flex justify-between text-[11px] font-numeric text-muted-foreground">
                 <span>1 (1/2)</span>
                 <span>2 (1/4, 1/5)</span>
                 <span>3 (1/5, 1/6, 1/10)</span>
@@ -749,15 +767,15 @@ export default function NetworkView({
             </div>
 
             <div className="space-y-2">
-              <p className="text-xs font-medium text-[#4B554E]">Checkout Attribution Type</p>
+              <p className="text-xs font-medium text-muted-foreground">Checkout Attribution Type</p>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => setIsReferral(true)}
-                  className={`py-2 px-3 text-xs font-semibold rounded-lg border cursor-pointer ${
+                  className={`py-2 px-3 text-xs font-semibold rounded-xl border cursor-pointer ${
                     isReferral
-                      ? 'bg-[#0B6E4F] text-white border-[#0B6E4F]'
-                      : 'bg-white text-[#4B554E] border-[#D8D8D0]'
+                      ? 'bg-primary text-primary-foreground border-primary-border'
+                      : 'bg-background text-muted-foreground border-border'
                   }`}
                 >
                   Referral-Card Buy
@@ -765,10 +783,10 @@ export default function NetworkView({
                 <button
                   type="button"
                   onClick={() => setIsReferral(false)}
-                  className={`py-2 px-3 text-xs font-semibold rounded-lg border cursor-pointer ${
+                  className={`py-2 px-3 text-xs font-semibold rounded-xl border cursor-pointer ${
                     !isReferral
-                      ? 'bg-[#111814] text-white border-[#111814]'
-                      : 'bg-white text-[#4B554E] border-[#D8D8D0]'
+                      ? 'bg-commerce text-commerce-foreground border-commerce'
+                      : 'bg-background text-muted-foreground border-border'
                   }`}
                 >
                   Direct Marketplace
@@ -776,8 +794,8 @@ export default function NetworkView({
               </div>
             </div>
 
-            <div className="space-y-2 pt-2 border-t border-[#ECECE6]">
-              <p className="text-xs font-medium text-[#4B554E]">
+            <div className="space-y-2 pt-2 border-t border-border">
+              <p className="text-xs font-medium text-muted-foreground">
                 Simulate Ineligible Ancestors (Verify No-Promotion Rule)
               </p>
               <div className="grid grid-cols-5 gap-1.5">
@@ -788,10 +806,10 @@ export default function NetworkView({
                       key={g}
                       type="button"
                       onClick={() => toggleGenIneligible(g)}
-                      className={`py-1.5 text-xs font-mono rounded border cursor-pointer ${
+                      className={`py-1.5 text-xs font-numeric rounded-lg border cursor-pointer ${
                         off
-                          ? 'bg-[#FEF2F2] border-[#FECACA] text-[#B91C1C] line-through'
-                          : 'bg-[#FAFAF8] border-[#D8D8D0] text-[#111814]'
+                          ? 'bg-destructive/10 border-destructive/30 text-destructive line-through'
+                          : 'bg-muted/60 border-border text-foreground'
                       }`}
                     >
                       G{g}
@@ -805,88 +823,88 @@ export default function NetworkView({
           <div className="lg:col-span-7 space-y-5">
             {simResult && (
               <>
-                <div className="bg-white border border-[#E4E4DE] rounded-xl p-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="bg-card border border-border rounded-2xl p-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
                   <div>
-                    <p className="text-xs text-[#5C665E]">Seller Proceeds (90%)</p>
-                    <p className="mt-1 font-mono text-base font-semibold text-[#111814] tabular-nums">
+                    <p className="text-xs text-muted-foreground">Seller Proceeds (90%)</p>
+                    <p className="mt-1 font-numeric text-base font-bold text-foreground tabular-nums">
                       {formatKoboToNaira(simResult.sellerProceedsKobo)}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-[#5C665E]">NairaScout Fee (10%)</p>
-                    <p className="mt-1 font-mono text-base font-semibold text-[#111814] tabular-nums">
+                    <p className="text-xs text-muted-foreground">NairaScout Fee (10%)</p>
+                    <p className="mt-1 font-numeric text-base font-bold text-foreground tabular-nums">
                       {formatKoboToNaira(simResult.marketplaceCommissionKobo)}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-[#5C665E]">20% Referral Pool</p>
-                    <p className="mt-1 font-mono text-base font-semibold text-[#0B6E4F] tabular-nums">
+                    <p className="text-xs text-muted-foreground">20% Referral Pool</p>
+                    <p className="mt-1 font-numeric text-base font-bold text-success tabular-nums">
                       {formatKoboToNaira(simResult.referralPoolKobo)}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-[#5C665E]">Undistributed Retained</p>
-                    <p className="mt-1 font-mono text-base font-semibold text-[#4B554E] tabular-nums">
+                    <p className="text-xs text-muted-foreground">Undistributed Retained</p>
+                    <p className="mt-1 font-numeric text-base font-bold text-muted-foreground tabular-nums">
                       {formatKoboToNaira(simResult.undistributedRetainedKobo)}
                     </p>
                   </div>
                 </div>
 
-                <div className="bg-white border border-[#E4E4DE] rounded-xl overflow-hidden">
-                  <div className="px-5 py-3.5 border-b border-[#E4E4DE] flex items-center justify-between text-xs">
-                    <span className="font-semibold text-[#111814]">
+                <div className="bg-card border border-border rounded-2xl overflow-hidden">
+                  <div className="px-5 py-3.5 border-b border-border flex items-center justify-between text-xs">
+                    <span className="font-semibold text-foreground">
                       {simResult.scheduleName}
                     </span>
-                    <span className="font-mono text-[#5C665E]">
+                    <span className="font-numeric text-muted-foreground">
                       {simLoading ? 'Calculating...' : `Engine ${simResult.ruleVersion}`}
                     </span>
                   </div>
 
                   {simResult.allocations.length === 0 ? (
-                    <div className="p-8 text-center text-sm text-[#5C665E]">
+                    <div className="p-8 text-center text-sm text-muted-foreground">
                       Direct marketplace purchase generates ₦0.00 referral pool and ₦0.00
                       generation commissions.
                     </div>
                   ) : (
                     <table className="w-full text-left border-collapse text-sm">
                       <thead>
-                        <tr className="border-b border-[#E4E4DE] text-xs text-[#5C665E]">
+                        <tr className="border-b border-border text-xs text-muted-foreground">
                           <th className="py-2.5 px-4 font-medium">Generation</th>
                           <th className="py-2.5 px-4 font-medium">Fraction</th>
                           <th className="py-2.5 px-4 font-medium">Eligibility</th>
                           <th className="py-2.5 px-4 font-medium text-right">Allocation (₦)</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-[#ECECE6]">
+                      <tbody className="divide-y divide-border">
                         {simResult.allocations.map((row) => (
-                          <tr key={row.generation} className="hover:bg-[#FAFAF8]">
-                            <td className="py-2.5 px-4 font-mono text-xs font-semibold text-[#111814]">
+                          <tr key={row.generation} className="hover:bg-muted/40">
+                            <td className="py-2.5 px-4 font-numeric text-xs font-semibold text-foreground">
                               Gen {row.generation}
                             </td>
-                            <td className="py-2.5 px-4 font-mono text-xs text-[#4B554E]">
+                            <td className="py-2.5 px-4 font-numeric text-xs text-muted-foreground">
                               {row.fractionLabel}
                             </td>
                             <td className="py-2.5 px-4 text-xs">
                               {row.eligible ? (
-                                <span className="text-[#0B6E4F] font-medium">Eligible</span>
+                                <span className="text-success font-medium">Eligible</span>
                               ) : (
-                                <span className="text-[#B45309] font-medium">
+                                <span className="text-amber-600 dark:text-amber-400 font-medium">
                                   Ineligible (Slot kept empty)
                                 </span>
                               )}
                             </td>
-                            <td className="py-2.5 px-4 font-mono text-right tabular-nums font-semibold text-[#111814]">
+                            <td className="py-2.5 px-4 font-numeric text-right tabular-nums font-bold text-foreground">
                               {formatKoboToNaira(row.amountKobo)}
                             </td>
                           </tr>
                         ))}
                       </tbody>
                       <tfoot>
-                        <tr className="border-t border-[#D8D8D0] bg-[#FAFAF8] font-semibold">
-                          <td colSpan={3} className="py-3 px-4 text-xs text-[#111814]">
+                        <tr className="border-t border-border bg-muted/50 font-semibold">
+                          <td colSpan={3} className="py-3 px-4 text-xs text-foreground">
                             Total Allocated to Eligible Scouts
                           </td>
-                          <td className="py-3 px-4 font-mono text-right tabular-nums text-[#0B6E4F]">
+                          <td className="py-3 px-4 font-numeric text-right tabular-nums text-success">
                             {formatKoboToNaira(simResult.totalAllocatedKobo)}
                           </td>
                         </tr>
@@ -906,28 +924,30 @@ export default function NetworkView({
           role="dialog"
           aria-modal="true"
           aria-label="Report Abuse"
-          className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex items-center justify-center p-4"
         >
-          <div className="bg-white border border-[#E4E4DE] rounded-xl max-w-md w-full p-6 space-y-4">
+          <div className="bg-card text-card-foreground border border-border rounded-2xl max-w-md w-full p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-display text-lg font-bold text-[#111814]">
+              <h3 className="font-sans text-lg font-bold text-foreground">
                 Report Abuse (@{abuseTarget.handle})
               </h3>
               <button
                 type="button"
                 onClick={() => setAbuseTarget(null)}
-                className="p-1 text-[#5C665E] cursor-pointer"
+                className="p-1 text-muted-foreground hover:text-foreground cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
             <form onSubmit={handleSubmitAbuse} className="space-y-3">
               <div>
-                <label className="block text-xs font-medium text-[#4B554E] mb-1">Reason</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Reason
+                </label>
                 <select
                   value={abuseReason}
                   onChange={(e) => setAbuseReason(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg bg-white"
+                  className="w-full px-3 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                 >
                   <option value="Unsolicited spam or harassment">
                     Unsolicited spam or harassment
@@ -937,7 +957,7 @@ export default function NetworkView({
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-[#4B554E] mb-1">
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
                   Description
                 </label>
                 <textarea
@@ -946,12 +966,12 @@ export default function NetworkView({
                   value={abuseDesc}
                   onChange={(e) => setAbuseDesc(e.target.value)}
                   placeholder="Describe what happened..."
-                  className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg"
+                  className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
                 />
               </div>
               <button
                 type="submit"
-                className="w-full py-2.5 text-xs font-semibold text-white bg-[#B91C1C] rounded-lg cursor-pointer"
+                className="w-full py-2.5 text-xs font-semibold text-destructive-foreground bg-destructive rounded-xl cursor-pointer"
               >
                 Submit Report to Trust &amp; Safety
               </button>

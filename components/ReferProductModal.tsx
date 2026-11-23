@@ -2,7 +2,17 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, Check, Copy, Send, Users, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  Copy,
+  ExternalLink,
+  MessageCircle,
+  Send,
+  Share2,
+  Users,
+  X,
+} from 'lucide-react';
 import type {
   NairaScoutSnapshot,
   ProductListing,
@@ -39,6 +49,7 @@ export default function ReferProductModal({
   const [note, setNote] = useState('');
   const [createdEvents, setCreatedEvents] = useState<ProductReferralEvent[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedGeneral, setCopiedGeneral] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   if (!product) return null;
@@ -79,13 +90,32 @@ export default function ReferProductModal({
     setSubmitting(false);
   };
 
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://nairascout.ng';
+
   const buildShareUrl = (ev: ProductReferralEvent) =>
-    `${typeof window !== 'undefined' ? window.location.origin : 'https://nairascout.ng'}/?refEvent=${ev.id}&refScout=${ev.senderHandle}`;
+    `${origin}/?refEvent=${ev.id}&refScout=${ev.senderHandle}`;
+
+  const primaryQuickShareUrl =
+    createdEvents[0]
+      ? buildShareUrl(createdEvents[0])
+      : snapshot.activeScout
+        ? `${origin}/auth/register?refScout=${encodeURIComponent(snapshot.activeScout.handle)}`
+        : `${origin}/`;
+
+  const shareText = `Check out ${product.title} (${formatWholeNaira(product.priceKobo)}) on NairaScout: ${primaryQuickShareUrl}`;
+  const whatsappHref = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
+  const twitterHref = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
 
   const handleCopy = (ev: ProductReferralEvent) => {
     navigator.clipboard?.writeText(buildShareUrl(ev));
     setCopiedId(ev.id);
     setTimeout(() => setCopiedId((prev) => (prev === ev.id ? null : prev)), 1800);
+  };
+
+  const handleCopyQuickLink = () => {
+    navigator.clipboard?.writeText(primaryQuickShareUrl);
+    setCopiedGeneral(true);
+    setTimeout(() => setCopiedGeneral(false), 1800);
   };
 
   const handleClose = () => {
@@ -100,44 +130,92 @@ export default function ReferProductModal({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Refer Product"
-      className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-4"
+      aria-label="Referral Card"
+      className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex items-end md:items-center justify-center md:p-4"
+      onClick={handleClose}
     >
-      <div className="bg-white border border-[#E4E4DE] rounded-xl max-w-lg w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto">
+      <div
+        className="w-full max-w-lg rounded-t-3xl md:rounded-2xl bg-card text-card-foreground border-t md:border border-border p-5 sm:p-6 space-y-5 max-h-[92vh] overflow-y-auto shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="md:hidden w-10 h-1.5 bg-muted-foreground/30 rounded-full mx-auto -mt-1" />
+
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="font-display text-xl font-bold text-[#111814]">
-              Refer Product to Scouts List
+            <h2 className="font-sans text-lg font-bold tracking-tight text-foreground">
+              Referral Card
             </h2>
-            <p className="text-xs text-[#5C665E] mt-0.5">
-              Generates one unique, traceable referral event per selected contact (max{' '}
-              {MAX_RECIPIENTS} recipients per batch).
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Generates a traceable referral event per selected contact (max {MAX_RECIPIENTS}{' '}
+              recipients per batch).
             </p>
           </div>
           <button
             type="button"
             onClick={handleClose}
             aria-label="Close modal"
-            className="p-1 text-[#5C665E] hover:text-[#111814] cursor-pointer"
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="bg-[#FAFAF8] border border-[#E4E4DE] rounded-lg p-3.5">
-          <p className="text-xs text-[#5C665E]">
+        {/* Product Summary */}
+        <div className="bg-muted/60 border border-border rounded-xl p-3.5">
+          <p className="font-sans text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             {product.category} · {product.sellerName}
           </p>
-          <p className="font-display text-sm font-semibold text-[#111814] mt-0.5">
+          <p className="font-sans text-sm font-semibold text-foreground mt-0.5">
             {product.title}
           </p>
-          <p className="font-mono text-sm font-bold text-[#0B6E4F] mt-1 tabular-nums">
+          <p className="font-numeric text-sm font-bold text-foreground mt-1 tabular-nums">
             {formatWholeNaira(product.priceKobo)}
           </p>
         </div>
 
+        {/* Quick Social Share Pills */}
+        <div className="space-y-2">
+          <p className="font-sans text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Quick Social Share
+          </p>
+          <div className="space-y-2">
+            <a
+              href={whatsappHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full h-11 px-4 rounded-full bg-[#25D366] text-white font-sans text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-95 transition-opacity"
+            >
+              <MessageCircle className="w-4 h-4" aria-hidden="true" />
+              Share on WhatsApp
+              <ExternalLink className="w-3.5 h-3.5 opacity-80" aria-hidden="true" />
+            </a>
+            <a
+              href={twitterHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full h-11 px-4 rounded-full bg-[#1DA1F2] text-white font-sans text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-95 transition-opacity"
+            >
+              <Share2 className="w-4 h-4" aria-hidden="true" />
+              Share on X / Twitter
+              <ExternalLink className="w-3.5 h-3.5 opacity-80" aria-hidden="true" />
+            </a>
+            <button
+              type="button"
+              onClick={handleCopyQuickLink}
+              className="w-full h-11 px-4 rounded-full bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 text-white font-sans text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-95 transition-opacity cursor-pointer"
+            >
+              {copiedGeneral ? (
+                <Check className="w-4 h-4" aria-hidden="true" />
+              ) : (
+                <Copy className="w-4 h-4" aria-hidden="true" />
+              )}
+              {copiedGeneral ? 'Referral Link Copied!' : 'Instagram / Copy Referral Link'}
+            </button>
+          </div>
+        </div>
+
         {referralRestriction && (
-          <div className="bg-[#FEF2F2] border border-[#FECACA] rounded-lg p-3.5 text-xs text-[#991B1B] flex items-start gap-2.5">
+          <div className="bg-destructive/10 border border-destructive/30 rounded-xl p-3.5 text-xs text-destructive flex items-start gap-2.5">
             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
             <div>
               <p className="font-semibold">Referral Capability Restricted (CREATE_REFERRAL)</p>
@@ -149,21 +227,21 @@ export default function ReferProductModal({
         )}
 
         {!snapshot.authenticated ? (
-          <div className="space-y-4 text-xs text-[#4B554E]">
+          <div className="space-y-4 text-xs text-muted-foreground pt-2 border-t border-border">
             <p>
-              Sign in or create a free Scout account to send product referrals from your Scouts
-              List and earn across up to 13 generations.
+              Sign in or create a free Scout account to send traceable in-app product referral
+              cards to your Scouts List and earn across up to 13 generations.
             </p>
             <Link
               href="/auth/login"
-              className="block w-full text-center py-2.5 px-4 font-semibold text-white bg-[#0B6E4F] rounded-lg"
+              className="block w-full text-center py-2.5 px-4 font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90"
             >
               Sign In to Refer Products
             </Link>
           </div>
         ) : createdEvents.length > 0 ? (
-          <div className="space-y-4">
-            <div className="bg-[#F3F8F6] border border-[#CBE2D8] rounded-lg p-4 text-xs text-[#0B6E4F] space-y-1">
+          <div className="space-y-4 pt-2 border-t border-border">
+            <div className="bg-accent border border-primary-border/50 rounded-xl p-4 text-xs text-accent-foreground space-y-1">
               <p className="font-semibold">
                 {createdEvents.length} Referral{' '}
                 {createdEvents.length === 1 ? 'Event' : 'Events'} Created
@@ -177,8 +255,11 @@ export default function ReferProductModal({
 
             <div className="space-y-2 max-h-48 overflow-y-auto">
               {createdEvents.map((ev) => (
-                <div key={ev.id} className="space-y-1 p-2.5 bg-[#FAFAF8] border border-[#E4E4DE] rounded-lg">
-                  <p className="text-[11px] font-mono text-[#4B554E]">
+                <div
+                  key={ev.id}
+                  className="space-y-1.5 p-3 bg-muted/50 border border-border rounded-xl"
+                >
+                  <p className="text-[11px] font-numeric text-muted-foreground">
                     @{ev.recipientHandle} · {ev.id}
                   </p>
                   <div className="flex items-center gap-2">
@@ -187,12 +268,12 @@ export default function ReferProductModal({
                       readOnly
                       value={buildShareUrl(ev)}
                       aria-label={`Event-specific referral link for ${ev.recipientHandle}`}
-                      className="flex-1 px-2.5 py-1.5 font-mono text-[11px] bg-white border border-[#D8D8D0] rounded text-[#111814]"
+                      className="flex-1 px-2.5 py-1.5 font-numeric text-[11px] bg-background border border-input rounded-lg text-foreground"
                     />
                     <button
                       type="button"
                       onClick={() => handleCopy(ev)}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-[#111814] rounded cursor-pointer shrink-0"
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-lg cursor-pointer shrink-0"
                     >
                       {copiedId === ev.id ? (
                         <Check className="w-3.5 h-3.5" />
@@ -209,37 +290,37 @@ export default function ReferProductModal({
             <button
               type="button"
               onClick={handleClose}
-              className="w-full py-2.5 px-4 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg cursor-pointer"
+              className="w-full py-2.5 px-4 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
             >
               Done
             </button>
           </div>
         ) : activeContacts.length === 0 ? (
-          <div className="text-xs text-[#5C665E] space-y-2">
+          <div className="text-xs text-muted-foreground pt-2 border-t border-border">
             <p>
               You have no active non-blocked contacts in your Scouts List yet. Invite a Scout in
-              the Network → Scouts List tab first.
+              the Network → Scouts List tab first to dispatch in-app cards.
             </p>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4 pt-2 border-t border-border">
             <div>
               <div className="flex items-center justify-between gap-2 mb-2">
-                <label className="text-xs font-medium text-[#4B554E] inline-flex items-center gap-1.5">
-                  <Users className="w-3.5 h-3.5 text-[#0B6E4F]" aria-hidden="true" />
-                  Select Recipients from Scouts List
+                <label className="text-xs font-medium text-foreground inline-flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-foreground" aria-hidden="true" />
+                  In-App Scouts List
                 </label>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={handleSelectUpTo20}
-                    className="text-[11px] font-semibold text-[#0B6E4F] hover:underline cursor-pointer"
+                    className="text-[11px] font-semibold text-foreground hover:underline cursor-pointer"
                   >
                     Select Eligible
                   </button>
                   <span
-                    className={`font-mono text-xs font-semibold tabular-nums ${
-                      atBatchCap ? 'text-[#B45309]' : 'text-[#0B6E4F]'
+                    className={`font-numeric text-xs font-semibold tabular-nums ${
+                      atBatchCap ? 'text-amber-600 dark:text-amber-400' : 'text-foreground'
                     }`}
                   >
                     Selected: {selectedIds.length} / {MAX_RECIPIENTS} recipients
@@ -247,7 +328,7 @@ export default function ReferProductModal({
                 </div>
               </div>
 
-              <div className="max-h-48 overflow-y-auto border border-[#D8D8D0] rounded-lg divide-y divide-[#ECECE6] bg-white">
+              <div className="max-h-44 overflow-y-auto border border-border rounded-xl divide-y divide-border bg-background/50">
                 {activeContacts.map((c) => {
                   const checked = selectedIds.includes(c.scoutId);
                   const disabled = !checked && atBatchCap;
@@ -255,7 +336,9 @@ export default function ReferProductModal({
                     <label
                       key={c.contactId}
                       className={`flex items-center justify-between gap-3 px-3 py-2.5 text-xs ${
-                        disabled ? 'opacity-50 cursor-not-allowed bg-[#FAFAF8]' : 'cursor-pointer hover:bg-[#FAFAF8]'
+                        disabled
+                          ? 'opacity-50 cursor-not-allowed bg-muted/40'
+                          : 'cursor-pointer hover:bg-muted/60'
                       }`}
                     >
                       <div className="flex items-center gap-2.5">
@@ -264,14 +347,16 @@ export default function ReferProductModal({
                           checked={checked}
                           disabled={disabled}
                           onChange={() => toggleRecipient(c.scoutId)}
-                          className="accent-[#0B6E4F]"
+                          className="accent-foreground"
                         />
                         <div>
-                          <p className="font-semibold text-[#111814]">
+                          <p className="font-semibold text-foreground">
                             {c.displayName}{' '}
-                            <span className="font-mono font-normal text-[#5C665E]">@{c.handle}</span>
+                            <span className="font-sans font-normal text-muted-foreground">
+                              @{c.handle}
+                            </span>
                           </p>
-                          <p className="text-[11px] text-[#5C665E]">{c.city}</p>
+                          <p className="text-[11px] text-muted-foreground">{c.city}</p>
                         </div>
                       </div>
                     </label>
@@ -279,7 +364,7 @@ export default function ReferProductModal({
                 })}
               </div>
               {atBatchCap && (
-                <p className="mt-1 text-[11px] text-[#B45309]">
+                <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
                   Maximum batch limit of {MAX_RECIPIENTS} recipients reached for this operation.
                 </p>
               )}
@@ -288,24 +373,24 @@ export default function ReferProductModal({
             <div>
               <label
                 htmlFor="ref-note"
-                className="block text-xs font-medium text-[#4B554E] mb-1"
+                className="block text-xs font-medium text-muted-foreground mb-1"
               >
                 Personal Note (Optional)
               </label>
               <textarea
                 id="ref-note"
-                rows={3}
+                rows={2}
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="Share why this product is useful or verified..."
-                className="w-full px-3 py-2 text-sm border border-[#D8D8D0] rounded-lg focus:outline-none focus:border-[#0B6E4F]"
+                className="w-full px-3 py-2 text-sm bg-background border border-input rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-ring"
               />
             </div>
 
             <button
               type="submit"
               disabled={selectedIds.length === 0 || submitting || Boolean(referralRestriction)}
-              className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 text-xs font-semibold text-white bg-[#0B6E4F] rounded-lg hover:bg-[#09583F] disabled:opacity-45 cursor-pointer"
+              className="w-full inline-flex items-center justify-center gap-2 h-11 px-4 text-xs font-bold uppercase tracking-wider text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-45 cursor-pointer"
             >
               <Send className="w-3.5 h-3.5" aria-hidden="true" />
               {submitting
