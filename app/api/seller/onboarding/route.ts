@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
       sellerType: body.sellerType === 'BUSINESS' ? 'BUSINESS' : 'INDIVIDUAL',
       sellerName: String(body.sellerName || ''),
       description: String(body.description || ''),
-      businessCategory: String(body.businessCategory || 'Home & Craft'),
+      businessCategory: String(body.businessCategory || 'Fashion & Apparel'),
       businessRegNumber: body.businessRegNumber ? String(body.businessRegNumber) : undefined,
       businessAddress: body.businessAddress ? String(body.businessAddress) : undefined,
       businessContactEmail: body.businessContactEmail

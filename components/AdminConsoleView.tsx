@@ -11,9 +11,12 @@ import {
   FileText,
   Gavel,
   Lock,
+  Pencil,
+  Plus,
   Scale,
   Search,
   ShieldAlert,
+  Tags,
   Users,
 } from 'lucide-react';
 import {
@@ -31,6 +34,7 @@ import type {
   AbuseReportRecord,
   AuditLogRecord,
   GovernanceAppealDTO,
+  ListingCategoryDTO,
   MakerCheckerActionType,
   MakerCheckerRequestDTO,
   VerificationRecord,
@@ -85,6 +89,7 @@ export interface AdminConsoleData {
   governanceAppeals: GovernanceAppealDTO[];
   abuseReports: AbuseReportRecord[];
   auditLogs: AuditLogRecord[];
+  categories: ListingCategoryDTO[];
 }
 
 export type AdminSection =
@@ -93,6 +98,7 @@ export type AdminSection =
   | 'users'
   | 'approvals'
   | 'appeals'
+  | 'categories'
   | 'audit_logs';
 
 interface AdminConsoleViewProps {
@@ -146,6 +152,16 @@ export default function AdminConsoleView({
 
   // Audit Log filter
   const [auditQuery, setAuditQuery] = useState('');
+
+  // Listing Categories manager state (SUPER_ADMIN)
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatDesc, setNewCatDesc] = useState('');
+  const [newCatSort, setNewCatSort] = useState('10');
+  const [newCatActive, setNewCatActive] = useState(true);
+  const [editingCatId, setEditingCatId] = useState<string | null>(null);
+  const [editCatName, setEditCatName] = useState('');
+  const [editCatDesc, setEditCatDesc] = useState('');
+  const [editCatSort, setEditCatSort] = useState('0');
 
   const buildHeaders = (): HeadersInit => ({
     'Content-Type': 'application/json',
@@ -436,6 +452,75 @@ export default function AdminConsoleView({
     }
   };
 
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCatName.trim()) {
+      setFeedback({ type: 'err', message: 'Category name is required.' });
+      return;
+    }
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/admin/categories', {
+        method: 'POST',
+        headers: buildHeaders(),
+        body: JSON.stringify({
+          name: newCatName.trim(),
+          description: newCatDesc.trim() || null,
+          sortOrder: Number(newCatSort || 0),
+          isActive: newCatActive,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFeedback({ type: 'err', message: data.error || 'Could not create listing category.' });
+        return;
+      }
+      if (data.admin) setAdminData(data.admin);
+      setNewCatName('');
+      setNewCatDesc('');
+      setNewCatSort('10');
+      setNewCatActive(true);
+      setFeedback({
+        type: 'ok',
+        message: `Listing category "${data.category?.name ?? newCatName.trim()}" created and synced.`,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleUpdateCategory = async (payload: {
+    id: string;
+    name?: string;
+    description?: string | null;
+    sortOrder?: number;
+    isActive?: boolean;
+  }) => {
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/admin/categories', {
+        method: 'PATCH',
+        headers: buildHeaders(),
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFeedback({ type: 'err', message: data.error || 'Could not update listing category.' });
+        return;
+      }
+      if (data.admin) setAdminData(data.admin);
+      setEditingCatId(null);
+      setFeedback({
+        type: 'ok',
+        message: `Listing category "${data.category?.name ?? ''}" updated and logged.`,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const filteredVerifications = useMemo(() => {
     if (!adminData) return [];
     return adminData.verifications.filter(
@@ -516,6 +601,8 @@ export default function AdminConsoleView({
   const openAppealsCount = adminData.governanceAppeals.filter(
     (a) => a.status === 'OPEN' || a.status === 'UNDER_REVIEW'
   ).length;
+  const activeCategoriesCount = adminData.categories.filter((c) => c.isActive).length;
+  const isSuperAdmin = adminData.adminRole === 'SUPER_ADMIN';
   const selectedUser = adminData.users.find((u) => u.userId === selectedUserId) ?? null;
 
   return (
@@ -554,6 +641,11 @@ export default function AdminConsoleView({
                   href: '/admin/appeals',
                   id: 'appeals',
                   label: `Appeals (${openAppealsCount})`,
+                },
+                {
+                  href: '/admin/categories',
+                  id: 'categories',
+                  label: `Categories (${activeCategoriesCount})`,
                 },
                 { href: '/admin/audit-logs', id: 'audit_logs', label: 'Audit Logs' },
               ] as const
@@ -608,7 +700,7 @@ export default function AdminConsoleView({
               </p>
             </div>
 
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
               <div className="bg-card border border-border rounded-2xl p-5">
                 <p className="text-xs text-muted-foreground">Verification Queue</p>
                 <p className="mt-1 font-numeric text-3xl font-bold text-amber-600 dark:text-amber-400 tabular-nums">
@@ -655,6 +747,18 @@ export default function AdminConsoleView({
                   className="mt-3 inline-block text-xs font-semibold text-foreground hover:underline"
                 >
                   Trust &amp; Safety →
+                </Link>
+              </div>
+              <div className="bg-card border border-border rounded-2xl p-5">
+                <p className="text-xs text-muted-foreground">Listing Categories</p>
+                <p className="mt-1 font-numeric text-3xl font-bold text-foreground tabular-nums">
+                  {activeCategoriesCount}
+                </p>
+                <Link
+                  href="/admin/categories"
+                  className="mt-3 inline-block text-xs font-semibold text-foreground hover:underline"
+                >
+                  Manage Categories →
                 </Link>
               </div>
               <div className="bg-card border border-border rounded-2xl p-5">
@@ -1533,6 +1637,252 @@ export default function AdminConsoleView({
                   );
                 })
               )}
+            </div>
+          </section>
+        )}
+
+        {(initialSection === 'overview' || initialSection === 'categories') && (
+          <section className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Tags className="w-5 h-5 text-foreground" aria-hidden="true" />
+                <div>
+                  <h2 className="font-sans text-xl md:text-2xl font-bold text-foreground">
+                    Listing Categories
+                  </h2>
+                  <p className="text-xs text-muted-foreground">
+                    Manage marketplace listing categories in PostgreSQL. Active categories sync
+                    immediately to Account Settings Preferred Categories, Marketplace filters, and
+                    Seller Hub.
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs font-semibold text-muted-foreground">
+                {activeCategoriesCount} active / {adminData.categories.length} total
+              </span>
+            </div>
+
+            {!isSuperAdmin && (
+              <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-xs text-amber-800 dark:text-amber-200">
+                Read-only view ({adminData.adminRole}): Creating, editing, or toggling listing
+                categories is restricted to <strong>SUPER_ADMIN</strong>.
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              <form
+                onSubmit={handleCreateCategory}
+                className="lg:col-span-5 bg-card border border-border rounded-2xl p-5 space-y-4 self-start"
+              >
+                <div className="flex items-center gap-2">
+                  <Plus className="w-4 h-4 text-foreground" aria-hidden="true" />
+                  <h3 className="font-sans text-base font-bold text-foreground">
+                    Add Listing Category
+                  </h3>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="cat-name"
+                    className="block text-xs font-medium text-muted-foreground mb-1"
+                  >
+                    Category Name
+                  </label>
+                  <input
+                    id="cat-name"
+                    type="text"
+                    required
+                    disabled={!isSuperAdmin || busy}
+                    value={newCatName}
+                    onChange={(e) => setNewCatName(e.target.value)}
+                    placeholder="e.g., Sports & Fitness"
+                    className="w-full px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl disabled:opacity-50"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="cat-desc"
+                    className="block text-xs font-medium text-muted-foreground mb-1"
+                  >
+                    Description (Optional)
+                  </label>
+                  <textarea
+                    id="cat-desc"
+                    rows={2}
+                    disabled={!isSuperAdmin || busy}
+                    value={newCatDesc}
+                    onChange={(e) => setNewCatDesc(e.target.value)}
+                    placeholder="Short category summary..."
+                    className="w-full px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl disabled:opacity-50"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 items-end">
+                  <div>
+                    <label
+                      htmlFor="cat-sort"
+                      className="block text-xs font-medium text-muted-foreground mb-1"
+                    >
+                      Sort Order
+                    </label>
+                    <input
+                      id="cat-sort"
+                      type="number"
+                      disabled={!isSuperAdmin || busy}
+                      value={newCatSort}
+                      onChange={(e) => setNewCatSort(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-numeric tabular-nums bg-background text-foreground border border-input rounded-xl disabled:opacity-50"
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 p-2.5 bg-muted/50 border border-border rounded-xl text-xs font-medium text-foreground cursor-pointer">
+                    <input
+                      type="checkbox"
+                      disabled={!isSuperAdmin || busy}
+                      checked={newCatActive}
+                      onChange={(e) => setNewCatActive(e.target.checked)}
+                      className="accent-foreground"
+                    />
+                    Active immediately
+                  </label>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={!isSuperAdmin || busy}
+                  className="w-full py-2.5 px-4 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-45 cursor-pointer"
+                >
+                  {busy ? 'Saving Category...' : 'Add Category'}
+                </button>
+              </form>
+
+              <div className="lg:col-span-7 bg-card border border-border rounded-2xl divide-y divide-border">
+                {adminData.categories.length === 0 ? (
+                  <div className="p-8 text-center text-sm text-muted-foreground">
+                    No listing categories found.
+                  </div>
+                ) : (
+                  adminData.categories.map((cat) => {
+                    const isEditing = editingCatId === cat.id;
+                    return (
+                      <div key={cat.id} className="p-4 space-y-3 text-xs">
+                        {isEditing ? (
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <input
+                                type="text"
+                                value={editCatName}
+                                onChange={(e) => setEditCatName(e.target.value)}
+                                placeholder="Category Name"
+                                className="sm:col-span-2 px-3 py-1.5 text-xs bg-background text-foreground border border-input rounded-lg"
+                              />
+                              <input
+                                type="number"
+                                value={editCatSort}
+                                onChange={(e) => setEditCatSort(e.target.value)}
+                                placeholder="Sort Order"
+                                className="px-3 py-1.5 text-xs font-numeric tabular-nums bg-background text-foreground border border-input rounded-lg"
+                              />
+                            </div>
+                            <input
+                              type="text"
+                              value={editCatDesc}
+                              onChange={(e) => setEditCatDesc(e.target.value)}
+                              placeholder="Optional description..."
+                              className="w-full px-3 py-1.5 text-xs bg-background text-foreground border border-input rounded-lg"
+                            />
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={busy || !editCatName.trim()}
+                                onClick={() =>
+                                  handleUpdateCategory({
+                                    id: cat.id,
+                                    name: editCatName.trim(),
+                                    description: editCatDesc.trim() || null,
+                                    sortOrder: Number(editCatSort || 0),
+                                  })
+                                }
+                                className="px-3 py-1.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-lg hover:bg-primary/90 cursor-pointer"
+                              >
+                                Save Changes
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingCatId(null)}
+                                className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-sans text-sm font-semibold text-foreground">
+                                  {cat.name}
+                                </span>
+                                <span className="font-numeric text-[11px] text-muted-foreground">
+                                  #{cat.sortOrder} · {cat.slug}
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-md font-sans text-[11px] font-semibold ${
+                                    cat.isActive
+                                      ? 'bg-accent text-accent-foreground'
+                                      : 'bg-muted text-muted-foreground'
+                                  }`}
+                                >
+                                  {cat.isActive ? 'ACTIVE' : 'INACTIVE'}
+                                </span>
+                              </div>
+                              {cat.description && (
+                                <p className="text-muted-foreground">{cat.description}</p>
+                              )}
+                            </div>
+
+                            {isSuperAdmin && (
+                              <div className="flex items-center gap-2 shrink-0">
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => {
+                                    setEditingCatId(cat.id);
+                                    setEditCatName(cat.name);
+                                    setEditCatDesc(cat.description || '');
+                                    setEditCatSort(String(cat.sortOrder));
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border border-border rounded-lg text-foreground hover:bg-muted cursor-pointer"
+                                >
+                                  <Pencil className="w-3 h-3" aria-hidden="true" />
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() =>
+                                    handleUpdateCategory({
+                                      id: cat.id,
+                                      isActive: !cat.isActive,
+                                    })
+                                  }
+                                  className={`px-2.5 py-1.5 text-xs font-semibold rounded-lg border cursor-pointer ${
+                                    cat.isActive
+                                      ? 'border-destructive/30 text-destructive hover:bg-destructive/10'
+                                      : 'border-primary-border bg-primary text-primary-foreground hover:bg-primary/90'
+                                  }`}
+                                >
+                                  {cat.isActive ? 'Deactivate' : 'Activate'}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </div>
           </section>
         )}

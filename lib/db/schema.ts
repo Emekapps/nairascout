@@ -3,6 +3,7 @@ import {
   pgEnum,
   uuid,
   text,
+  integer,
   boolean,
   timestamp,
   jsonb,
@@ -450,3 +451,24 @@ export const governanceAppeals = pgTable(
     ),
   ]
 );
+
+// ============================================================================
+// 6. REFERENCE LOOKUP TABLES (NIGERIAN STATES & ADMIN-MANAGED CATEGORIES)
+// ============================================================================
+
+export const nigerianStates = pgTable('nigerian_states', {
+  code: text('code').primaryKey(),
+  name: text('name').notNull().unique(),
+  geoZone: text('geo_zone').notNull(),
+});
+
+export const listingCategories = pgTable('listing_categories', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: text('name').notNull().unique(),
+  slug: text('slug').notNull().unique(),
+  description: text('description'),
+  isActive: boolean('is_active').default(true).notNull(),
+  sortOrder: integer('sort_order').default(0).notNull(),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});

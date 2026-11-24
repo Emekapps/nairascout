@@ -36,7 +36,7 @@ export function WalletHeroCard({
       <div className="mt-5 pt-4 border-t border-white/20 flex flex-wrap items-center justify-between gap-4 font-numeric text-xs tabular-nums text-white/85">
         <div className="flex flex-wrap items-center gap-6">
           <span>
-            Pending Escrow: <strong>{formatKoboToNaira(pendingKobo)}</strong>
+            Pending: <strong>{formatKoboToNaira(pendingKobo)}</strong>
           </span>
           <span>
             Total Withdrawn: <strong>{formatKoboToNaira(paidKobo)}</strong>

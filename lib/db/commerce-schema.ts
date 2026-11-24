@@ -246,6 +246,78 @@ export async function ensureCommerceTables(
           created_at timestamptz NOT NULL DEFAULT now()
         );
       `);
+      await executeSql(sql`
+        CREATE TABLE IF NOT EXISTS public.nigerian_states (
+          code text PRIMARY KEY,
+          name text NOT NULL UNIQUE,
+          geo_zone text NOT NULL
+        );
+      `);
+      await executeSql(sql`
+        INSERT INTO public.nigerian_states (code, name, geo_zone) VALUES
+          ('AB', 'Abia', 'South East'),
+          ('AD', 'Adamawa', 'North East'),
+          ('AK', 'Akwa Ibom', 'South South'),
+          ('AN', 'Anambra', 'South East'),
+          ('BA', 'Bauchi', 'North East'),
+          ('BY', 'Bayelsa', 'South South'),
+          ('BE', 'Benue', 'North Central'),
+          ('BO', 'Borno', 'North East'),
+          ('CR', 'Cross River', 'South South'),
+          ('DE', 'Delta', 'South South'),
+          ('EB', 'Ebonyi', 'South East'),
+          ('ED', 'Edo', 'South South'),
+          ('EK', 'Ekiti', 'South West'),
+          ('EN', 'Enugu', 'South East'),
+          ('FC', 'FCT - Abuja', 'North Central'),
+          ('GO', 'Gombe', 'North East'),
+          ('IM', 'Imo', 'South East'),
+          ('JI', 'Jigawa', 'North West'),
+          ('KD', 'Kaduna', 'North West'),
+          ('KN', 'Kano', 'North West'),
+          ('KT', 'Katsina', 'North West'),
+          ('KE', 'Kebbi', 'North West'),
+          ('KO', 'Kogi', 'North Central'),
+          ('KW', 'Kwara', 'North Central'),
+          ('LA', 'Lagos', 'South West'),
+          ('NA', 'Nasarawa', 'North Central'),
+          ('NI', 'Niger', 'North Central'),
+          ('OG', 'Ogun', 'South West'),
+          ('ON', 'Ondo', 'South West'),
+          ('OS', 'Osun', 'South West'),
+          ('OY', 'Oyo', 'South West'),
+          ('PL', 'Plateau', 'North Central'),
+          ('RI', 'Rivers', 'South South'),
+          ('SO', 'Sokoto', 'North West'),
+          ('TA', 'Taraba', 'North East'),
+          ('YO', 'Yobe', 'North East'),
+          ('ZA', 'Zamfara', 'North West')
+        ON CONFLICT (code) DO NOTHING;
+      `);
+      await executeSql(sql`
+        CREATE TABLE IF NOT EXISTS public.listing_categories (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          name text NOT NULL UNIQUE,
+          slug text NOT NULL UNIQUE,
+          description text,
+          is_active boolean NOT NULL DEFAULT true,
+          sort_order integer NOT NULL DEFAULT 0,
+          created_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
+          created_at timestamptz NOT NULL DEFAULT now()
+        );
+      `);
+      await executeSql(sql`
+        INSERT INTO public.listing_categories (name, slug, sort_order) VALUES
+          ('Fashion & Apparel', 'fashion-apparel', 1),
+          ('Electronics & Gadgets', 'electronics-gadgets', 2),
+          ('Phones & Accessories', 'phones-accessories', 3),
+          ('Beauty & Personal Care', 'beauty-personal-care', 4),
+          ('Home & Living', 'home-living', 5),
+          ('Health & Wellness', 'health-wellness', 6),
+          ('Groceries & Provisions', 'groceries-provisions', 7),
+          ('Books & Education', 'books-education', 8)
+        ON CONFLICT (slug) DO NOTHING;
+      `);
     })().catch((err) => {
       globalForDdl.__nsCommerceTablesReady = undefined;
       throw err;

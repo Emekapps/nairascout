@@ -14,6 +14,7 @@ import {
 import type { LedgerEntryStatus, NairaScoutSnapshot } from '@/lib/nairascout-store';
 import { formatKoboToNaira } from '@/lib/commission-engine';
 import { WalletHeroCard } from './wallet/WalletHeroCard';
+import { DismissibleNoticePanel } from './shared/DismissibleNoticePanel';
 
 interface WalletViewProps {
   snapshot: NairaScoutSnapshot;
@@ -101,15 +102,18 @@ export default function WalletView({ snapshot }: WalletViewProps) {
 
   return (
     <div className="space-y-8">
-      <div className="border-b border-border pb-6">
-        <h1 className="font-sans text-2xl md:text-3xl font-bold tracking-tight text-foreground">
-          Referral Earnings Wallet &amp; Ledger
+      <div className="border-b border-border pb-5">
+        <h1 className="font-sans text-xl md:text-2xl font-bold tracking-tight text-foreground">
+          Wallet
         </h1>
-        <p className="mt-1.5 text-sm text-muted-foreground max-w-2xl">
-          Internal accounting derived strictly from the immutable financial ledger. Separate from
-          Seller proceeds. Paid and Reversed figures are cumulative historical states.
-        </p>
       </div>
+
+      <DismissibleNoticePanel
+        storageKey="nairascout_wallet_ledger_notice_v1"
+        title="Referral Earnings Wallet & Ledger"
+        description="Internal accounting derived strictly from the immutable financial ledger. Separate from Seller proceeds. Paid and Reversed figures are cumulative historical states."
+        ariaLabel="Referral Earnings Wallet & Ledger Notice"
+      />
 
       {/* Hero Wallet Card (Charcoal Black #292D2F) */}
       <WalletHeroCard
@@ -120,7 +124,7 @@ export default function WalletView({ snapshot }: WalletViewProps) {
       />
 
       {/* Five Distinct Wallet States */}
-      <section className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="bg-card border border-border rounded-2xl p-5">
           <p className="text-xs text-muted-foreground">Available</p>
           <p className="mt-2 font-numeric text-xl font-bold text-success tabular-nums">
@@ -168,7 +172,7 @@ export default function WalletView({ snapshot }: WalletViewProps) {
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-success" aria-hidden="true" />
             <h2 className="font-sans text-base font-semibold text-foreground">
-              Monthly Payout Cycle — 15th of Each Month
+              Payout — 15th of Each Month
             </h2>
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed">
@@ -218,7 +222,7 @@ export default function WalletView({ snapshot }: WalletViewProps) {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h2 className="font-sans text-xl font-bold text-foreground">
-              Immutable Financial Ledger
+              Ledger
             </h2>
             <p className="text-xs text-muted-foreground">
               Entries are append-only; delivery releases and refund reversals create new linked

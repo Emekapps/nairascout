@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, or } from 'drizzle-orm';
 import {
   AncestorNode,
   CommissionBreakdown,
@@ -55,7 +55,9 @@ import {
   auditLogs,
   capabilityRestrictions,
   governanceAppeals,
+  listingCategories,
   makerCheckerRequests,
+  nigerianStates,
   platformAdminRoles,
   referralAncestry,
   scoutProfiles,
@@ -77,6 +79,11 @@ import {
   productReferralEvents,
   supportCases,
 } from './db/commerce-schema';
+import {
+  DEFAULT_LISTING_CATEGORIES_SEED,
+  NIGERIAN_STATES_SEED,
+  slugifyCategoryName,
+} from './constants/nigeria-and-categories';
 import {
   SELLER_PLANS,
   SellerPlanId,
@@ -432,6 +439,22 @@ export interface ActiveScoutDTO {
   closureAssessment: ClosureAssessmentDTO;
 }
 
+export interface NigerianStateDTO {
+  code: string;
+  name: string;
+  geoZone: string;
+}
+
+export interface ListingCategoryDTO {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+}
+
 export interface NairaScoutSnapshot {
   authenticated: boolean;
   dbConfigured: boolean;
@@ -463,6 +486,8 @@ export interface NairaScoutSnapshot {
   notifications: PlatformNotification[];
   supportCases: SupportCase[];
   allScoutsDirectory: PublicScoutProfileDTO[];
+  states: NigerianStateDTO[];
+  categories: ListingCategoryDTO[];
 }
 
 // ============================================================================
@@ -975,6 +1000,98 @@ export async function ensureUserProvisionedInDb(
 // SNAPSHOT BUILDER (100% POSTGRESQL VIA DRIZZLE ORM)
 // ============================================================================
 
+export async function getNigerianStates(): Promise<NigerianStateDTO[]> {
+  const db = getDb();
+  if (!db) {
+    return NIGERIAN_STATES_SEED.map((s) => ({ ...s }));
+  }
+  await ensureTablesReady(db);
+  const rows = await db
+    .select()
+    .from(nigerianStates)
+    .orderBy(asc(nigerianStates.name));
+
+  if (rows.length === 0) {
+    return NIGERIAN_STATES_SEED.map((s) => ({ ...s }));
+  }
+  return rows.map((r) => ({
+    code: r.code,
+    name: r.name,
+    geoZone: r.geoZone,
+  }));
+}
+
+export async function getListingCategories(options?: {
+  includeInactive?: boolean;
+}): Promise<ListingCategoryDTO[]> {
+  const includeInactive = options?.includeInactive === true;
+  const db = getDb();
+  if (!db) {
+    return DEFAULT_LISTING_CATEGORIES_SEED.map((c, idx) => ({
+      id: `default-${idx + 1}`,
+      name: c.name,
+      slug: c.slug,
+      description: c.description ?? null,
+      isActive: c.isActive ?? true,
+      sortOrder: c.sortOrder,
+      createdAt: new Date(0).toISOString(),
+    }));
+  }
+  await ensureTablesReady(db);
+  const rows = includeInactive
+    ? await db
+        .select()
+        .from(listingCategories)
+        .orderBy(asc(listingCategories.sortOrder), asc(listingCategories.name))
+    : await db
+        .select()
+        .from(listingCategories)
+        .where(eq(listingCategories.isActive, true))
+        .orderBy(asc(listingCategories.sortOrder), asc(listingCategories.name));
+
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    slug: r.slug,
+    description: r.description ?? null,
+    isActive: r.isActive,
+    sortOrder: r.sortOrder,
+    createdAt: r.createdAt.toISOString(),
+  }));
+}
+
+export async function checkUsernameAvailability(rawUsername: string): Promise<{
+  available: boolean;
+  normalized: string;
+  reason?: string;
+}> {
+  const trimmed = rawUsername.trim().toLowerCase();
+  if (!trimmed) {
+    return { available: false, normalized: '', reason: 'Enter a username.' };
+  }
+  if (!/^[a-z0-9_]{3,24}$/.test(trimmed)) {
+    return {
+      available: false,
+      normalized: trimmed,
+      reason: 'Use 3–24 lowercase letters, numbers, or underscores.',
+    };
+  }
+  const db = getDb();
+  if (!db) {
+    return { available: true, normalized: trimmed };
+  }
+  const existing = await db
+    .select({ userId: scoutProfiles.userId })
+    .from(scoutProfiles)
+    .where(eq(scoutProfiles.username, trimmed))
+    .limit(1);
+
+  if (existing.length > 0) {
+    return { available: false, normalized: trimmed, reason: 'This username is already taken.' };
+  }
+  return { available: true, normalized: trimmed };
+}
+
 export async function getNairaScoutSnapshot(
   viewerUserId: string | null,
   referralEventQuery?: string | null
@@ -1015,10 +1132,25 @@ export async function getNairaScoutSnapshot(
       notifications: [],
       supportCases: [],
       allScoutsDirectory: [],
+      states: NIGERIAN_STATES_SEED.map((s) => ({ ...s })),
+      categories: DEFAULT_LISTING_CATEGORIES_SEED.map((c, idx) => ({
+        id: `default-${idx + 1}`,
+        name: c.name,
+        slug: c.slug,
+        description: c.description ?? null,
+        isActive: true,
+        sortOrder: c.sortOrder,
+        createdAt: new Date(0).toISOString(),
+      })),
     };
   }
 
   await ensureTablesReady(db);
+
+  const [statesList, activeCategoriesList] = await Promise.all([
+    getNigerianStates(),
+    getListingCategories({ includeInactive: false }),
+  ]);
 
   const allSellers = await db.select().from(sellerProfiles);
   const sellerById = new Map(allSellers.map((s) => [s.id, s]));
@@ -1137,6 +1269,8 @@ export async function getNairaScoutSnapshot(
       notifications: [],
       supportCases: [],
       allScoutsDirectory: [],
+      states: statesList,
+      categories: activeCategoriesList,
     };
   }
 
@@ -1633,6 +1767,8 @@ export async function getNairaScoutSnapshot(
       createdAt: c.createdAt.toISOString(),
     })),
     allScoutsDirectory,
+    states: statesList,
+    categories: activeCategoriesList,
   };
 }
 
@@ -3678,6 +3814,7 @@ export async function getAdminConsoleSnapshot(actorUserId: string) {
       reason: l.reason,
       createdAt: l.createdAt.toISOString(),
     })),
+    categories: await getListingCategories({ includeInactive: true }),
   };
 }
 
@@ -4492,4 +4629,222 @@ export async function submitSupportCaseForActor(
     status: created.status as SupportCase['status'],
     createdAt: created.createdAt.toISOString(),
   };
+}
+
+export async function adminCreateListingCategory(
+  actorUserId: string,
+  input: {
+    name: string;
+    description?: string | null;
+    isActive?: boolean;
+    sortOrder?: number;
+  }
+): Promise<ListingCategoryDTO> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAdminRole(ctx, ['SUPER_ADMIN']);
+
+  const name = input.name.trim();
+  if (name.length < 2 || name.length > 64) {
+    throw new AuthorizationError(
+      'Category name must be between 2 and 64 characters.',
+      400,
+      'INVALID_CATEGORY_NAME'
+    );
+  }
+
+  const baseSlug = slugifyCategoryName(name);
+  if (!baseSlug) {
+    throw new AuthorizationError('Category name must include letters or numbers.', 400, 'INVALID_SLUG');
+  }
+
+  const description = input.description?.trim() ? input.description.trim() : null;
+  const isActive = input.isActive !== false;
+  const sortOrder = Number.isFinite(input.sortOrder) ? Number(input.sortOrder) : 0;
+
+  return db.transaction(async (tx) => {
+    const existing = await tx
+      .select({ id: listingCategories.id })
+      .from(listingCategories)
+      .where(or(eq(listingCategories.name, name), eq(listingCategories.slug, baseSlug)))
+      .limit(1);
+
+    if (existing.length > 0) {
+      throw new AuthorizationError(
+        `A listing category named "${name}" already exists.`,
+        409,
+        'CATEGORY_ALREADY_EXISTS'
+      );
+    }
+
+    const [created] = await tx
+      .insert(listingCategories)
+      .values({
+        name,
+        slug: baseSlug,
+        description,
+        isActive,
+        sortOrder,
+        createdBy: actorUserId,
+      })
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: actorUserId,
+      action: 'CREATE_LISTING_CATEGORY',
+      entityType: 'listing_category',
+      entityId: created.id,
+      previousValue: null,
+      newValue: {
+        name: created.name,
+        slug: created.slug,
+        isActive: created.isActive,
+        sortOrder: created.sortOrder,
+      },
+      reason: `Super Admin added listing category "${created.name}"`,
+    });
+
+    return {
+      id: created.id,
+      name: created.name,
+      slug: created.slug,
+      description: created.description ?? null,
+      isActive: created.isActive,
+      sortOrder: created.sortOrder,
+      createdAt: created.createdAt.toISOString(),
+    };
+  });
+}
+
+export async function adminUpdateListingCategory(
+  actorUserId: string,
+  input: {
+    id: string;
+    name?: string;
+    description?: string | null;
+    isActive?: boolean;
+    sortOrder?: number;
+  }
+): Promise<ListingCategoryDTO> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAdminRole(ctx, ['SUPER_ADMIN']);
+
+  if (!isUuid(input.id)) {
+    throw new AuthorizationError('Invalid listing category ID.', 400, 'INVALID_CATEGORY_ID');
+  }
+
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .select()
+      .from(listingCategories)
+      .where(eq(listingCategories.id, input.id))
+      .limit(1);
+    const current = rows[0];
+    if (!current) {
+      throw new AuthorizationError('Listing category not found.', 404, 'CATEGORY_NOT_FOUND');
+    }
+
+    let nextName = current.name;
+    let nextSlug = current.slug;
+    if (typeof input.name === 'string') {
+      const trimmed = input.name.trim();
+      if (trimmed.length < 2 || trimmed.length > 64) {
+        throw new AuthorizationError(
+          'Category name must be between 2 and 64 characters.',
+          400,
+          'INVALID_CATEGORY_NAME'
+        );
+      }
+      const candidateSlug = slugifyCategoryName(trimmed);
+      if (!candidateSlug) {
+        throw new AuthorizationError('Category name must include letters or numbers.', 400, 'INVALID_SLUG');
+      }
+      if (trimmed !== current.name || candidateSlug !== current.slug) {
+        const conflict = await tx
+          .select({ id: listingCategories.id })
+          .from(listingCategories)
+          .where(or(eq(listingCategories.name, trimmed), eq(listingCategories.slug, candidateSlug)))
+          .limit(1);
+        if (conflict[0] && conflict[0].id !== current.id) {
+          throw new AuthorizationError(
+            `Another category already uses "${trimmed}".`,
+            409,
+            'CATEGORY_ALREADY_EXISTS'
+          );
+        }
+      }
+      nextName = trimmed;
+      nextSlug = candidateSlug;
+    }
+
+    const nextDescription =
+      input.description !== undefined
+        ? input.description?.trim() || null
+        : current.description;
+    const nextIsActive =
+      typeof input.isActive === 'boolean' ? input.isActive : current.isActive;
+    const nextSortOrder =
+      typeof input.sortOrder === 'number' && Number.isFinite(input.sortOrder)
+        ? input.sortOrder
+        : current.sortOrder;
+
+    const [updated] = await tx
+      .update(listingCategories)
+      .set({
+        name: nextName,
+        slug: nextSlug,
+        description: nextDescription,
+        isActive: nextIsActive,
+        sortOrder: nextSortOrder,
+      })
+      .where(eq(listingCategories.id, current.id))
+      .returning();
+
+    const toggledOnly =
+      nextName === current.name &&
+      nextDescription === current.description &&
+      nextSortOrder === current.sortOrder &&
+      nextIsActive !== current.isActive;
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: actorUserId,
+      action: toggledOnly ? 'TOGGLE_LISTING_CATEGORY' : 'UPDATE_LISTING_CATEGORY',
+      entityType: 'listing_category',
+      entityId: updated.id,
+      previousValue: {
+        name: current.name,
+        slug: current.slug,
+        description: current.description,
+        isActive: current.isActive,
+        sortOrder: current.sortOrder,
+      },
+      newValue: {
+        name: updated.name,
+        slug: updated.slug,
+        description: updated.description,
+        isActive: updated.isActive,
+        sortOrder: updated.sortOrder,
+      },
+      reason: toggledOnly
+        ? `Super Admin ${updated.isActive ? 'activated' : 'deactivated'} category "${updated.name}"`
+        : `Super Admin updated listing category "${updated.name}"`,
+    });
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      slug: updated.slug,
+      description: updated.description ?? null,
+      isActive: updated.isActive,
+      sortOrder: updated.sortOrder,
+      createdAt: updated.createdAt.toISOString(),
+    };
+  });
 }

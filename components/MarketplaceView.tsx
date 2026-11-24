@@ -3,6 +3,10 @@
 import { Fragment, useMemo, useState } from 'react';
 import { MapPin, Search, Share2, ShoppingBag, X } from 'lucide-react';
 import type { NairaScoutSnapshot, ProductListing } from '@/lib/nairascout-store';
+import {
+  DEFAULT_LISTING_CATEGORIES_SEED,
+  NIGERIAN_STATES_SEED,
+} from '@/lib/constants/nigeria-and-categories';
 import { formatWholeNaira } from '@/lib/commission-engine';
 import ProductImage from './ProductImage';
 import { ProductCard } from './marketplace/ProductCard';
@@ -35,14 +39,24 @@ export default function MarketplaceView({
   const setSearchQuery = onExternalSearchChange ?? setLocalSearchQuery;
 
   const categories = useMemo(() => {
-    const cats = Array.from(new Set(snapshot.products.map((p) => p.category)));
+    const activeFromDb =
+      snapshot.categories && snapshot.categories.length > 0
+        ? snapshot.categories.filter((c) => c.isActive).map((c) => c.name)
+        : DEFAULT_LISTING_CATEGORIES_SEED.map((c) => c.name);
+    const productCats = snapshot.products.map((p) => p.category);
+    const cats = Array.from(new Set([...activeFromDb, ...productCats]));
     return ['All', ...cats];
-  }, [snapshot.products]);
+  }, [snapshot.categories, snapshot.products]);
 
   const cities = useMemo(() => {
-    const c = Array.from(new Set(snapshot.products.map((p) => p.sellerCity)));
-    return ['All', ...c];
-  }, [snapshot.products]);
+    const dbStates =
+      snapshot.states && snapshot.states.length > 0
+        ? snapshot.states.map((s) => s.name)
+        : NIGERIAN_STATES_SEED.map((s) => s.name);
+    const productCities = snapshot.products.map((p) => p.sellerCity).filter(Boolean);
+    const merged = Array.from(new Set([...dbStates, ...productCities]));
+    return ['All', ...merged];
+  }, [snapshot.states, snapshot.products]);
 
   const filteredProducts = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -143,12 +157,12 @@ export default function MarketplaceView({
             <div className="bg-card border border-border rounded-2xl p-12 text-center">
               <p className="font-sans text-lg font-semibold text-foreground">
                 {snapshot.products.length === 0
-                  ? 'No published marketplace listings yet'
+                  ? 'No published listings yet'
                   : 'No matching products found'}
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
                 {snapshot.products.length === 0
-                  ? 'Verified Sellers can create draft listings and publish them to the live PostgreSQL catalogue from Seller Hub.'
+                  ? 'Verified Sellers can create product listings, save them as draft, and publish them to the live marketplace from the Seller Hub'
                   : 'Try clearing your search query or switching back to all categories.'}
               </p>
               {snapshot.products.length > 0 && (

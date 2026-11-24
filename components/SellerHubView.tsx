@@ -17,6 +17,7 @@ import type {
   SellerPlanId,
 } from '@/lib/nairascout-store';
 import { SELLER_PLANS, SELLER_TEAM_ROLE_LABELS } from '@/lib/seller-plans';
+import { DEFAULT_LISTING_CATEGORIES_SEED } from '@/lib/constants/nigeria-and-categories';
 import { formatKoboToNaira, formatWholeNaira } from '@/lib/commission-engine';
 import { UserIdentityRow } from './shared/UserIdentityRow';
 import type { SellerTeamPermissions } from '@/lib/db/schema';
@@ -65,9 +66,15 @@ export default function SellerHubView({
 }: SellerHubViewProps) {
   const [subTab, setSubTab] = useState<'operations' | 'plans' | 'team'>('operations');
 
+  const activeCategoryNames =
+    snapshot.categories && snapshot.categories.length > 0
+      ? snapshot.categories.filter((c) => c.isActive).map((c) => c.name)
+      : DEFAULT_LISTING_CATEGORIES_SEED.map((c) => c.name);
+  const defaultCategory = activeCategoryNames[0] || 'Fashion & Apparel';
+
   // Draft listing form
   const [title, setTitle] = useState('');
-  const [category, setCategory] = useState('Kitchen & Pantry');
+  const [category, setCategory] = useState(defaultCategory);
   const [priceNaira, setPriceNaira] = useState('18500');
   const [deliveryFeeNaira, setDeliveryFeeNaira] = useState('2500');
   const [stock, setStock] = useState('10');
@@ -79,7 +86,7 @@ export default function SellerHubView({
   const [sellerType, setSellerType] = useState<'INDIVIDUAL' | 'BUSINESS'>('INDIVIDUAL');
   const [sellerName, setSellerName] = useState('');
   const [sellerDesc, setSellerDesc] = useState('');
-  const [bizCat, setBizCat] = useState('Home & Craft');
+  const [bizCat, setBizCat] = useState(defaultCategory);
   const [bizReg, setBizReg] = useState('');
   const [bizAddr, setBizAddr] = useState('');
   const [docFilename, setDocFilename] = useState('gov-id-nin.pdf');
@@ -269,11 +276,11 @@ export default function SellerHubView({
                     onChange={(e) => setBizCat(e.target.value)}
                     className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                   >
-                    <option value="Home & Craft">Home &amp; Craft</option>
-                    <option value="Kitchen & Pantry">Kitchen &amp; Pantry</option>
-                    <option value="Audio & Tech">Audio &amp; Tech</option>
-                    <option value="Beauty & Botanicals">Beauty &amp; Botanicals</option>
-                    <option value="Fashion & Leather">Fashion &amp; Leather</option>
+                    {activeCategoryNames.map((catName) => (
+                      <option key={catName} value={catName}>
+                        {catName}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 {sellerType === 'BUSINESS' && (
@@ -801,11 +808,11 @@ export default function SellerHubView({
                       onChange={(e) => setCategory(e.target.value)}
                       className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground focus:outline-none focus:border-ring"
                     >
-                      <option value="Home & Craft">Home &amp; Craft</option>
-                      <option value="Kitchen & Pantry">Kitchen &amp; Pantry</option>
-                      <option value="Audio & Tech">Audio &amp; Tech</option>
-                      <option value="Beauty & Botanicals">Beauty &amp; Botanicals</option>
-                      <option value="Fashion & Leather">Fashion &amp; Leather</option>
+                      {activeCategoryNames.map((catName) => (
+                        <option key={catName} value={catName}>
+                          {catName}
+                        </option>
+                      ))}
                     </select>
                   </div>
                   <div>

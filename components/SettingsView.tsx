@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -16,9 +16,15 @@ import {
 } from 'lucide-react';
 import type {
   InvitationPolicy,
+  ListingCategoryDTO,
   NairaScoutSnapshot,
+  NigerianStateDTO,
   VerificationCategory,
 } from '@/lib/nairascout-store';
+import {
+  DEFAULT_LISTING_CATEGORIES_SEED,
+  NIGERIAN_STATES_SEED,
+} from '@/lib/constants/nigeria-and-categories';
 import { formatKoboToNaira } from '@/lib/commission-engine';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { UserAvatar } from './shared/UserAvatar';
@@ -30,14 +36,6 @@ interface SettingsViewProps {
 }
 
 type SettingsTab = 'profile' | 'privacy' | 'verification' | 'lifecycle';
-
-const CATEGORIES = [
-  'Home & Craft',
-  'Kitchen & Pantry',
-  'Audio & Tech',
-  'Beauty & Botanicals',
-  'Fashion & Leather',
-];
 
 export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
   const router = useRouter();
@@ -83,6 +81,57 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
     label: string;
   } | null>(null);
   const [appealReason, setAppealReason] = useState('');
+
+  const [liveCategories, setLiveCategories] = useState<ListingCategoryDTO[]>(
+    initialSnapshot.categories ?? []
+  );
+  const [liveStates, setLiveStates] = useState<NigerianStateDTO[]>(
+    initialSnapshot.states && initialSnapshot.states.length > 0
+      ? initialSnapshot.states
+      : NIGERIAN_STATES_SEED
+  );
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/categories', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && Array.isArray(data?.categories)) {
+          setLiveCategories(data.categories);
+        }
+      })
+      .catch(() => {});
+
+    fetch('/api/states', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && Array.isArray(data?.states) && data.states.length > 0) {
+          setLiveStates(data.states);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const availableCategoryNames = useMemo(() => {
+    const activeNames =
+      liveCategories.length > 0
+        ? liveCategories.filter((c) => c.isActive).map((c) => c.name)
+        : DEFAULT_LISTING_CATEGORIES_SEED.map((c) => c.name);
+    const merged = new Set([...activeNames, ...preferredCategories]);
+    return Array.from(merged);
+  }, [liveCategories, preferredCategories]);
+
+  const availableStates = useMemo(() => {
+    const base = liveStates.length > 0 ? liveStates : NIGERIAN_STATES_SEED;
+    if (locationState && !base.some((s) => s.name === locationState)) {
+      return [...base, { code: 'CUSTOM', name: locationState, geoZone: 'Nigeria' }];
+    }
+    return base;
+  }, [liveStates, locationState]);
 
   if (!snapshot.authenticated || !scout) {
     return (
@@ -354,9 +403,16 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
             <h1 className="font-sans text-2xl md:text-3xl font-bold text-foreground">
               Account Settings
             </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Primary Identity: <span className="font-sans">{scout.email}</span> · Account Status:{' '}
-              <strong className="font-sans text-foreground">{scout.accountStatus}</strong>
+            <p className="mt-1 text-sm text-muted-foreground flex flex-wrap items-center gap-1.5">
+              <span className="font-sans">{scout.email}</span>
+              <span aria-hidden="true">·</span>
+              <span>Account Status:</span>
+              <span className="inline-flex items-center gap-1.5 font-sans font-semibold text-foreground">
+                {scout.accountStatus === 'ACTIVE' && (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" aria-hidden="true" />
+                )}
+                <span>{scout.accountStatus}</span>
+              </span>
             </p>
           </div>
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1 snap-x">
@@ -440,7 +496,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                     Profile Photo
                   </p>
                   <p className="font-sans text-xs text-muted-foreground">
-                    JPG, PNG, or WebP up to 5 MB. Shown across Scouts List, Referrals, and Mobile Navigation.
+                    JPG, PNG, or WebP up to 5 MB.
                   </p>
                 </div>
                 <input
@@ -512,15 +568,24 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                <label
+                  htmlFor="settings-location-state"
+                  className="block text-xs font-medium text-muted-foreground mb-1"
+                >
                   Location State
                 </label>
-                <input
-                  type="text"
+                <select
+                  id="settings-location-state"
                   value={locationState}
                   onChange={(e) => setLocationState(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
-                />
+                  className="w-full pl-3.5 pr-10 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
+                >
+                  {availableStates.map((st) => (
+                    <option key={st.code + st.name} value={st.name}>
+                      {st.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">
@@ -554,7 +619,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
             <div>
               <p className="text-xs font-medium text-muted-foreground mb-2">Preferred Categories</p>
               <div className="flex flex-wrap gap-2">
-                {CATEGORIES.map((cat) => {
+                {availableCategoryNames.map((cat) => {
                   const active = preferredCategories.includes(cat);
                   return (
                     <button

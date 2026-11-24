@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const listing = await createSellerDraftListing(identity.userId, {
       title: String(body.title || ''),
-      category: String(body.category || 'Home & Craft'),
+      category: String(body.category || 'Fashion & Apparel'),
       priceNaira: Number(body.priceNaira || 0),
       deliveryFeeNaira: Number(body.deliveryFeeNaira || 0),
       stock: Number(body.stock || 1),
