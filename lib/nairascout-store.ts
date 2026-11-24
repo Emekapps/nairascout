@@ -3008,6 +3008,57 @@ export async function updateProfileAndPrivacy(
     .where(eq(scoutProfiles.userId, actorUserId));
 }
 
+export async function updateScoutAvatarForActor(
+  actorUserId: string,
+  nextAvatarUrl: string | null
+): Promise<{ previousAvatarUrl: string | null }> {
+  const db = requireDb();
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAccountOperational(ctx);
+
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .select({
+        userId: scoutProfiles.userId,
+        avatarUrl: scoutProfiles.avatarUrl,
+      })
+      .from(scoutProfiles)
+      .where(eq(scoutProfiles.userId, actorUserId))
+      .limit(1);
+
+    const scout = rows[0];
+    if (!scout) {
+      throw new AuthorizationError('Scout profile not found.', 404, 'NOT_FOUND');
+    }
+
+    const previousAvatarUrl = scout.avatarUrl ?? null;
+
+    await tx
+      .update(scoutProfiles)
+      .set({
+        avatarUrl: nextAvatarUrl,
+        updatedAt: new Date(),
+      })
+      .where(eq(scoutProfiles.userId, actorUserId));
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: actorUserId,
+      action: nextAvatarUrl ? 'AVATAR_UPDATED' : 'AVATAR_REMOVED',
+      entityType: 'scout_profile',
+      entityId: actorUserId,
+      previousValue: { avatarUrl: previousAvatarUrl },
+      newValue: { avatarUrl: nextAvatarUrl },
+      reason: nextAvatarUrl
+        ? 'User uploaded profile avatar to Supabase Storage avatars bucket'
+        : 'User removed profile avatar',
+    });
+
+    return { previousAvatarUrl };
+  });
+}
+
 export async function submitVerificationEvidence(
   actorUserId: string,
   input: {

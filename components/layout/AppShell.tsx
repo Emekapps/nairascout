@@ -59,8 +59,6 @@ export function AppShell({
           onOpenGuide={onOpenGuide}
           notifications={notifications}
           authenticated={authenticated}
-          activeScout={activeScout}
-          onLogout={onLogout}
         />
 
         {banners}

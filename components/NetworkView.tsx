@@ -226,9 +226,9 @@ export default function NetworkView({
             </div>
           </div>
         ) : (
-          <div className="space-y-10">
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 border-b border-border pb-8">
-              <div>
+          <div className="space-y-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
                 <p className="text-xs text-muted-foreground">Permanent Direct Referrer (Gen 1)</p>
                 <p className="mt-1 font-sans text-lg font-semibold text-foreground">
                   {snapshot.upstreamAncestry[0]
@@ -241,21 +241,21 @@ export default function NetworkView({
                     : 'No direct referrer'}
                 </p>
               </div>
-              <div>
+              <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
                 <p className="text-xs text-muted-foreground">Upstream Ancestry Depth</p>
                 <p className="mt-1 font-numeric text-2xl font-bold text-foreground tabular-nums">
                   {snapshot.upstreamAncestry.length} / 13
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">Locked at registration</p>
               </div>
-              <div>
+              <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
                 <p className="text-xs text-muted-foreground">Direct Downstream Scouts (Gen 1)</p>
                 <p className="mt-1 font-numeric text-2xl font-bold text-foreground tabular-nums">
                   {directGen1Count}
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">Zero recruitment fees paid</p>
               </div>
-              <div>
+              <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
                 <p className="text-xs text-muted-foreground">Total 13-Gen Network Reach</p>
                 <p className="mt-1 font-numeric text-2xl font-bold text-success tabular-nums">
                   {totalNetworkScouts}
@@ -268,15 +268,15 @@ export default function NetworkView({
               <div className="lg:col-span-7 space-y-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <h2 className="font-sans text-lg font-bold text-foreground">
-                    Downstream Network by Generation (Gen 1–13)
+                    Downstream Network (Gen 1-13)
                   </h2>
                   <span className="text-xs text-muted-foreground">
                     Your position above downstream Seller Scouts
                   </span>
                 </div>
 
-                <div className="bg-card border border-border rounded-2xl overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-sm">
+                <div className="bg-card border border-border rounded-2xl w-full overflow-x-auto">
+                  <table className="w-full min-w-[540px] text-left border-collapse text-sm">
                     <thead>
                       <tr className="border-b border-border text-xs text-muted-foreground">
                         <th className="py-3 px-4 font-medium">Generation</th>
@@ -407,9 +407,9 @@ export default function NetworkView({
             {/* Left: Active Contacts & Sanitized Scout Directory Search */}
             <div className="lg:col-span-7 space-y-8">
               <section className="space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
                   <h2 className="font-sans text-lg font-bold text-foreground">
-                    Active Scouts List Contacts
+                    Scouts List
                   </h2>
                   <span className="text-xs text-muted-foreground">
                     INVITE is separate from product REFER
@@ -502,7 +502,7 @@ export default function NetworkView({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <h2 className="font-sans text-lg font-bold text-foreground">
-                      Discover Scouts (Sanitized Directory)
+                      Invite
                     </h2>
                     <p className="text-xs text-muted-foreground">
                       Emails, phone numbers, and wallet balances are never exposed in directory
@@ -788,14 +788,24 @@ export default function NetworkView({
                 )}
               </div>
 
-              <div className="bg-card border border-border rounded-2xl p-5 space-y-2">
+              <div className="bg-card border border-border rounded-2xl p-5 space-y-3">
                 <p className="text-xs font-semibold text-foreground">
                   Your Privacy &amp; Block Controls
                 </p>
-                <p className="text-xs text-muted-foreground">
-                  Invitation policy: <strong className="text-foreground">{snapshot.activeScout?.invitePolicy}</strong> · Blocked
-                  users: <strong className="font-numeric text-foreground">{snapshot.blockedUsers.length}</strong>
-                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-[11px] text-muted-foreground">Invitation policy</p>
+                    <p className="text-xs font-semibold text-foreground mt-0.5">
+                      {snapshot.activeScout?.invitePolicy}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-muted-foreground">Blocked users</p>
+                    <p className="font-numeric text-xs font-semibold text-foreground mt-0.5 tabular-nums">
+                      {snapshot.blockedUsers.length}
+                    </p>
+                  </div>
+                </div>
                 <Link
                   href="/settings"
                   className="inline-block text-xs font-semibold text-foreground hover:underline"
@@ -820,7 +830,7 @@ export default function NetworkView({
 
             <div className="space-y-2">
               <label htmlFor="sim-merch" className="block text-xs font-medium text-muted-foreground">
-                Eligible Merchandise Revenue (₦, excl. delivery &amp; tax)
+                Eligible Revenue (₦). *Excluding delivery &amp; tax
               </label>
               <input
                 id="sim-merch"
@@ -928,27 +938,27 @@ export default function NetworkView({
           <div className="lg:col-span-7 space-y-5">
             {simResult && (
               <>
-                <div className="bg-card border border-border rounded-2xl p-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  <div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
                     <p className="text-xs text-muted-foreground">Seller Proceeds (90%)</p>
                     <p className="mt-1 font-numeric text-base font-bold text-foreground tabular-nums">
                       {formatKoboToNaira(simResult.sellerProceedsKobo)}
                     </p>
                   </div>
-                  <div>
+                  <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
                     <p className="text-xs text-muted-foreground">NairaScout Fee (10%)</p>
                     <p className="mt-1 font-numeric text-base font-bold text-foreground tabular-nums">
                       {formatKoboToNaira(simResult.marketplaceCommissionKobo)}
                     </p>
                   </div>
-                  <div>
+                  <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
                     <p className="text-xs text-muted-foreground">20% Referral Pool</p>
                     <p className="mt-1 font-numeric text-base font-bold text-success tabular-nums">
                       {formatKoboToNaira(simResult.referralPoolKobo)}
                     </p>
                   </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Undistributed Retained</p>
+                  <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
+                    <p className="text-xs text-muted-foreground">Retained (Undistributed)</p>
                     <p className="mt-1 font-numeric text-base font-bold text-muted-foreground tabular-nums">
                       {formatKoboToNaira(simResult.undistributedRetainedKobo)}
                     </p>
@@ -958,11 +968,13 @@ export default function NetworkView({
                 <div className="bg-card border border-border rounded-2xl overflow-hidden">
                   <div className="px-5 py-3.5 border-b border-border flex items-center justify-between text-xs">
                     <span className="font-semibold text-foreground">
-                      {simResult.scheduleName}
+                      {simResult.scheduleName === 'Extended 4–13 Generation Schedule'
+                        ? '13 Generation Schedule'
+                        : simResult.scheduleName}
                     </span>
-                    <span className="font-numeric text-muted-foreground">
-                      {simLoading ? 'Calculating...' : `Engine ${simResult.ruleVersion}`}
-                    </span>
+                    {simLoading && (
+                      <span className="font-numeric text-muted-foreground">Calculating...</span>
+                    )}
                   </div>
 
                   {simResult.allocations.length === 0 ? (
@@ -971,50 +983,52 @@ export default function NetworkView({
                       generation commissions.
                     </div>
                   ) : (
-                    <table className="w-full text-left border-collapse text-sm">
-                      <thead>
-                        <tr className="border-b border-border text-xs text-muted-foreground">
-                          <th className="py-2.5 px-4 font-medium">Generation</th>
-                          <th className="py-2.5 px-4 font-medium">Fraction</th>
-                          <th className="py-2.5 px-4 font-medium">Eligibility</th>
-                          <th className="py-2.5 px-4 font-medium text-right">Allocation (₦)</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border">
-                        {simResult.allocations.map((row) => (
-                          <tr key={row.generation} className="hover:bg-muted/40">
-                            <td className="py-2.5 px-4 font-numeric text-xs font-semibold text-foreground">
-                              Gen {row.generation}
+                    <div className="w-full overflow-x-auto">
+                      <table className="w-full min-w-[540px] text-left border-collapse text-sm">
+                        <thead>
+                          <tr className="border-b border-border text-xs text-muted-foreground">
+                            <th className="py-2.5 px-4 font-medium">Generation</th>
+                            <th className="py-2.5 px-4 font-medium">Fraction</th>
+                            <th className="py-2.5 px-4 font-medium">Eligibility</th>
+                            <th className="py-2.5 px-4 font-medium text-right">Allocation (₦)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {simResult.allocations.map((row) => (
+                            <tr key={row.generation} className="hover:bg-muted/40">
+                              <td className="py-2.5 px-4 font-numeric text-xs font-semibold text-foreground">
+                                Gen {row.generation}
+                              </td>
+                              <td className="py-2.5 px-4 font-numeric text-xs text-muted-foreground">
+                                {row.fractionLabel}
+                              </td>
+                              <td className="py-2.5 px-4 text-xs">
+                                {row.eligible ? (
+                                  <span className="text-success font-medium">Eligible</span>
+                                ) : (
+                                  <span className="text-amber-600 dark:text-amber-400 font-medium">
+                                    Ineligible (Slot kept empty)
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-4 font-numeric text-right tabular-nums font-bold text-foreground">
+                                {formatKoboToNaira(row.amountKobo)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t border-border bg-muted/50 font-semibold">
+                            <td colSpan={3} className="py-3 px-4 text-xs text-foreground">
+                              Total Allocated to Eligible Scouts
                             </td>
-                            <td className="py-2.5 px-4 font-numeric text-xs text-muted-foreground">
-                              {row.fractionLabel}
-                            </td>
-                            <td className="py-2.5 px-4 text-xs">
-                              {row.eligible ? (
-                                <span className="text-success font-medium">Eligible</span>
-                              ) : (
-                                <span className="text-amber-600 dark:text-amber-400 font-medium">
-                                  Ineligible (Slot kept empty)
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-4 font-numeric text-right tabular-nums font-bold text-foreground">
-                              {formatKoboToNaira(row.amountKobo)}
+                            <td className="py-3 px-4 font-numeric text-right tabular-nums text-success">
+                              {formatKoboToNaira(simResult.totalAllocatedKobo)}
                             </td>
                           </tr>
-                        ))}
-                      </tbody>
-                      <tfoot>
-                        <tr className="border-t border-border bg-muted/50 font-semibold">
-                          <td colSpan={3} className="py-3 px-4 text-xs text-foreground">
-                            Total Allocated to Eligible Scouts
-                          </td>
-                          <td className="py-3 px-4 font-numeric text-right tabular-nums text-success">
-                            {formatKoboToNaira(simResult.totalAllocatedKobo)}
-                          </td>
-                        </tr>
-                      </tfoot>
-                    </table>
+                        </tfoot>
+                      </table>
+                    </div>
                   )}
                 </div>
               </>

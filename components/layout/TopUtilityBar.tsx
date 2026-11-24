@@ -2,19 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import {
-  Bell,
-  BookOpen,
-  LogIn,
-  LogOut,
-  Search,
-  Settings,
-  Shield,
-  X,
-} from 'lucide-react';
-import type { ActiveScoutDTO, PlatformNotification } from '@/lib/nairascout-store';
-import { UserAvatar } from '@/components/shared/UserAvatar';
-import { UserIdentityRow } from '@/components/shared/UserIdentityRow';
+import { Bell, LogIn, Search, X } from 'lucide-react';
+import type { PlatformNotification } from '@/lib/nairascout-store';
 import { ThemeToggle } from './ThemeToggle';
 
 interface TopUtilityBarProps {
@@ -25,8 +14,6 @@ interface TopUtilityBarProps {
   onOpenGuide: () => void;
   notifications: PlatformNotification[];
   authenticated: boolean;
-  activeScout: ActiveScoutDTO | null;
-  onLogout: () => Promise<void>;
 }
 
 export function TopUtilityBar({
@@ -37,10 +24,7 @@ export function TopUtilityBar({
   onOpenGuide,
   notifications,
   authenticated,
-  activeScout,
-  onLogout,
 }: TopUtilityBarProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const [noticesOpen, setNoticesOpen] = useState(false);
 
   return (
@@ -89,7 +73,7 @@ export function TopUtilityBar({
           )}
         </form>
 
-        {/* Right Utility Cluster */}
+        {/* Right Utility Cluster: Theme Toggle + Notifications (+ Desktop Sign In when logged out) */}
         <div className="flex items-center gap-2 shrink-0 ml-auto">
           <ThemeToggle />
 
@@ -97,10 +81,7 @@ export function TopUtilityBar({
           <div className="relative">
             <button
               type="button"
-              onClick={() => {
-                setNoticesOpen((prev) => !prev);
-                setMenuOpen(false);
-              }}
+              onClick={() => setNoticesOpen((prev) => !prev)}
               aria-label={`Notifications (${notifications.length})`}
               aria-expanded={noticesOpen}
               className="relative inline-flex items-center justify-center w-10 h-10 rounded-lg border border-border bg-card text-foreground hover:bg-muted transition-colors cursor-pointer"
@@ -153,101 +134,15 @@ export function TopUtilityBar({
             )}
           </div>
 
-          {/* Quick Profile / Sign In Menu */}
-          <div className="relative">
-            {authenticated && activeScout ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen((prev) => !prev);
-                    setNoticesOpen(false);
-                  }}
-                  aria-label={`Account menu for ${activeScout.displayName}`}
-                  title={activeScout.displayName}
-                  aria-expanded={menuOpen}
-                  className="inline-flex items-center justify-center rounded-full hover:ring-2 hover:ring-ring/40 focus-visible:outline-2 focus-visible:outline-ring transition-all cursor-pointer"
-                >
-                  <UserAvatar
-                    avatarUrl={activeScout.avatarUrl}
-                    displayName={activeScout.displayName}
-                    username={activeScout.handle}
-                    size="md"
-                  />
-                </button>
-
-                {menuOpen && (
-                  <div className="absolute right-0 mt-2 w-60 bg-popover text-popover-foreground border border-border rounded-xl shadow-lg py-1.5 z-50">
-                    <div className="px-3.5 py-2.5 border-b border-border space-y-1">
-                      <UserIdentityRow
-                        avatarUrl={activeScout.avatarUrl}
-                        displayName={activeScout.displayName}
-                        username={activeScout.handle}
-                        size="sm"
-                      />
-                      <p className="text-[11px] text-muted-foreground truncate pl-10">
-                        {activeScout.email}
-                      </p>
-                    </div>
-
-                    <Link
-                      href="/settings"
-                      onClick={() => setMenuOpen(false)}
-                      className="flex items-center gap-2 px-3.5 py-2 text-xs text-foreground hover:bg-muted"
-                    >
-                      <Settings className="w-3.5 h-3.5 text-muted-foreground" aria-hidden="true" />
-                      Account Settings
-                    </Link>
-
-                    {activeScout.adminRole && (
-                      <Link
-                        href="/admin"
-                        onClick={() => setMenuOpen(false)}
-                        className="flex items-center gap-2 px-3.5 py-2 text-xs text-foreground font-semibold hover:bg-muted"
-                      >
-                        <Shield className="w-3.5 h-3.5 text-success" aria-hidden="true" />
-                        Admin Console
-                      </Link>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        onOpenGuide();
-                      }}
-                      className="w-full flex items-center gap-2 px-3.5 py-2 text-xs text-foreground hover:bg-muted text-left cursor-pointer"
-                    >
-                      <BookOpen className="w-3.5 h-3.5 text-muted-foreground" aria-hidden="true" />
-                      Trust &amp; Guide
-                    </button>
-
-                    <div className="border-t border-border mt-1 pt-1">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          setMenuOpen(false);
-                          await onLogout();
-                        }}
-                        className="w-full flex items-center gap-2 px-3.5 py-2 text-xs text-destructive hover:bg-destructive/10 text-left cursor-pointer"
-                      >
-                        <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
-                        Sign Out
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : (
-              <Link
-                href="/auth/login"
-                className="inline-flex items-center gap-1.5 h-10 px-3.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-lg hover:bg-primary/90 transition-colors whitespace-nowrap"
-              >
-                <LogIn className="w-3.5 h-3.5" aria-hidden="true" />
-                Sign In
-              </Link>
-            )}
-          </div>
+          {!authenticated && (
+            <Link
+              href="/auth/login"
+              className="hidden md:inline-flex items-center gap-1.5 h-10 px-3.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-lg hover:bg-primary/90 transition-colors whitespace-nowrap"
+            >
+              <LogIn className="w-3.5 h-3.5" aria-hidden="true" />
+              Sign In
+            </Link>
+          )}
         </div>
       </div>
     </header>

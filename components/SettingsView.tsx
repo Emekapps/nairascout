@@ -1,12 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
   ArrowLeft,
+  Camera,
   CheckCircle2,
+  Loader2,
   Lock,
   ShieldCheck,
   Trash2,
@@ -19,6 +21,7 @@ import type {
 } from '@/lib/nairascout-store';
 import { formatKoboToNaira } from '@/lib/commission-engine';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { UserAvatar } from './shared/UserAvatar';
 import { UserIdentityRow } from './shared/UserIdentityRow';
 import { ThemeToggle } from './layout/ThemeToggle';
 
@@ -42,6 +45,8 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
   const [tab, setTab] = useState<SettingsTab>('profile');
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   const scout = snapshot.activeScout;
 
@@ -233,6 +238,94 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
     }
   };
 
+  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      setFeedback({ type: 'err', message: 'Only JPG, PNG, and WebP images are supported.' });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setFeedback({ type: 'err', message: 'Profile photo must be 5 MB or smaller.' });
+      return;
+    }
+
+    setAvatarBusy(true);
+    setFeedback(null);
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const { data: sessionData } = supabase
+        ? await supabase.auth.getSession()
+        : { data: { session: null } };
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const headers: Record<string, string> = {
+        'X-Requested-With': 'NairaScout',
+      };
+      if (sessionData.session?.access_token) {
+        headers.Authorization = `Bearer ${sessionData.session.access_token}`;
+      }
+
+      const res = await fetch('/api/profile/avatar', {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFeedback({ type: 'err', message: data.error || 'Could not upload profile photo.' });
+        return;
+      }
+      if (data.snapshot) setSnapshot(data.snapshot);
+      setFeedback({ type: 'ok', message: 'Profile photo updated.' });
+      router.refresh();
+    } catch {
+      setFeedback({ type: 'err', message: 'Network error while uploading profile photo.' });
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    setAvatarBusy(true);
+    setFeedback(null);
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const { data: sessionData } = supabase
+        ? await supabase.auth.getSession()
+        : { data: { session: null } };
+
+      const headers: Record<string, string> = {
+        'X-Requested-With': 'NairaScout',
+      };
+      if (sessionData.session?.access_token) {
+        headers.Authorization = `Bearer ${sessionData.session.access_token}`;
+      }
+
+      const res = await fetch('/api/profile/avatar', {
+        method: 'DELETE',
+        headers,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFeedback({ type: 'err', message: data.error || 'Could not remove profile photo.' });
+        return;
+      }
+      if (data.snapshot) setSnapshot(data.snapshot);
+      setFeedback({ type: 'ok', message: 'Profile photo removed.' });
+      router.refresh();
+    } catch {
+      setFeedback({ type: 'err', message: 'Network error while removing profile photo.' });
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
   const openOrdersCount = snapshot.orders.filter(
     (o) => o.fulfilmentStatus !== 'Delivered' && o.fulfilmentStatus !== 'Refunded'
   ).length;
@@ -331,6 +424,63 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
               <h2 className="font-sans text-lg font-bold text-foreground">
                 Public Scout Profile
               </h2>
+            </div>
+
+            {/* Supabase Profile Photo / Avatar Uploader */}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-xl border border-border bg-muted/40">
+              <UserAvatar
+                avatarUrl={scout.avatarUrl}
+                displayName={displayName || scout.displayName}
+                username={username || scout.handle}
+                size="xl"
+              />
+              <div className="flex-1 space-y-2">
+                <div>
+                  <p className="font-sans text-sm font-semibold text-foreground">
+                    Profile Photo
+                  </p>
+                  <p className="font-sans text-xs text-muted-foreground">
+                    JPG, PNG, or WebP up to 5 MB. Shown across Scouts List, Referrals, and Mobile Navigation.
+                  </p>
+                </div>
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handleAvatarFileChange}
+                  className="sr-only"
+                  aria-label="Upload profile photo"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={avatarBusy}
+                    onClick={() => avatarInputRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+                  >
+                    {avatarBusy ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Camera className="w-3.5 h-3.5" aria-hidden="true" />
+                    )}
+                    {avatarBusy
+                      ? 'Uploading...'
+                      : scout.avatarUrl
+                        ? 'Change Photo'
+                        : 'Upload Avatar'}
+                  </button>
+                  {scout.avatarUrl && (
+                    <button
+                      type="button"
+                      disabled={avatarBusy}
+                      onClick={handleRemoveAvatar}
+                      className="px-3.5 py-2 text-xs font-semibold text-destructive border border-destructive/30 rounded-xl hover:bg-destructive/10 disabled:opacity-50 cursor-pointer"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

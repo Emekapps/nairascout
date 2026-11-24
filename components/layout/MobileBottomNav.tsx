@@ -101,7 +101,29 @@ export function MobileBottomNav({
                 : 'text-muted-foreground font-medium'
             }`}
           >
-            <User className="w-5 h-5" aria-hidden="true" />
+            {authenticated && activeScout ? (
+              <UserAvatar
+                avatarUrl={activeScout.avatarUrl}
+                displayName={activeScout.displayName}
+                username={activeScout.handle}
+                size="xs"
+                className={
+                  activeTab === 'seller' || accountSheetOpen
+                    ? 'ring-2 ring-primary'
+                    : 'ring-1 ring-border'
+                }
+              />
+            ) : (
+              <span
+                className={`h-6 w-6 rounded-full bg-muted flex items-center justify-center border ${
+                  activeTab === 'seller' || accountSheetOpen
+                    ? 'border-primary ring-2 ring-primary'
+                    : 'border-border'
+                }`}
+              >
+                <User className="w-3.5 h-3.5 text-muted-foreground" aria-hidden="true" />
+              </span>
+            )}
             <span className="tracking-tight leading-none">Accounts</span>
           </button>
         </div>

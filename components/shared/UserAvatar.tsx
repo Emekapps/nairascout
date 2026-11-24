@@ -6,14 +6,16 @@ export interface UserAvatarProps {
   avatarUrl?: string | null;
   displayName: string;
   username?: string;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
   className?: string;
 }
 
 const SIZE_CLASSES: Record<NonNullable<UserAvatarProps['size']>, string> = {
+  xs: 'h-6 w-6 text-[10px]',
   sm: 'h-7 w-7 text-[10px]',
   md: 'h-9 w-9 text-xs',
   lg: 'h-11 w-11 text-sm',
+  xl: 'h-20 w-20 text-xl',
 };
 
 function getInitials(displayName: string, username?: string): string {

@@ -1,7 +1,8 @@
 'use client';
 
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Inbox, Send, ShoppingBag } from 'lucide-react';
+import { Inbox, Search, Send, ShoppingBag, X } from 'lucide-react';
 import type {
   NairaScoutSnapshot,
   ProductListing,
@@ -9,6 +10,7 @@ import type {
 } from '@/lib/nairascout-store';
 import { formatWholeNaira } from '@/lib/commission-engine';
 import ProductImage from './ProductImage';
+import { DismissibleNoticePanel } from './shared/DismissibleNoticePanel';
 
 interface ReferralsViewProps {
   snapshot: NairaScoutSnapshot;
@@ -21,65 +23,142 @@ export default function ReferralsView({
   onStartReferralCheckout,
   onOpenReferModal,
 }: ReferralsViewProps) {
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+
+  const filteredInbox = useMemo(() => {
+    if (!normalizedQuery) return snapshot.referralsInbox;
+    return snapshot.referralsInbox.filter((ev) => {
+      const product = snapshot.products.find((p) => p.id === ev.productListingId);
+      return (
+        ev.id.toLowerCase().includes(normalizedQuery) ||
+        ev.senderDisplayName.toLowerCase().includes(normalizedQuery) ||
+        ev.senderHandle.toLowerCase().includes(normalizedQuery) ||
+        ev.note.toLowerCase().includes(normalizedQuery) ||
+        (product?.title.toLowerCase().includes(normalizedQuery) ?? false) ||
+        (product?.sellerName.toLowerCase().includes(normalizedQuery) ?? false)
+      );
+    });
+  }, [snapshot.referralsInbox, snapshot.products, normalizedQuery]);
+
+  const filteredSent = useMemo(() => {
+    if (!normalizedQuery) return snapshot.sentReferrals;
+    return snapshot.sentReferrals.filter((ev) => {
+      const product = snapshot.products.find((p) => p.id === ev.productListingId);
+      return (
+        ev.id.toLowerCase().includes(normalizedQuery) ||
+        ev.recipientDisplayName.toLowerCase().includes(normalizedQuery) ||
+        ev.recipientHandle.toLowerCase().includes(normalizedQuery) ||
+        ev.ancestryPathSignature.toLowerCase().includes(normalizedQuery) ||
+        (product?.title.toLowerCase().includes(normalizedQuery) ?? false)
+      );
+    });
+  }, [snapshot.sentReferrals, snapshot.products, normalizedQuery]);
+
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-border pb-6">
-        <div>
-          <h1 className="font-sans text-2xl md:text-3xl font-bold tracking-tight text-foreground">
-            Product Referrals Inbox
-          </h1>
-          <p className="mt-1.5 text-sm text-muted-foreground max-w-2xl">
-            Every product referral card carries a unique referral-event identifier preserved through
-            registration, Email OTP verification, and checkout.
-          </p>
-        </div>
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-5">
+        <h1 className="font-sans text-xl md:text-2xl font-bold tracking-tight text-foreground">
+          Referrals
+        </h1>
         {snapshot.authenticated && (
           <Link
             href="/settings"
             className="text-xs font-semibold text-foreground hover:underline shrink-0"
           >
-            Manage Referral Mute &amp; Privacy →
+            Manage Privacy Settings →
           </Link>
         )}
       </div>
 
-      {/* Received Product Referral Cards */}
+      {/* Dismissible Notice Panel + Search Bar */}
+      <div className="space-y-4">
+        <DismissibleNoticePanel
+          storageKey="nairascout_referrals_inbox_notice_v1"
+          title="Product Referrals Inbox"
+          description="Every product referral card carries a unique referral-event identifier preserved through registration, Email OTP verification, and checkout."
+          ariaLabel="Product Referrals Inbox Notice"
+        />
+
+        <div className="relative">
+          <Search
+            className="w-4 h-4 text-muted-foreground absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+            aria-hidden="true"
+          />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search referral cards by product, scout, or event ID..."
+            aria-label="Search referrals inbox and sent cards"
+            className="w-full h-10 pl-10 pr-9 text-sm bg-card border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-ring"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              aria-label="Clear referral search"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Inbox */}
       <section className="space-y-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="font-sans text-lg md:text-xl font-bold text-foreground">
-            Received Product Referral Cards
+            Inbox
           </h2>
           <span className="text-xs text-muted-foreground">
             Selecting Buy here records Referral-Card Attribution
           </span>
         </div>
 
-        {snapshot.referralsInbox.length === 0 ? (
+        {filteredInbox.length === 0 ? (
           <div className="bg-card border border-border rounded-2xl p-10 text-center space-y-2">
             <Inbox className="w-7 h-7 text-muted-foreground mx-auto" aria-hidden="true" />
             <p className="font-sans text-base font-semibold text-foreground">
-              {snapshot.authenticated
-                ? 'No received product referrals yet'
-                : 'Sign in to view personal referral cards sent to your Scout account'}
+              {snapshot.referralsInbox.length > 0 && normalizedQuery
+                ? 'No matching referrals found'
+                : snapshot.authenticated
+                  ? 'No referrals inbox'
+                  : 'Sign in to view personal referral cards sent to your Scout account'}
             </p>
             <p className="text-sm text-muted-foreground">
-              When Scouts in your network refer a product to you or you open a referral link, it
-              appears here with its event ID.
+              {snapshot.referralsInbox.length > 0 && normalizedQuery
+                ? 'Try clearing your search query to view all referral cards.'
+                : 'When Scouts in your network refer a product to you or you open a referral link, it appears here with its event ID.'}
             </p>
-            {!snapshot.authenticated && (
+            {snapshot.referralsInbox.length > 0 && normalizedQuery ? (
               <div className="pt-2">
-                <Link
-                  href="/auth/login"
-                  className="inline-block px-4 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90"
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="px-4 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
                 >
-                  Sign In
-                </Link>
+                  Clear Search
+                </button>
               </div>
+            ) : (
+              !snapshot.authenticated && (
+                <div className="pt-2">
+                  <Link
+                    href="/auth/login"
+                    className="inline-block px-4 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90"
+                  >
+                    Sign In
+                  </Link>
+                </div>
+              )
             )}
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {snapshot.referralsInbox.map((refEvent) => {
+            {filteredInbox.map((refEvent) => {
               const product = snapshot.products.find((p) => p.id === refEvent.productListingId);
               if (!product) return null;
               const isConverted = refEvent.status === 'converted';
@@ -168,19 +247,21 @@ export default function ReferralsView({
         )}
       </section>
 
-      {/* Outgoing Sent Product Referrals */}
+      {/* Sent */}
       {snapshot.authenticated && (
         <section className="space-y-4">
           <h2 className="font-sans text-lg md:text-xl font-bold text-foreground">
-            Sent Product Referrals
+            Sent
           </h2>
           <div className="bg-card border border-border rounded-2xl overflow-x-auto">
-            {snapshot.sentReferrals.length === 0 ? (
+            {filteredSent.length === 0 ? (
               <div className="p-8 text-center text-sm text-muted-foreground">
-                You have not sent any product referral cards yet.
+                {snapshot.sentReferrals.length > 0 && normalizedQuery
+                  ? 'No matching sent referrals found.'
+                  : 'You have not sent any product referral cards yet.'}
               </div>
             ) : (
-              <table className="w-full text-left border-collapse text-sm">
+              <table className="w-full min-w-[540px] text-left border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-border text-xs text-muted-foreground">
                     <th className="py-3 px-4 font-medium">Event ID</th>
@@ -191,7 +272,7 @@ export default function ReferralsView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {snapshot.sentReferrals.map((ev) => {
+                  {filteredSent.map((ev) => {
                     const prod = snapshot.products.find((p) => p.id === ev.productListingId);
                     return (
                       <tr key={ev.id} className="hover:bg-muted/40">
