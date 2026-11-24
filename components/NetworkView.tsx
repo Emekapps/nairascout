@@ -23,6 +23,10 @@ import { UserIdentityRow } from './shared/UserIdentityRow';
 
 interface NetworkViewProps {
   snapshot: NairaScoutSnapshot;
+  externalSubTab?: 'explorer' | 'scouts_list' | 'simulator';
+  onExternalSubTabChange?: (tab: 'explorer' | 'scouts_list' | 'simulator') => void;
+  externalScoutSearch?: string;
+  onExternalScoutSearchChange?: (q: string) => void;
   onInviteScout: (targetScoutId: string) => Promise<void>;
   onRespondInvite: (invitationId: string, decision: 'accept' | 'reject' | 'withdraw') => Promise<void>;
   onManageContact: (payload: {
@@ -40,15 +44,25 @@ interface NetworkViewProps {
 
 export default function NetworkView({
   snapshot,
+  externalSubTab,
+  onExternalSubTabChange,
+  externalScoutSearch,
+  onExternalScoutSearchChange,
   onInviteScout,
   onRespondInvite,
   onManageContact,
   onReportAbuse,
   onOpenReferForProduct,
 }: NetworkViewProps) {
-  const [subTab, setSubTab] = useState<'explorer' | 'scouts_list' | 'simulator'>('explorer');
+  const [localSubTab, setLocalSubTab] = useState<'explorer' | 'scouts_list' | 'simulator'>('explorer');
   const [inviteSubTab, setInviteSubTab] = useState<'received' | 'sent'>('received');
-  const [scoutSearch, setScoutSearch] = useState('');
+  const [localScoutSearch, setLocalScoutSearch] = useState('');
+
+  const subTab = externalSubTab ?? localSubTab;
+  const setSubTab = onExternalSubTabChange ?? setLocalSubTab;
+  const scoutSearch = externalScoutSearch !== undefined ? externalScoutSearch : localScoutSearch;
+  const setScoutSearch = onExternalScoutSearchChange ?? setLocalScoutSearch;
+
   const [searchFocused, setSearchFocused] = useState(false);
   const searchDropdownRef = useRef<HTMLDivElement | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);

@@ -25,6 +25,7 @@ export async function POST(req: NextRequest) {
     const seller = await activateSellerOnboarding(identity.userId, {
       sellerType: body.sellerType === 'BUSINESS' ? 'BUSINESS' : 'INDIVIDUAL',
       sellerName: String(body.sellerName || ''),
+      logoUrl: typeof body.logoUrl === 'string' ? body.logoUrl : null,
       description: String(body.description || ''),
       businessCategory: String(body.businessCategory || 'Fashion & Apparel'),
       businessRegNumber: body.businessRegNumber ? String(body.businessRegNumber) : undefined,

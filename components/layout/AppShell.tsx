@@ -1,6 +1,12 @@
 'use client';
 
-import type { ActiveScoutDTO, PlatformNotification } from '@/lib/nairascout-store';
+import type {
+  ActiveScoutDTO,
+  GlobalSearchCategoryHit,
+  GlobalSearchPersonHit,
+  GlobalSearchProductHit,
+  PlatformNotification,
+} from '@/lib/nairascout-store';
 import type { NavTab } from '@/components/HeaderNav';
 import { DesktopSidebar } from './DesktopSidebar';
 import { TopUtilityBar } from './TopUtilityBar';
@@ -18,6 +24,9 @@ interface AppShellProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   onSearchSubmit: () => void;
+  onSelectSearchProduct?: (product: GlobalSearchProductHit) => void;
+  onSelectSearchCategory?: (category: GlobalSearchCategoryHit) => void;
+  onSelectSearchPerson?: (person: GlobalSearchPersonHit) => void;
   banners?: React.ReactNode;
   footer?: React.ReactNode;
   children: React.ReactNode;
@@ -35,6 +44,9 @@ export function AppShell({
   searchQuery,
   onSearchChange,
   onSearchSubmit,
+  onSelectSearchProduct,
+  onSelectSearchCategory,
+  onSelectSearchPerson,
   banners,
   footer,
   children,
@@ -55,6 +67,9 @@ export function AppShell({
           searchQuery={searchQuery}
           onSearchChange={onSearchChange}
           onSearchSubmit={onSearchSubmit}
+          onSelectSearchProduct={onSelectSearchProduct}
+          onSelectSearchCategory={onSelectSearchCategory}
+          onSelectSearchPerson={onSelectSearchPerson}
           onSelectHome={() => onSelectTab('marketplace')}
           onOpenGuide={onOpenGuide}
           notifications={notifications}

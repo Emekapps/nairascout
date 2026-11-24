@@ -1,10 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
+  Camera,
   Check,
+  Loader2,
   Lock,
   PackagePlus,
   ShieldCheck,
@@ -19,7 +21,9 @@ import type {
 import { SELLER_PLANS, SELLER_TEAM_ROLE_LABELS } from '@/lib/seller-plans';
 import { DEFAULT_LISTING_CATEGORIES_SEED } from '@/lib/constants/nigeria-and-categories';
 import { formatKoboToNaira, formatWholeNaira } from '@/lib/commission-engine';
+import { UserAvatar } from './shared/UserAvatar';
 import { UserIdentityRow } from './shared/UserIdentityRow';
+import { DismissibleNoticePanel } from './shared/DismissibleNoticePanel';
 import type { SellerTeamPermissions } from '@/lib/db/schema';
 import {
   MAX_SELLER_TEAM_SEATS,
@@ -44,6 +48,7 @@ interface SellerHubViewProps {
   onActivateSeller: (payload: {
     sellerType: 'INDIVIDUAL' | 'BUSINESS';
     sellerName: string;
+    logoUrl?: string | null;
     description: string;
     businessCategory: string;
     businessRegNumber?: string;
@@ -53,6 +58,7 @@ interface SellerHubViewProps {
     termsAccepted: boolean;
   }) => Promise<boolean>;
   onManageTeam: (payload: Record<string, unknown>) => Promise<boolean>;
+  onLogoUpdated?: (nextSnapshot: NairaScoutSnapshot) => void;
 }
 
 export default function SellerHubView({
@@ -63,6 +69,7 @@ export default function SellerHubView({
   onSelectPlan,
   onActivateSeller,
   onManageTeam,
+  onLogoUpdated,
 }: SellerHubViewProps) {
   const [subTab, setSubTab] = useState<'operations' | 'plans' | 'team'>('operations');
 
@@ -85,6 +92,16 @@ export default function SellerHubView({
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
   const [sellerType, setSellerType] = useState<'INDIVIDUAL' | 'BUSINESS'>('INDIVIDUAL');
   const [sellerName, setSellerName] = useState('');
+  const [logoUrl, setLogoUrl] = useState<string | null>(
+    snapshot.activeScout?.sellerProfile?.logoUrl ?? null
+  );
+  const [logoBusy, setLogoBusy] = useState(false);
+  const [logoFeedback, setLogoFeedback] = useState<{
+    type: 'ok' | 'err';
+    message: string;
+  } | null>(null);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const activeLogoInputRef = useRef<HTMLInputElement | null>(null);
   const [sellerDesc, setSellerDesc] = useState('');
   const [bizCat, setBizCat] = useState(defaultCategory);
   const [bizReg, setBizReg] = useState('');
@@ -102,6 +119,82 @@ export default function SellerHubView({
   const [memberPerms, setMemberPerms] = useState<SellerTeamPermissions>(
     SELLER_TEAM_ROLE_PERMISSIONS.PRODUCT_MANAGER
   );
+
+  const handleLogoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setLogoFeedback({ type: 'err', message: 'Use JPG, PNG, or WebP images only.' });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setLogoFeedback({ type: 'err', message: 'Image must be 5 MB or smaller.' });
+      return;
+    }
+
+    setLogoBusy(true);
+    setLogoFeedback(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/seller/logo', {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'NairaScout' },
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setLogoFeedback({
+          type: 'err',
+          message: data.error || 'Could not upload business profile photo.',
+        });
+        return;
+      }
+      setLogoUrl(data.logoUrl ?? null);
+      if (data.snapshot && onLogoUpdated) {
+        onLogoUpdated(data.snapshot);
+      }
+      setLogoFeedback({ type: 'ok', message: 'Business profile photo updated.' });
+    } catch {
+      setLogoFeedback({ type: 'err', message: 'Network error uploading business photo.' });
+    } finally {
+      setLogoBusy(false);
+    }
+  };
+
+  const handleRemoveLogo = async () => {
+    setLogoBusy(true);
+    setLogoFeedback(null);
+    try {
+      const res = await fetch('/api/seller/logo', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'NairaScout',
+        },
+        body: JSON.stringify({ logoUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setLogoFeedback({
+          type: 'err',
+          message: data.error || 'Could not remove business profile photo.',
+        });
+        return;
+      }
+      setLogoUrl(null);
+      if (data.snapshot && onLogoUpdated) {
+        onLogoUpdated(data.snapshot);
+      }
+      setLogoFeedback({ type: 'ok', message: 'Business profile photo removed.' });
+    } catch {
+      setLogoFeedback({ type: 'err', message: 'Network error removing business photo.' });
+    } finally {
+      setLogoBusy(false);
+    }
+  };
 
   if (!snapshot.authenticated || !snapshot.activeScout) {
     return (
@@ -153,6 +246,7 @@ export default function SellerHubView({
       await onActivateSeller({
         sellerType,
         sellerName: sellerName || `${scout.displayName} Store`,
+        logoUrl,
         description: sellerDesc,
         businessCategory: bizCat,
         businessRegNumber: bizReg,
@@ -167,17 +261,19 @@ export default function SellerHubView({
     return (
       <div className="max-w-3xl mx-auto space-y-6">
         <div className="border-b border-border pb-5">
-          <h1 className="font-sans text-2xl md:text-3xl font-bold text-foreground">
-            Activate Seller Capabilities
+          <h1 className="font-sans text-xl md:text-2xl font-bold tracking-tight text-foreground">
+            Seller Setup
           </h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">
-            Attached to your primary identity (<span className="font-sans">@{scout.handle}</span>).
-            You may create draft listings immediately, while public publishing requires Seller
-            verification approval.
-          </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
+        <DismissibleNoticePanel
+          storageKey="nairascout_seller_setup_notice_v1"
+          title="Activate Seller Capabilities"
+          description={`Attached to your account (@${scout.handle}). You may start creating your product listings and saving them as drafts. But publishing requires Seller verification approval.`}
+          ariaLabel="Activate Seller Capabilities Notice"
+        />
+
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1 snap-x text-xs font-medium">
           {[
             { step: 1, label: '1. Seller Type' },
             { step: 2, label: '2. Business Profile' },
@@ -188,7 +284,7 @@ export default function SellerHubView({
               key={s.step}
               type="button"
               onClick={() => setWizardStep(s.step as 1 | 2 | 3 | 4)}
-              className={`px-3 py-1.5 rounded-xl cursor-pointer transition-colors ${
+              className={`whitespace-nowrap shrink-0 snap-start rounded-full px-3.5 py-2 cursor-pointer transition-colors ${
                 wizardStep === s.step
                   ? 'bg-primary text-primary-foreground border border-primary-border font-semibold'
                   : 'bg-muted text-muted-foreground hover:text-foreground'
@@ -253,6 +349,72 @@ export default function SellerHubView({
               <h2 className="font-sans text-lg font-bold text-foreground">
                 Step 2: Seller &amp; Business Details
               </h2>
+
+              <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-xl border border-border bg-muted/40">
+                <UserAvatar
+                  avatarUrl={logoUrl}
+                  displayName={sellerName || scout.displayName}
+                  username={scout.handle}
+                  size="xl"
+                />
+                <div className="flex-1 space-y-2">
+                  <div>
+                    <p className="font-sans text-sm font-semibold text-foreground">
+                      Business Profile Photo / Store Logo
+                    </p>
+                    <p className="font-sans text-xs text-muted-foreground">
+                      JPG, PNG, or WebP up to 5 MB. Shown on your storefront and product cards.
+                    </p>
+                  </div>
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={handleLogoFileChange}
+                    className="sr-only"
+                    aria-label="Upload business profile photo"
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={logoBusy}
+                      onClick={() => logoInputRef.current?.click()}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+                    >
+                      {logoBusy ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Camera className="w-3.5 h-3.5" aria-hidden="true" />
+                      )}
+                      {logoBusy
+                        ? 'Uploading...'
+                        : logoUrl
+                          ? 'Change Business Photo'
+                          : 'Upload Business Photo'}
+                    </button>
+                    {logoUrl && (
+                      <button
+                        type="button"
+                        disabled={logoBusy}
+                        onClick={handleRemoveLogo}
+                        className="px-3.5 py-2 text-xs font-semibold text-destructive border border-destructive/30 rounded-xl hover:bg-destructive/10 disabled:opacity-50 cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  {logoFeedback && (
+                    <p
+                      className={`text-xs font-medium ${
+                        logoFeedback.type === 'ok' ? 'text-success' : 'text-destructive'
+                      }`}
+                    >
+                      {logoFeedback.message}
+                    </p>
+                  )}
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">
                   Storefront / Seller Name
@@ -337,8 +499,8 @@ export default function SellerHubView({
                 Step 3: Upload Verification Documents
               </h2>
               <p className="text-xs text-muted-foreground">
-                Stored securely in private bucket <span className="font-sans">verification-docs</span>{' '}
-                and inspected via short-lived 60s signed URLs by Verification Officers.
+                Stored securely in encrypted verification storage and inspected via short-lived
+                signed links by Verification Officers.
               </p>
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">
@@ -356,7 +518,9 @@ export default function SellerHubView({
                   className="block w-full text-xs text-muted-foreground file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-secondary file:text-secondary-foreground file:font-semibold"
                 />
                 <p className="mt-1 text-xs font-sans text-success">
-                  Target object: verification-docs/{scout.id}/{docFilename}
+                  {docFile
+                    ? `Document ready for submission (${docFilename})`
+                    : 'Upload Government ID or CAC Certificate (PDF, JPG, PNG)'}
                 </p>
               </div>
               <button
@@ -372,7 +536,7 @@ export default function SellerHubView({
           {wizardStep === 4 && (
             <div className="space-y-4">
               <h2 className="font-sans text-lg font-bold text-foreground">
-                Step 4: Select Initial Plan &amp; Accept Seller Terms
+                Step 4: Select Plan
               </h2>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {(['starter', 'traction', 'growth', 'sprawl'] as SellerPlanId[]).map((pid) => {
@@ -413,7 +577,7 @@ export default function SellerHubView({
                 disabled={submitting || !termsAccepted}
                 className="w-full py-2.5 px-4 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-45 cursor-pointer"
               >
-                {submitting ? 'Activating Seller Profile...' : 'Submit Onboarding & Activate Seller'}
+                {submitting ? 'Activating Seller Role...' : 'Submit & Activate Seller Role'}
               </button>
             </div>
           )}
@@ -472,35 +636,76 @@ export default function SellerHubView({
   return (
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-border pb-6">
-        <div>
-          <h1 className="font-sans text-2xl md:text-3xl font-bold tracking-tight text-foreground">
-            Seller Operations &amp; Subscriptions
-          </h1>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-            <span className="text-muted-foreground">
-              {sellerProfile.sellerName} ({sellerProfile.sellerType})
-            </span>
-            <span className="px-2 py-0.5 rounded-md bg-muted font-sans font-semibold text-foreground">
-              Seller: {sellerProfile.sellerStatus}
-            </span>
-            <span
-              className={`px-2 py-0.5 rounded-md font-sans font-semibold ${
-                scout.sellerVerificationStatus === 'VERIFIED'
-                  ? 'bg-accent text-accent-foreground'
-                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-              }`}
+        <div className="flex items-start gap-3.5">
+          <div className="relative shrink-0">
+            <UserAvatar
+              avatarUrl={sellerProfile.logoUrl}
+              displayName={sellerProfile.sellerName}
+              username={scout.handle}
+              size="lg"
+            />
+            <input
+              ref={activeLogoInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={handleLogoFileChange}
+              className="sr-only"
+              aria-label="Update business profile photo"
+            />
+            <button
+              type="button"
+              disabled={logoBusy}
+              onClick={() => activeLogoInputRef.current?.click()}
+              title="Change Business Photo"
+              aria-label="Change Business Photo"
+              className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-card border border-border flex items-center justify-center text-foreground hover:bg-muted shadow-xs cursor-pointer"
             >
-              Verification: {scout.sellerVerificationStatus}
-            </span>
-            <span className="px-2 py-0.5 rounded-md bg-card border border-border font-sans text-muted-foreground">
-              Plan: {currentPlan.name} ({sellerProfile.subscriptionStatus})
-            </span>
-            <Link
-              href="/settings/closure"
-              className="text-xs font-medium text-muted-foreground hover:text-destructive underline ml-1"
-            >
-              Close Seller Capabilities
-            </Link>
+              {logoBusy ? (
+                <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+              ) : (
+                <Camera className="w-3 h-3" aria-hidden="true" />
+              )}
+            </button>
+          </div>
+          <div>
+            <h1 className="font-sans text-2xl md:text-3xl font-bold tracking-tight text-foreground">
+              Seller Operations &amp; Subscriptions
+            </h1>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-muted-foreground">
+                {sellerProfile.sellerName} ({sellerProfile.sellerType})
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-muted font-sans font-semibold text-foreground">
+                Seller: {sellerProfile.sellerStatus}
+              </span>
+              <span
+                className={`px-2 py-0.5 rounded-md font-sans font-semibold ${
+                  scout.sellerVerificationStatus === 'VERIFIED'
+                    ? 'bg-accent text-accent-foreground'
+                    : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                }`}
+              >
+                Verification: {scout.sellerVerificationStatus}
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-card border border-border font-sans text-muted-foreground">
+                Plan: {currentPlan.name} ({sellerProfile.subscriptionStatus})
+              </span>
+              <Link
+                href="/settings/closure"
+                className="text-xs font-medium text-muted-foreground hover:text-destructive underline ml-1"
+              >
+                Close Seller Capabilities
+              </Link>
+            </div>
+            {logoFeedback && (
+              <p
+                className={`mt-1.5 text-xs font-medium ${
+                  logoFeedback.type === 'ok' ? 'text-success' : 'text-destructive'
+                }`}
+              >
+                {logoFeedback.message}
+              </p>
+            )}
           </div>
         </div>
 

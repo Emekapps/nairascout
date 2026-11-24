@@ -4,6 +4,9 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'motion/react';
 import type {
+  GlobalSearchCategoryHit,
+  GlobalSearchPersonHit,
+  GlobalSearchProductHit,
   MarketplaceOrder,
   NairaScoutSnapshot,
   OrderFulfilmentStatus,
@@ -39,6 +42,12 @@ export default function NairaScoutApp({
     initialRefEvent ? 'referrals' : 'marketplace'
   );
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const [marketplaceCategoryFilter, setMarketplaceCategoryFilter] = useState<string>('All');
+  const [selectedProductIdFromSearch, setSelectedProductIdFromSearch] = useState<string | null>(null);
+  const [networkSubTab, setNetworkSubTab] = useState<'explorer' | 'scouts_list' | 'simulator'>(
+    'explorer'
+  );
+  const [networkScoutSearch, setNetworkScoutSearch] = useState('');
   const [checkoutSession, setCheckoutSession] = useState<{
     product: ProductListing;
     referralEvent: ProductReferralEvent | null;
@@ -181,6 +190,7 @@ export default function NairaScoutApp({
   const handleActivateSeller = async (payload: {
     sellerType: 'INDIVIDUAL' | 'BUSINESS';
     sellerName: string;
+    logoUrl?: string | null;
     description: string;
     businessCategory: string;
     businessRegNumber?: string;
@@ -339,13 +349,36 @@ export default function NairaScoutApp({
         activeScout={snapshot.activeScout}
         onLogout={handleLogout}
         searchQuery={globalSearchQuery}
-        onSearchChange={(q) => {
-          setGlobalSearchQuery(q);
-          if (q.trim() && activeTab !== 'marketplace') {
+        onSearchChange={(q) => setGlobalSearchQuery(q)}
+        onSearchSubmit={() => {
+          setSelectedProductIdFromSearch(null);
+          setActiveTab('marketplace');
+        }}
+        onSelectSearchProduct={(product: GlobalSearchProductHit) => {
+          setSelectedProductIdFromSearch(product.id);
+          setMarketplaceCategoryFilter('All');
+          setGlobalSearchQuery('');
+          setActiveTab('marketplace');
+        }}
+        onSelectSearchCategory={(cat: GlobalSearchCategoryHit) => {
+          setSelectedProductIdFromSearch(null);
+          setMarketplaceCategoryFilter(cat.name);
+          setGlobalSearchQuery('');
+          setActiveTab('marketplace');
+        }}
+        onSelectSearchPerson={(person: GlobalSearchPersonHit) => {
+          setSelectedProductIdFromSearch(null);
+          if (!snapshot.authenticated && person.isSeller && person.sellerName) {
+            setMarketplaceCategoryFilter('All');
+            setGlobalSearchQuery(person.sellerName);
             setActiveTab('marketplace');
+          } else {
+            setGlobalSearchQuery('');
+            setNetworkSubTab('scouts_list');
+            setNetworkScoutSearch(person.username);
+            setActiveTab('network');
           }
         }}
-        onSearchSubmit={() => setActiveTab('marketplace')}
         banners={banners}
         footer={footer}
       >
@@ -360,6 +393,10 @@ export default function NairaScoutApp({
               snapshot={snapshot}
               externalSearchQuery={globalSearchQuery}
               onExternalSearchChange={setGlobalSearchQuery}
+              externalCategoryFilter={marketplaceCategoryFilter}
+              onExternalCategoryChange={setMarketplaceCategoryFilter}
+              externalSelectedProductId={selectedProductIdFromSearch}
+              onClearExternalProduct={() => setSelectedProductIdFromSearch(null)}
               onStartDirectCheckout={(product) =>
                 setCheckoutSession({ product, referralEvent: null })
               }
@@ -381,6 +418,10 @@ export default function NairaScoutApp({
           {activeTab === 'network' && (
             <NetworkView
               snapshot={snapshot}
+              externalSubTab={networkSubTab}
+              onExternalSubTabChange={setNetworkSubTab}
+              externalScoutSearch={networkScoutSearch}
+              onExternalScoutSearchChange={setNetworkScoutSearch}
               onInviteScout={handleInviteScout}
               onRespondInvite={handleRespondInvite}
               onManageContact={handleManageContact}
@@ -400,6 +441,7 @@ export default function NairaScoutApp({
               onSelectPlan={handleSelectPlan}
               onActivateSeller={handleActivateSeller}
               onManageTeam={handleManageTeam}
+              onLogoUpdated={setSnapshot}
             />
           )}
         </motion.div>

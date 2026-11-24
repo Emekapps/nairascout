@@ -318,6 +318,10 @@ export async function ensureCommerceTables(
           ('Books & Education', 'books-education', 8)
         ON CONFLICT (slug) DO NOTHING;
       `);
+      await executeSql(sql`
+        ALTER TABLE public.seller_profiles
+          ADD COLUMN IF NOT EXISTS logo_url text;
+      `);
     })().catch((err) => {
       globalForDdl.__nsCommerceTablesReady = undefined;
       throw err;

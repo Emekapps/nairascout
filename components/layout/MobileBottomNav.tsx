@@ -251,10 +251,10 @@ export function MobileBottomNav({
                     setAccountSheetOpen(false);
                     await onLogout();
                   }}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-semibold text-destructive bg-destructive/10 cursor-pointer"
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-semibold bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors cursor-pointer"
                 >
                   <LogOut className="w-4 h-4" aria-hidden="true" />
-                  Sign Out
+                  Sign out
                 </button>
               ) : (
                 <Link

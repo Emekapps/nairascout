@@ -403,17 +403,18 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
             <h1 className="font-sans text-2xl md:text-3xl font-bold text-foreground">
               Account Settings
             </h1>
-            <p className="mt-1 text-sm text-muted-foreground flex flex-wrap items-center gap-1.5">
+            <div className="mt-1.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 text-sm text-muted-foreground">
               <span className="font-sans">{scout.email}</span>
-              <span aria-hidden="true">·</span>
-              <span>Account Status:</span>
-              <span className="inline-flex items-center gap-1.5 font-sans font-semibold text-foreground">
-                {scout.accountStatus === 'ACTIVE' && (
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" aria-hidden="true" />
-                )}
-                <span>{scout.accountStatus}</span>
-              </span>
-            </p>
+              <div className="flex items-center gap-1.5">
+                <span>Account Status:</span>
+                <span className="inline-flex items-center gap-1.5 font-sans font-semibold text-foreground">
+                  {scout.accountStatus === 'ACTIVE' && (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" aria-hidden="true" />
+                  )}
+                  <span>{scout.accountStatus}</span>
+                </span>
+              </div>
+            </div>
           </div>
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1 snap-x">
             {(
@@ -791,7 +792,16 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                       )}
                       <div className="flex items-center justify-between gap-2">
                         <p className="font-sans text-[11px] text-muted-foreground">
-                          {v.evidencePaths.join(', ') || 'Direct check'}
+                          {v.evidencePaths.length > 0
+                            ? v.evidencePaths
+                                .map((p) => {
+                                  const fileName = p.split('/').pop();
+                                  return fileName && !fileName.includes('seller-kyc-')
+                                    ? fileName
+                                    : 'Document uploaded';
+                                })
+                                .join(', ')
+                            : 'Direct check'}
                         </p>
                         {(v.status === 'REJECTED' || v.status === 'REVOKED') && (
                           <button
@@ -985,7 +995,9 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                   className="block w-full text-xs text-muted-foreground file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-secondary file:text-secondary-foreground file:font-semibold"
                 />
                 <p className="mt-1 font-sans text-[11px] text-muted-foreground">
-                  Bucket path: verification-docs/{scout.id}/{docName}
+                  {docFile
+                    ? `Document ready for submission (${docFile.name})`
+                    : 'Upload NIN, Passport, CAC, or Bank Proof (PDF, JPG, PNG)'}
                 </p>
               </div>
 
@@ -1007,7 +1019,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="w-5 h-5 text-destructive shrink-0" aria-hidden="true" />
                   <h2 className="font-sans text-base sm:text-xl font-bold text-foreground">
-                    Two-Track Account &amp; Seller Closure
+                    Account &amp; Seller Closure
                   </h2>
                 </div>
                 <p className="font-sans text-sm leading-relaxed text-muted-foreground">
@@ -1024,22 +1036,22 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
               </Link>
             </div>
 
-            <div className="grid grid-cols-3 gap-4 p-4 bg-muted/50 border border-border rounded-xl text-xs">
-              <div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              <div className="bg-muted/50 border border-border rounded-xl p-4">
                 <p className="text-muted-foreground">Open Orders</p>
-                <p className="font-numeric text-base font-bold text-foreground tabular-nums">
+                <p className="mt-1 font-numeric text-base font-bold text-foreground tabular-nums">
                   {openOrdersCount}
                 </p>
               </div>
-              <div>
+              <div className="bg-muted/50 border border-border rounded-xl p-4">
                 <p className="text-muted-foreground">Pending Commissions</p>
-                <p className="font-numeric text-base font-bold text-amber-600 dark:text-amber-400 tabular-nums">
+                <p className="mt-1 font-numeric text-base font-bold text-amber-600 dark:text-amber-400 tabular-nums">
                   {formatKoboToNaira(snapshot.wallet.pendingKobo)}
                 </p>
               </div>
-              <div>
+              <div className="bg-muted/50 border border-border rounded-xl p-4">
                 <p className="text-muted-foreground">Available Balance</p>
-                <p className="font-numeric text-base font-bold text-success tabular-nums">
+                <p className="mt-1 font-numeric text-base font-bold text-success tabular-nums">
                   {formatKoboToNaira(snapshot.wallet.availableKobo)}
                 </p>
               </div>
@@ -1060,7 +1072,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                   type="button"
                   disabled={busy}
                   onClick={handleCloseSeller}
-                  className="px-4 py-2 text-xs font-semibold text-amber-700 dark:text-amber-300 border border-amber-500/40 bg-card rounded-xl hover:bg-amber-500/10 shrink-0 cursor-pointer"
+                  className="px-4 py-2 text-xs font-semibold text-destructive-foreground bg-destructive rounded-xl hover:bg-destructive/90 transition-colors shrink-0 cursor-pointer"
                 >
                   Close Seller Only
                 </button>

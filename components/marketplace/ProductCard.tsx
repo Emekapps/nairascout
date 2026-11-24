@@ -25,6 +25,7 @@ export function ProductCard({
       <div className="px-4 pt-3.5 pb-2.5 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <UserAvatar
+            avatarUrl={product.sellerLogoUrl}
             displayName={product.sellerName}
             size="sm"
             className="bg-secondary text-secondary-foreground border-border"

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, or } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, or } from 'drizzle-orm';
 import {
   AncestorNode,
   CommissionBreakdown,
@@ -121,6 +121,7 @@ export interface SellerProfileRecord {
   ownerUserId: string;
   sellerType: 'INDIVIDUAL' | 'BUSINESS';
   sellerName: string;
+  logoUrl?: string | null;
   description: string | null;
   businessCategory: string | null;
   businessRegNumber: string | null;
@@ -229,6 +230,7 @@ export interface ProductListing {
   sellerScoutId: string;
   sellerProfileId: string;
   sellerName: string;
+  sellerLogoUrl?: string | null;
   sellerCity: string;
   hasActiveSellerBadge: boolean;
   isSellerVerified: boolean;
@@ -1162,6 +1164,7 @@ export async function getNairaScoutSnapshot(
       (v) => v.sellerProfileId === sellerProfileId && v.category === 'SELLER'
     );
     return {
+      sellerLogoUrl: sp?.logoUrl ?? null,
       hasActiveSellerBadge: normalizeSellerStatus(sp?.sellerStatus) === 'ACTIVE',
       isSellerVerified: normalizeVerificationStatus(sellerVerif?.status) === 'VERIFIED',
     };
@@ -1304,6 +1307,7 @@ export async function getNairaScoutSnapshot(
         ownerUserId: sellerProfileRow.ownerUserId,
         sellerType: sellerProfileRow.sellerType,
         sellerName: sellerProfileRow.sellerName,
+        logoUrl: sellerProfileRow.logoUrl ?? null,
         description: sellerProfileRow.description,
         businessCategory: sellerProfileRow.businessCategory,
         businessRegNumber: sellerProfileRow.businessRegNumber,
@@ -2599,6 +2603,7 @@ export async function activateSellerOnboarding(
   input: {
     sellerType: 'INDIVIDUAL' | 'BUSINESS';
     sellerName: string;
+    logoUrl?: string | null;
     description: string;
     businessCategory: string;
     businessRegNumber?: string;
@@ -2611,6 +2616,7 @@ export async function activateSellerOnboarding(
   }
 ): Promise<SellerProfileRecord> {
   const db = requireDb();
+  await ensureTablesReady(db);
 
   const ctx = await loadDbAuthContext(actorUserId);
   assertAccountOperational(ctx);
@@ -2621,6 +2627,12 @@ export async function activateSellerOnboarding(
   if (ctx.seller) {
     throw new AuthorizationError('Seller capabilities are already activated on this account.', 409, 'SELLER_EXISTS');
   }
+
+  const cleanLogoUrl =
+    typeof input.logoUrl === 'string' &&
+    (input.logoUrl.startsWith('https://') || input.logoUrl.startsWith('http://'))
+      ? input.logoUrl.trim()
+      : null;
 
   const cleanPaths =
     input.evidencePaths.length > 0
@@ -2635,6 +2647,7 @@ export async function activateSellerOnboarding(
         ownerUserId: actorUserId,
         sellerType: input.sellerType,
         sellerName: input.sellerName.trim(),
+        logoUrl: cleanLogoUrl,
         description: input.description.trim() || null,
         businessCategory: input.businessCategory,
         businessRegNumber:
@@ -2703,6 +2716,7 @@ export async function activateSellerOnboarding(
       ownerUserId: seller.ownerUserId,
       sellerType: seller.sellerType,
       sellerName: seller.sellerName,
+      logoUrl: seller.logoUrl ?? null,
       description: seller.description,
       businessCategory: seller.businessCategory,
       businessRegNumber: seller.businessRegNumber,
@@ -2791,6 +2805,7 @@ export async function createSellerDraftListing(
     sellerScoutId: inserted.sellerScoutId,
     sellerProfileId: inserted.sellerProfileId,
     sellerName: inserted.sellerName,
+    sellerLogoUrl: seller.logoUrl ?? null,
     sellerCity: inserted.sellerCity,
     hasActiveSellerBadge: normalizeSellerStatus(seller.sellerStatus) === 'ACTIVE',
     isSellerVerified: normalizeVerificationStatus(ctx!.seller!.sellerVerificationStatus) === 'VERIFIED',
@@ -2869,6 +2884,7 @@ export async function publishSellerListingById(
     sellerScoutId: listing.sellerScoutId,
     sellerProfileId: listing.sellerProfileId,
     sellerName: listing.sellerName,
+    sellerLogoUrl: null,
     sellerCity: listing.sellerCity,
     hasActiveSellerBadge: true,
     isSellerVerified: true,
@@ -3192,6 +3208,58 @@ export async function updateScoutAvatarForActor(
     });
 
     return { previousAvatarUrl };
+  });
+}
+
+export async function updateSellerLogoForActor(
+  actorUserId: string,
+  nextLogoUrl: string | null
+): Promise<{ hasSellerProfile: boolean; previousLogoUrl: string | null }> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAccountOperational(ctx);
+
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .select({
+        id: sellerProfiles.id,
+        logoUrl: sellerProfiles.logoUrl,
+      })
+      .from(sellerProfiles)
+      .where(eq(sellerProfiles.ownerUserId, actorUserId))
+      .limit(1);
+
+    const seller = rows[0];
+    if (!seller) {
+      return { hasSellerProfile: false, previousLogoUrl: null };
+    }
+
+    const previousLogoUrl = seller.logoUrl ?? null;
+
+    await tx
+      .update(sellerProfiles)
+      .set({
+        logoUrl: nextLogoUrl,
+        updatedAt: new Date(),
+      })
+      .where(eq(sellerProfiles.id, seller.id));
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: actorUserId,
+      action: nextLogoUrl ? 'SELLER_LOGO_UPDATED' : 'SELLER_LOGO_REMOVED',
+      entityType: 'seller_profiles',
+      entityId: seller.id,
+      previousValue: { logoUrl: previousLogoUrl },
+      newValue: { logoUrl: nextLogoUrl },
+      reason: nextLogoUrl
+        ? 'Seller uploaded business profile photo to Supabase Storage seller-logos bucket'
+        : 'Seller removed business profile photo',
+    });
+
+    return { hasSellerProfile: true, previousLogoUrl };
   });
 }
 
@@ -4848,3 +4916,189 @@ export async function adminUpdateListingCategory(
     };
   });
 }
+
+export interface GlobalSearchProductHit {
+  id: string;
+  title: string;
+  category: string;
+  priceKobo: number;
+  imageUrl: string;
+  sellerName: string;
+  sellerCity: string;
+  sellerLogoUrl: string | null;
+}
+
+export interface GlobalSearchCategoryHit {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+export interface GlobalSearchPersonHit {
+  userId: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string | null;
+  locationState: string | null;
+  sellerName: string | null;
+  sellerLogoUrl: string | null;
+  isSeller: boolean;
+  isSellerVerified: boolean;
+}
+
+export interface GlobalSearchResponse {
+  query: string;
+  products: GlobalSearchProductHit[];
+  categories: GlobalSearchCategoryHit[];
+  people: GlobalSearchPersonHit[];
+}
+
+export async function searchGlobalDirectory(
+  rawQuery: string,
+  viewerUserId: string | null
+): Promise<GlobalSearchResponse> {
+  const query = rawQuery.trim();
+  if (query.length < 3 || !isPostgresConfigured()) {
+    return { query, products: [], categories: [], people: [] };
+  }
+
+  const db = getDb();
+  if (!db) {
+    return { query, products: [], categories: [], people: [] };
+  }
+
+  await ensureTablesReady(db);
+  const pattern = `%${query.replace(/[%_\\]/g, '\\$&')}%`;
+
+  const [matchedProducts, matchedCategories, allScoutsRows, allSellerRows, allUserRows, allVerifsRows] =
+    await Promise.all([
+      db
+        .select()
+        .from(productListings)
+        .where(
+          and(
+            eq(productListings.status, 'PUBLISHED'),
+            or(
+              ilike(productListings.title, pattern),
+              ilike(productListings.description, pattern),
+              ilike(productListings.category, pattern),
+              ilike(productListings.sellerName, pattern)
+            )
+          )
+        )
+        .orderBy(desc(productListings.createdAt))
+        .limit(5),
+      db
+        .select({
+          id: listingCategories.id,
+          name: listingCategories.name,
+          slug: listingCategories.slug,
+        })
+        .from(listingCategories)
+        .where(
+          and(
+            eq(listingCategories.isActive, true),
+            or(ilike(listingCategories.name, pattern), ilike(listingCategories.slug, pattern))
+          )
+        )
+        .orderBy(asc(listingCategories.sortOrder), asc(listingCategories.name))
+        .limit(5),
+      db.select().from(scoutProfiles),
+      db.select().from(sellerProfiles),
+      db.select({ id: users.id, accountStatus: users.accountStatus }).from(users),
+      db
+        .select({
+          sellerProfileId: verificationRecords.sellerProfileId,
+          category: verificationRecords.category,
+          status: verificationRecords.status,
+        })
+        .from(verificationRecords)
+        .where(eq(verificationRecords.category, 'SELLER')),
+    ]);
+
+  let blockedIds = new Set<string>();
+  if (viewerUserId) {
+    const blocks = await db
+      .select()
+      .from(userBlocks)
+      .where(or(eq(userBlocks.blockerId, viewerUserId), eq(userBlocks.blockedId, viewerUserId)));
+    blockedIds = new Set(
+      blocks.map((b) => (b.blockerId === viewerUserId ? b.blockedId : b.blockerId))
+    );
+  }
+
+  const sellerById = new Map(allSellerRows.map((s) => [s.id, s]));
+  const sellerByOwner = new Map(allSellerRows.map((s) => [s.ownerUserId, s]));
+  const userStatusById = new Map(allUserRows.map((u) => [u.id, u.accountStatus]));
+  const verifiedSellerIds = new Set(
+    allVerifsRows
+      .filter((v) => v.sellerProfileId && normalizeVerificationStatus(v.status) === 'VERIFIED')
+      .map((v) => v.sellerProfileId as string)
+  );
+
+  const products: GlobalSearchProductHit[] = matchedProducts.map((p) => {
+    const seller = sellerById.get(p.sellerProfileId);
+    return {
+      id: p.id,
+      title: p.title,
+      category: p.category,
+      priceKobo: Number(p.priceKobo),
+      imageUrl: p.imageUrl,
+      sellerName: p.sellerName,
+      sellerCity: p.sellerCity,
+      sellerLogoUrl: seller?.logoUrl ?? null,
+    };
+  });
+
+  const qLower = query.toLowerCase();
+  const people: GlobalSearchPersonHit[] = allScoutsRows
+    .filter((s) => {
+      if (viewerUserId && s.userId === viewerUserId) return false;
+      if (blockedIds.has(s.userId)) return false;
+      const status = userStatusById.get(s.userId);
+      if (!status || status === 'CLOSED' || status === 'SUSPENDED') return false;
+      const seller = sellerByOwner.get(s.userId);
+      return (
+        s.username.toLowerCase().includes(qLower) ||
+        s.displayName.toLowerCase().includes(qLower) ||
+        (seller ? seller.sellerName.toLowerCase().includes(qLower) : false)
+      );
+    })
+    .slice(0, 5)
+    .map((s) => {
+      const seller = sellerByOwner.get(s.userId);
+      const sellerActive = Boolean(seller && normalizeSellerStatus(seller.sellerStatus) !== 'CLOSED');
+      const dto = toPublicScoutProfileDTO({
+        userId: s.userId,
+        username: s.username,
+        displayName: s.displayName,
+        avatarUrl: s.avatarUrl,
+        bio: s.bio,
+        locationState: s.locationState,
+        sellerStatus: seller ? normalizeSellerStatus(seller.sellerStatus) : null,
+        sellerVerificationStatus:
+          seller && verifiedSellerIds.has(seller.id) ? 'VERIFIED' : null,
+        workingWithCount: 0,
+        totalSoldUnits: 0,
+      });
+      return {
+        userId: dto.userId,
+        username: dto.username,
+        displayName: dto.displayName,
+        avatarUrl: dto.avatarUrl,
+        locationState: dto.locationState,
+        sellerName: sellerActive && seller ? seller.sellerName : null,
+        sellerLogoUrl: sellerActive && seller ? seller.logoUrl ?? null : null,
+        isSeller: sellerActive,
+        isSellerVerified: Boolean(seller && verifiedSellerIds.has(seller.id)),
+      };
+    });
+
+  return {
+    query,
+    products,
+    categories: matchedCategories,
+    people,
+  };
+}
+

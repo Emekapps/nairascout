@@ -1,31 +1,199 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Bell, LogIn, Search, X } from 'lucide-react';
-import type { PlatformNotification } from '@/lib/nairascout-store';
+import {
+  Bell,
+  Loader2,
+  LogIn,
+  Package,
+  Search,
+  Store,
+  Tag,
+  User,
+  X,
+} from 'lucide-react';
+import type {
+  GlobalSearchCategoryHit,
+  GlobalSearchPersonHit,
+  GlobalSearchProductHit,
+  GlobalSearchResponse,
+  PlatformNotification,
+} from '@/lib/nairascout-store';
+import { formatWholeNaira } from '@/lib/commission-engine';
+import { UserAvatar } from '@/components/shared/UserAvatar';
 import { ThemeToggle } from './ThemeToggle';
 
 interface TopUtilityBarProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   onSearchSubmit: () => void;
+  onSelectSearchProduct?: (product: GlobalSearchProductHit) => void;
+  onSelectSearchCategory?: (category: GlobalSearchCategoryHit) => void;
+  onSelectSearchPerson?: (person: GlobalSearchPersonHit) => void;
   onSelectHome: () => void;
   onOpenGuide: () => void;
   notifications: PlatformNotification[];
   authenticated: boolean;
 }
 
+type FlatSearchItem =
+  | { kind: 'product'; key: string; item: GlobalSearchProductHit }
+  | { kind: 'category'; key: string; item: GlobalSearchCategoryHit }
+  | { kind: 'person'; key: string; item: GlobalSearchPersonHit };
+
 export function TopUtilityBar({
   searchQuery,
   onSearchChange,
   onSearchSubmit,
+  onSelectSearchProduct,
+  onSelectSearchCategory,
+  onSelectSearchPerson,
   onSelectHome,
   onOpenGuide,
   notifications,
   authenticated,
 }: TopUtilityBarProps) {
   const [noticesOpen, setNoticesOpen] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<GlobalSearchResponse | null>(null);
+  const [activeIndex, setActiveIndex] = useState(-1);
+
+  const searchContainerRef = useRef<HTMLDivElement | null>(null);
+  const noticesContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const trimmedQuery = searchQuery.trim();
+
+  // Click-outside dismissal for both search dropdown and notices popover
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (searchContainerRef.current && !searchContainerRef.current.contains(target)) {
+        setDropdownOpen(false);
+      }
+      if (noticesContainerRef.current && !noticesContainerRef.current.contains(target)) {
+        setNoticesOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, []);
+
+  // Debounced server search when >= 3 characters are typed
+  useEffect(() => {
+    if (trimmedQuery.length < 3) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(trimmedQuery)}`, {
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          setSearching(false);
+          return;
+        }
+        const data: GlobalSearchResponse = await res.json();
+        setSearchResults(data);
+        setSearching(false);
+      } catch (err) {
+        if ((err as { name?: string })?.name !== 'AbortError') {
+          setSearching(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [trimmedQuery]);
+
+  const { flatItems, flatIndexByKey } = useMemo(() => {
+    if (!searchResults || trimmedQuery.length < 3) {
+      return { flatItems: [] as FlatSearchItem[], flatIndexByKey: new Map<string, number>() };
+    }
+    const list: FlatSearchItem[] = [];
+    for (const p of searchResults.products) {
+      list.push({ kind: 'product', key: `product-${p.id}`, item: p });
+    }
+    for (const c of searchResults.categories) {
+      list.push({ kind: 'category', key: `category-${c.id}`, item: c });
+    }
+    for (const person of searchResults.people) {
+      list.push({ kind: 'person', key: `person-${person.userId}`, item: person });
+    }
+    const indexMap = new Map<string, number>();
+    list.forEach((entry, idx) => indexMap.set(entry.key, idx));
+    return { flatItems: list, flatIndexByKey: indexMap };
+  }, [searchResults, trimmedQuery.length]);
+
+  const selectFlatItem = (entry: FlatSearchItem) => {
+    setDropdownOpen(false);
+    setActiveIndex(-1);
+    if (entry.kind === 'product') {
+      onSelectSearchProduct?.(entry.item);
+    } else if (entry.kind === 'category') {
+      onSelectSearchCategory?.(entry.item);
+    } else {
+      onSelectSearchPerson?.(entry.item);
+    }
+  };
+
+  const handleInputChange = (val: string) => {
+    onSearchChange(val);
+    setDropdownOpen(true);
+    setActiveIndex(-1);
+    if (val.trim().length < 3) {
+      setSearching(false);
+      setSearchResults(null);
+    } else {
+      setSearching(true);
+    }
+  };
+
+  const handleClearSearch = () => {
+    onSearchChange('');
+    setSearching(false);
+    setSearchResults(null);
+    setActiveIndex(-1);
+    setDropdownOpen(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      setDropdownOpen(false);
+      setActiveIndex(-1);
+      return;
+    }
+
+    if (!dropdownOpen || trimmedQuery.length < 3) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (flatItems.length > 0) {
+        setActiveIndex((prev) => (prev + 1) % flatItems.length);
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (flatItems.length > 0) {
+        setActiveIndex((prev) => (prev <= 0 ? flatItems.length - 1 : prev - 1));
+      }
+    } else if (e.key === 'Enter' && activeIndex >= 0 && flatItems[activeIndex]) {
+      e.preventDefault();
+      selectFlatItem(flatItems[activeIndex]);
+    }
+  };
+
+  const showDropdown = dropdownOpen && trimmedQuery.length > 0;
+  const hasAnyResults =
+    Boolean(searchResults) &&
+    (searchResults!.products.length > 0 ||
+      searchResults!.categories.length > 0 ||
+      searchResults!.people.length > 0);
 
   return (
     <header className="sticky top-0 z-30 h-16 border-b border-border bg-background/85 backdrop-blur-md">
@@ -41,44 +209,263 @@ export function TopUtilityBar({
           </span>
         </button>
 
-        {/* Search Input (Desktop & Tablet) */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSearchSubmit();
-          }}
-          className="hidden sm:block flex-1 max-w-md relative"
-        >
-          <Search
-            className="w-4 h-4 text-muted-foreground absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-            aria-hidden="true"
-          />
-          <input
-            type="search"
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search products, categories, or verified sellers..."
-            aria-label="Search products, categories, or verified sellers"
-            className="w-full h-10 pl-10 pr-8 text-sm bg-card border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => onSearchChange('')}
-              aria-label="Clear search"
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+        {/* Global Smart Search Input (Desktop & Tablet) */}
+        <div ref={searchContainerRef} className="hidden sm:block flex-1 max-w-md relative">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (activeIndex >= 0 && flatItems[activeIndex]) {
+                selectFlatItem(flatItems[activeIndex]);
+              } else {
+                setDropdownOpen(false);
+                onSearchSubmit();
+              }
+            }}
+            className="relative"
+          >
+            <Search
+              className="w-4 h-4 text-muted-foreground absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+              aria-hidden="true"
+            />
+            <input
+              type="search"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={showDropdown}
+              aria-controls="global-smart-search-listbox"
+              value={searchQuery}
+              onFocus={() => setDropdownOpen(true)}
+              onChange={(e) => handleInputChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Search products, categories, or scouts..."
+              aria-label="Search products, categories, or scouts"
+              className="w-full h-10 pl-10 pr-8 text-sm bg-card border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={handleClearSearch}
+                aria-label="Clear search"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </form>
+
+          {showDropdown && (
+            <div
+              id="global-smart-search-listbox"
+              role="listbox"
+              aria-label="Smart search suggestions"
+              className="absolute left-0 right-0 mt-2 z-50 bg-popover text-popover-foreground border border-border rounded-2xl shadow-xl overflow-hidden max-h-[75vh] overflow-y-auto"
             >
-              <X className="w-3.5 h-3.5" />
-            </button>
+              {trimmedQuery.length < 3 ? (
+                <p className="px-4 py-3 text-xs text-muted-foreground">
+                  Type at least 3 characters to search...
+                </p>
+              ) : searching && !searchResults ? (
+                <div className="px-4 py-4 flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                  Searching NairaScout...
+                </div>
+              ) : !hasAnyResults ? (
+                <div className="px-4 py-4 space-y-1">
+                  <p className="text-xs font-medium text-foreground">
+                    No matches for &ldquo;{trimmedQuery}&rdquo;
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Press Enter to filter the Marketplace Feed directly.
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {searchResults!.products.length > 0 && (
+                    <div className="p-2">
+                      <div className="px-2 py-1 flex items-center justify-between">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          Products
+                        </span>
+                        {searching && (
+                          <Loader2
+                            className="w-3 h-3 animate-spin text-muted-foreground"
+                            aria-hidden="true"
+                          />
+                        )}
+                      </div>
+                      <div className="space-y-0.5">
+                        {searchResults!.products.map((p) => {
+                          const idx = flatIndexByKey.get(`product-${p.id}`) ?? -1;
+                          const isSelected = activeIndex === idx;
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              role="option"
+                              aria-selected={isSelected}
+                              onMouseEnter={() => setActiveIndex(idx)}
+                              onClick={() =>
+                                selectFlatItem({ kind: 'product', key: `product-${p.id}`, item: p })
+                              }
+                              className={`w-full px-2.5 py-2 rounded-xl flex items-center gap-3 text-left transition-colors cursor-pointer ${
+                                isSelected ? 'bg-muted' : 'hover:bg-muted/60'
+                              }`}
+                            >
+                              <div className="w-10 h-10 rounded-lg bg-muted border border-border overflow-hidden shrink-0 flex items-center justify-center">
+                                {p.imageUrl ? (
+                                  <img
+                                    src={p.imageUrl}
+                                    alt={p.title}
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <Package
+                                    className="w-4 h-4 text-muted-foreground"
+                                    aria-hidden="true"
+                                  />
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-sans text-xs font-semibold text-foreground truncate">
+                                  {p.title}
+                                </p>
+                                <p className="text-[11px] text-muted-foreground truncate">
+                                  {p.sellerName} · {p.category}
+                                </p>
+                              </div>
+                              <span className="font-numeric text-xs font-bold text-foreground tabular-nums shrink-0">
+                                {formatWholeNaira(p.priceKobo)}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {searchResults!.categories.length > 0 && (
+                    <div className="p-2">
+                      <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Categories
+                      </p>
+                      <div className="space-y-0.5">
+                        {searchResults!.categories.map((cat) => {
+                          const idx = flatIndexByKey.get(`category-${cat.id}`) ?? -1;
+                          const isSelected = activeIndex === idx;
+                          return (
+                            <button
+                              key={cat.id}
+                              type="button"
+                              role="option"
+                              aria-selected={isSelected}
+                              onMouseEnter={() => setActiveIndex(idx)}
+                              onClick={() =>
+                                selectFlatItem({
+                                  kind: 'category',
+                                  key: `category-${cat.id}`,
+                                  item: cat,
+                                })
+                              }
+                              className={`w-full px-2.5 py-2 rounded-xl flex items-center justify-between gap-2 text-left transition-colors cursor-pointer ${
+                                isSelected ? 'bg-muted' : 'hover:bg-muted/60'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span className="w-7 h-7 rounded-lg bg-secondary flex items-center justify-center shrink-0">
+                                  <Tag
+                                    className="w-3.5 h-3.5 text-secondary-foreground"
+                                    aria-hidden="true"
+                                  />
+                                </span>
+                                <span className="font-sans text-xs font-semibold text-foreground truncate">
+                                  {cat.name}
+                                </span>
+                              </div>
+                              <span className="text-[11px] text-muted-foreground shrink-0">
+                                Filter feed
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {searchResults!.people.length > 0 && (
+                    <div className="p-2">
+                      <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Scouts &amp; Sellers
+                      </p>
+                      <div className="space-y-0.5">
+                        {searchResults!.people.map((person) => {
+                          const idx = flatIndexByKey.get(`person-${person.userId}`) ?? -1;
+                          const isSelected = activeIndex === idx;
+                          return (
+                            <button
+                              key={person.userId}
+                              type="button"
+                              role="option"
+                              aria-selected={isSelected}
+                              onMouseEnter={() => setActiveIndex(idx)}
+                              onClick={() =>
+                                selectFlatItem({
+                                  kind: 'person',
+                                  key: `person-${person.userId}`,
+                                  item: person,
+                                })
+                              }
+                              className={`w-full px-2.5 py-2 rounded-xl flex items-center justify-between gap-3 text-left transition-colors cursor-pointer ${
+                                isSelected ? 'bg-muted' : 'hover:bg-muted/60'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <UserAvatar
+                                  avatarUrl={person.avatarUrl || person.sellerLogoUrl}
+                                  displayName={person.displayName}
+                                  username={person.username}
+                                  size="sm"
+                                />
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="font-sans text-xs font-semibold text-foreground truncate">
+                                      {person.displayName}
+                                    </span>
+                                    {person.isSeller && (
+                                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-accent text-accent-foreground text-[10px] font-semibold shrink-0">
+                                        <Store className="w-2.5 h-2.5" aria-hidden="true" />
+                                        Seller
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="font-sans text-[11px] text-muted-foreground truncate">
+                                    @{person.username}
+                                    {person.locationState ? ` · ${person.locationState}` : ''}
+                                  </p>
+                                </div>
+                              </div>
+                              <User
+                                className="w-3.5 h-3.5 text-muted-foreground shrink-0"
+                                aria-hidden="true"
+                              />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
-        </form>
+        </div>
 
         {/* Right Utility Cluster: Theme Toggle + Notifications (+ Desktop Sign In when logged out) */}
         <div className="flex items-center gap-2 shrink-0 ml-auto">
           <ThemeToggle />
 
           {/* Notifications Bell wired to PostgreSQL notifications */}
-          <div className="relative">
+          <div ref={noticesContainerRef} className="relative">
             <button
               type="button"
               onClick={() => setNoticesOpen((prev) => !prev)}

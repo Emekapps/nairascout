@@ -194,6 +194,7 @@ export const sellerProfiles = pgTable('seller_profiles', {
     .references(() => users.id, { onDelete: 'restrict' }),
   sellerType: sellerTypeEnum('seller_type').notNull(),
   sellerName: text('seller_name').notNull(),
+  logoUrl: text('logo_url'),
   description: text('description'),
   businessCategory: text('business_category'),
   businessRegNumber: text('business_reg_number'),
