@@ -5,13 +5,14 @@ import Link from 'next/link';
 import {
   AlertTriangle,
   Camera,
-  Check,
+  CheckCircle2,
   Loader2,
   Lock,
   PackagePlus,
   ShieldCheck,
   Store,
   Users,
+  XCircle,
 } from 'lucide-react';
 import type {
   NairaScoutSnapshot,
@@ -668,8 +669,8 @@ export default function SellerHubView({
             </button>
           </div>
           <div>
-            <h1 className="font-sans text-2xl md:text-3xl font-bold tracking-tight text-foreground">
-              Seller Operations &amp; Subscriptions
+            <h1 className="font-sans text-xl md:text-2xl font-bold tracking-tight text-foreground">
+              Dashboard
             </h1>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
               <span className="text-muted-foreground">
@@ -774,8 +775,8 @@ export default function SellerHubView({
 
       {subTab === 'operations' && (
         <div className="space-y-10">
-          <section className="grid grid-cols-2 lg:grid-cols-4 gap-6 border-b border-border pb-8">
-            <div>
+          <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 border-b border-border pb-8">
+            <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
               <p className="text-xs text-muted-foreground">Eligible Merchandise Revenue</p>
               <p className="mt-1 font-numeric text-2xl font-bold text-foreground tabular-nums">
                 {formatKoboToNaira(sellerStats.eligibleMerchandiseKobo)}
@@ -784,7 +785,7 @@ export default function SellerHubView({
                 {sellerStats.directOrdersCount} direct · {sellerStats.referralOrdersCount} referral
               </p>
             </div>
-            <div>
+            <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
               <p className="text-xs text-muted-foreground">NairaScout 10% Commission</p>
               <p className="mt-1 font-numeric text-2xl font-bold text-foreground tabular-nums">
                 {formatKoboToNaira(sellerStats.marketplaceCommissionKobo)}
@@ -793,14 +794,14 @@ export default function SellerHubView({
                 Pool share: {formatKoboToNaira(sellerStats.referralPoolGeneratedKobo)}
               </p>
             </div>
-            <div>
+            <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
               <p className="text-xs text-muted-foreground">Net Seller Proceeds (90%)</p>
               <p className="mt-1 font-numeric text-2xl font-bold text-success tabular-nums">
                 {formatKoboToNaira(sellerStats.netSellerProceedsKobo)}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">Separate from Scout wallet</p>
             </div>
-            <div>
+            <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
               <p className="text-xs text-muted-foreground">Listings &amp; Publications</p>
               <p className="mt-1 font-numeric text-2xl font-bold text-foreground tabular-nums">
                 {sellerStats.activeListingsCount} / {currentPlan.maxActiveListings}
@@ -973,12 +974,12 @@ export default function SellerHubView({
               </section>
             </div>
 
-            {/* Create Draft Listing Form */}
+            {/* Create Listing Form */}
             <div className="lg:col-span-5 bg-card border border-border rounded-2xl p-6 space-y-4 self-start">
               <div className="flex items-center gap-2">
                 <PackagePlus className="w-4 h-4 text-foreground" aria-hidden="true" />
                 <h2 className="font-sans text-base font-bold text-foreground">
-                  Create Draft Listing
+                  Create Listing
                 </h2>
               </div>
               <p className="text-xs text-muted-foreground">
@@ -986,7 +987,7 @@ export default function SellerHubView({
                 publication slot and requires Seller verification approval.
               </p>
 
-              <form onSubmit={handleCreateDraft} className="space-y-3.5">
+              <form onSubmit={handleCreateDraft} className="space-y-4">
                 <div>
                   <label htmlFor="lst-title" className="block text-xs font-medium text-muted-foreground mb-1">
                     Product Name
@@ -1002,7 +1003,7 @@ export default function SellerHubView({
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label htmlFor="lst-cat" className="block text-xs font-medium text-muted-foreground mb-1">
                       Category
@@ -1036,7 +1037,7 @@ export default function SellerHubView({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label htmlFor="lst-price" className="block text-xs font-medium text-muted-foreground mb-1">
                       Unit Price (₦)
@@ -1087,7 +1088,7 @@ export default function SellerHubView({
                   disabled={submitting}
                   className="w-full py-2.5 px-4 text-xs font-semibold text-commerce-foreground bg-commerce rounded-xl hover:bg-commerce/90 disabled:opacity-45 cursor-pointer"
                 >
-                  {submitting ? 'Saving Draft...' : 'Save as Draft Listing'}
+                  {submitting ? 'Saving Draft...' : 'Save Draft'}
                 </button>
               </form>
             </div>
@@ -1135,28 +1136,66 @@ export default function SellerHubView({
                         : `${formatWholeNaira(plan.monthlyPriceKobo)}/mo`}
                     </p>
 
-                    <ul className="mt-5 pt-4 border-t border-border space-y-2 text-xs text-muted-foreground">
-                      <li className="flex items-center gap-2">
-                        <Check className="w-3.5 h-3.5 text-success shrink-0" />
+                    <ul className="mt-5 pt-4 border-t border-border space-y-2.5 text-xs">
+                      <li className="flex items-center gap-2 text-foreground">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" aria-hidden="true" />
                         <span>{plan.maxActiveListings} active product listings</span>
                       </li>
-                      <li className="flex items-center gap-2">
-                        <Check className="w-3.5 h-3.5 text-success shrink-0" />
+                      <li className="flex items-center gap-2 text-foreground">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" aria-hidden="true" />
                         <span>{plan.monthlyPublications} monthly publications</span>
                       </li>
-                      <li className="flex items-center gap-2">
-                        <Check className="w-3.5 h-3.5 text-success shrink-0" />
+                      <li className="flex items-center gap-2 text-foreground">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" aria-hidden="true" />
                         <span>{plan.maxCategories} product categories</span>
                       </li>
-                      <li className="flex items-center gap-2">
-                        <Check className="w-3.5 h-3.5 text-success shrink-0" />
+                      <li
+                        className={`flex items-center gap-2 ${
+                          plan.videoQuota === 'None' ? 'text-muted-foreground' : 'text-foreground'
+                        }`}
+                      >
+                        {plan.videoQuota === 'None' ? (
+                          <XCircle className="h-4 w-4 text-red-500 shrink-0" aria-hidden="true" />
+                        ) : (
+                          <CheckCircle2
+                            className="h-4 w-4 text-emerald-500 shrink-0"
+                            aria-hidden="true"
+                          />
+                        )}
                         <span>Video: {plan.videoQuota}</span>
                       </li>
-                      <li className="flex items-center gap-2">
-                        <Check className="w-3.5 h-3.5 text-success shrink-0" />
+                      <li
+                        className={`flex items-center gap-2 ${
+                          plan.promotionalPlacements ? 'text-foreground' : 'text-muted-foreground'
+                        }`}
+                      >
+                        {plan.promotionalPlacements ? (
+                          <CheckCircle2
+                            className="h-4 w-4 text-emerald-500 shrink-0"
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <XCircle className="h-4 w-4 text-red-500 shrink-0" aria-hidden="true" />
+                        )}
+                        <span>Promotions</span>
+                      </li>
+                      <li
+                        className={`flex items-center gap-2 ${
+                          plan.sellerTeamAccounts ? 'text-foreground' : 'text-muted-foreground'
+                        }`}
+                      >
+                        {plan.sellerTeamAccounts ? (
+                          <CheckCircle2
+                            className="h-4 w-4 text-emerald-500 shrink-0"
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <XCircle className="h-4 w-4 text-red-500 shrink-0" aria-hidden="true" />
+                        )}
                         <span>
-                          Promotions: {plan.promotionalPlacements ? 'Included' : 'No'} · Team:{' '}
-                          {plan.sellerTeamAccounts ? 'Yes' : 'No'}
+                          {plan.sellerTeamAccounts
+                            ? `Team (Up to ${plan.maxTeamSeats} seats)`
+                            : 'Team'}
                         </span>
                       </li>
                     </ul>

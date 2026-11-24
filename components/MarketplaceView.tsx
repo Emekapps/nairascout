@@ -2,12 +2,9 @@
 
 import { Fragment, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { MapPin, Search, Share2, ShoppingBag, SlidersHorizontal, X } from 'lucide-react';
+import { Share2, ShoppingBag, X } from 'lucide-react';
 import type { NairaScoutSnapshot, ProductListing } from '@/lib/nairascout-store';
-import {
-  DEFAULT_LISTING_CATEGORIES_SEED,
-  NIGERIAN_STATES_SEED,
-} from '@/lib/constants/nigeria-and-categories';
+import { DEFAULT_LISTING_CATEGORIES_SEED } from '@/lib/constants/nigeria-and-categories';
 import { formatWholeNaira } from '@/lib/commission-engine';
 import ProductImage from './ProductImage';
 import { ProductCard } from './marketplace/ProductCard';
@@ -19,6 +16,8 @@ interface MarketplaceViewProps {
   snapshot: NairaScoutSnapshot;
   externalSearchQuery?: string;
   onExternalSearchChange?: (q: string) => void;
+  externalLocationFilter?: string;
+  onExternalLocationChange?: (loc: string) => void;
   externalCategoryFilter?: string;
   onExternalCategoryChange?: (cat: string) => void;
   externalSelectedProductId?: string | null;
@@ -32,6 +31,8 @@ export default function MarketplaceView({
   snapshot,
   externalSearchQuery,
   onExternalSearchChange,
+  externalLocationFilter,
+  onExternalLocationChange,
   externalCategoryFilter,
   onExternalCategoryChange,
   externalSelectedProductId,
@@ -42,11 +43,13 @@ export default function MarketplaceView({
 }: MarketplaceViewProps) {
   const [localSelectedCategory, setLocalSelectedCategory] = useState<string>('All');
   const [localSearchQuery, setLocalSearchQuery] = useState('');
-  const [cityFilter, setCityFilter] = useState<string>('All');
+  const [localCityFilter, setLocalCityFilter] = useState<string>('All');
   const [selectedProduct, setSelectedProduct] = useState<ProductListing | null>(null);
 
   const searchQuery = externalSearchQuery !== undefined ? externalSearchQuery : localSearchQuery;
   const setSearchQuery = onExternalSearchChange ?? setLocalSearchQuery;
+  const cityFilter = externalLocationFilter !== undefined ? externalLocationFilter : localCityFilter;
+  const setCityFilter = onExternalLocationChange ?? setLocalCityFilter;
   const selectedCategory =
     externalCategoryFilter !== undefined ? externalCategoryFilter : localSelectedCategory;
   const setSelectedCategory = onExternalCategoryChange ?? setLocalSelectedCategory;
@@ -89,16 +92,6 @@ export default function MarketplaceView({
 
   const effectiveCategory =
     selectedCategory === 'All' || categories.includes(selectedCategory) ? selectedCategory : 'All';
-
-  const cities = useMemo(() => {
-    const dbStates =
-      snapshot.states && snapshot.states.length > 0
-        ? snapshot.states.map((s) => s.name)
-        : NIGERIAN_STATES_SEED.map((s) => s.name);
-    const productCities = snapshot.products.map((p) => p.sellerCity).filter(Boolean);
-    const merged = Array.from(new Set([...dbStates, ...productCities]));
-    return ['All', ...merged];
-  }, [snapshot.states, snapshot.products]);
 
   const filteredProducts = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -153,83 +146,25 @@ export default function MarketplaceView({
           ariaLabel="General Product Discovery Notice"
         />
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-          <div className="relative flex-1">
-            <Search
-              className="w-4 h-4 text-muted-foreground absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-              aria-hidden="true"
-            />
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search products or sellers..."
-              aria-label="Search products or sellers"
-              className="w-full h-10 pl-10 pr-8 text-sm bg-card border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-ring"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                aria-label="Clear search"
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          <div className="relative shrink-0">
-            <MapPin
-              className="w-3.5 h-3.5 text-muted-foreground absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-              aria-hidden="true"
-            />
-            <select
-              value={cityFilter}
-              onChange={(e) => setCityFilter(e.target.value)}
-              aria-label="Filter by Seller location"
-              className="w-full sm:w-auto h-10 pl-9 pr-10 text-xs sm:text-sm bg-card text-foreground border border-border rounded-xl focus:outline-none focus:border-ring cursor-pointer"
-            >
-              {cities.map((city) => (
-                <option key={city} value={city}>
-                  {city === 'All' ? 'All Locations' : city}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
         {/* Category Filter Pills */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 flex-1 min-w-0">
-            {categories.map((cat) => {
-              const active = effectiveCategory === cat;
-              return (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => setSelectedCategory(cat)}
-                  className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    active
-                      ? 'bg-commerce text-commerce-foreground'
-                      : 'bg-secondary text-secondary-foreground hover:bg-muted'
-                  }`}
-                >
-                  {cat}
-                </button>
-              );
-            })}
-          </div>
-
-          {snapshot.authenticated && (
-            <Link
-              href="/settings"
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground whitespace-nowrap shrink-0 py-1"
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5" aria-hidden="true" />
-              Edit Preferred Categories
-            </Link>
-          )}
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+          {categories.map((cat) => {
+            const active = effectiveCategory === cat;
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  active
+                    ? 'bg-commerce text-commerce-foreground'
+                    : 'bg-secondary text-secondary-foreground hover:bg-muted'
+                }`}
+              >
+                {cat}
+              </button>
+            );
+          })}
         </div>
 
         {filteredProducts.length === 0 ? (

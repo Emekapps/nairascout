@@ -215,7 +215,7 @@ export const SELLER_PLAN_ENTITLEMENTS: Record<SubscriptionPlan, PlanEntitlements
     maxVideosPerListing: 1,
     maxVideoSeconds: 60,
     maxVideoSizeMb: 30,
-    promotionalPlacements: false,
+    promotionalPlacements: true,
     teamAccountsAllowed: false,
     maxTeamSeats: 0,
     advancedAnalytics: false,

@@ -6,6 +6,7 @@ import {
   Bell,
   Loader2,
   LogIn,
+  MapPin,
   Package,
   Search,
   Store,
@@ -22,12 +23,14 @@ import type {
 } from '@/lib/nairascout-store';
 import { formatWholeNaira } from '@/lib/commission-engine';
 import { UserAvatar } from '@/components/shared/UserAvatar';
-import { ThemeToggle } from './ThemeToggle';
 
 interface TopUtilityBarProps {
   searchQuery: string;
+  selectedLocation: string;
   onSearchChange: (q: string) => void;
   onSearchSubmit: () => void;
+  onOpenLocationPicker: () => void;
+  onOpenMobileSearch: () => void;
   onSelectSearchProduct?: (product: GlobalSearchProductHit) => void;
   onSelectSearchCategory?: (category: GlobalSearchCategoryHit) => void;
   onSelectSearchPerson?: (person: GlobalSearchPersonHit) => void;
@@ -44,8 +47,11 @@ type FlatSearchItem =
 
 export function TopUtilityBar({
   searchQuery,
+  selectedLocation,
   onSearchChange,
   onSearchSubmit,
+  onOpenLocationPicker,
+  onOpenMobileSearch,
   onSelectSearchProduct,
   onSelectSearchCategory,
   onSelectSearchPerson,
@@ -209,49 +215,50 @@ export function TopUtilityBar({
           </span>
         </button>
 
-        {/* Global Smart Search Input (Desktop & Tablet) */}
-        <div ref={searchContainerRef} className="hidden sm:block flex-1 max-w-md relative">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (activeIndex >= 0 && flatItems[activeIndex]) {
-                selectFlatItem(flatItems[activeIndex]);
-              } else {
-                setDropdownOpen(false);
-                onSearchSubmit();
-              }
-            }}
-            className="relative"
-          >
-            <Search
-              className="w-4 h-4 text-muted-foreground absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-              aria-hidden="true"
-            />
-            <input
-              type="search"
-              role="combobox"
-              aria-autocomplete="list"
-              aria-expanded={showDropdown}
-              aria-controls="global-smart-search-listbox"
-              value={searchQuery}
-              onFocus={() => setDropdownOpen(true)}
-              onChange={(e) => handleInputChange(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Search products, categories, or scouts..."
-              aria-label="Search products, categories, or scouts"
-              className="w-full h-10 pl-10 pr-8 text-sm bg-card border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={handleClearSearch}
-                aria-label="Clear search"
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </form>
+        {/* Global Smart Search + Location Trigger (Desktop) */}
+        <div className="hidden md:flex flex-1 max-w-xl items-center gap-2">
+          <div ref={searchContainerRef} className="flex-1 min-w-0 relative">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (activeIndex >= 0 && flatItems[activeIndex]) {
+                  selectFlatItem(flatItems[activeIndex]);
+                } else {
+                  setDropdownOpen(false);
+                  onSearchSubmit();
+                }
+              }}
+              className="relative"
+            >
+              <Search
+                className="w-4 h-4 text-muted-foreground absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                aria-hidden="true"
+              />
+              <input
+                type="search"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={showDropdown}
+                aria-controls="global-smart-search-listbox"
+                value={searchQuery}
+                onFocus={() => setDropdownOpen(true)}
+                onChange={(e) => handleInputChange(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Search products, categories, or scouts..."
+                aria-label="Search products, categories, or scouts"
+                className="w-full h-10 pl-10 pr-8 text-sm bg-card border border-border rounded-xl text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-ring"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={handleClearSearch}
+                  aria-label="Clear search"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </form>
 
           {showDropdown && (
             <div
@@ -458,11 +465,37 @@ export function TopUtilityBar({
               )}
             </div>
           )}
+          </div>
+
+          <button
+            type="button"
+            onClick={onOpenLocationPicker}
+            aria-label={`Select location (${
+              selectedLocation === 'All' ? 'All Locations' : selectedLocation
+            })`}
+            className={`inline-flex items-center gap-1.5 h-10 px-3 rounded-xl border text-xs font-semibold shrink-0 transition-colors cursor-pointer ${
+              selectedLocation !== 'All'
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-border bg-card text-foreground hover:bg-muted'
+            }`}
+          >
+            <MapPin className="w-4 h-4 shrink-0" aria-hidden="true" />
+            <span className="hidden lg:inline max-w-[110px] truncate">
+              {selectedLocation === 'All' ? 'All Locations' : selectedLocation}
+            </span>
+          </button>
         </div>
 
-        {/* Right Utility Cluster: Theme Toggle + Notifications (+ Desktop Sign In when logged out) */}
+        {/* Right Utility Cluster: Mobile Search (left of Bell) + Notifications (+ Desktop Sign In when logged out) */}
         <div className="flex items-center gap-2 shrink-0 ml-auto">
-          <ThemeToggle />
+          <button
+            type="button"
+            onClick={onOpenMobileSearch}
+            aria-label="Open search"
+            className="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg border border-border bg-card text-foreground hover:bg-muted transition-colors cursor-pointer"
+          >
+            <Search className="w-4 h-4" aria-hidden="true" />
+          </button>
 
           {/* Notifications Bell wired to PostgreSQL notifications */}
           <div ref={noticesContainerRef} className="relative">

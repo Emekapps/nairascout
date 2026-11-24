@@ -22,8 +22,11 @@ interface AppShellProps {
   activeScout: ActiveScoutDTO | null;
   onLogout: () => Promise<void>;
   searchQuery: string;
+  selectedLocation: string;
   onSearchChange: (q: string) => void;
   onSearchSubmit: () => void;
+  onOpenLocationPicker: () => void;
+  onOpenMobileSearch: () => void;
   onSelectSearchProduct?: (product: GlobalSearchProductHit) => void;
   onSelectSearchCategory?: (category: GlobalSearchCategoryHit) => void;
   onSelectSearchPerson?: (person: GlobalSearchPersonHit) => void;
@@ -42,8 +45,11 @@ export function AppShell({
   activeScout,
   onLogout,
   searchQuery,
+  selectedLocation,
   onSearchChange,
   onSearchSubmit,
+  onOpenLocationPicker,
+  onOpenMobileSearch,
   onSelectSearchProduct,
   onSelectSearchCategory,
   onSelectSearchPerson,
@@ -65,8 +71,11 @@ export function AppShell({
       <div className="flex-1 flex flex-col md:pl-60 min-w-0">
         <TopUtilityBar
           searchQuery={searchQuery}
+          selectedLocation={selectedLocation}
           onSearchChange={onSearchChange}
           onSearchSubmit={onSearchSubmit}
+          onOpenLocationPicker={onOpenLocationPicker}
+          onOpenMobileSearch={onOpenMobileSearch}
           onSelectSearchProduct={onSelectSearchProduct}
           onSelectSearchCategory={onSelectSearchCategory}
           onSelectSearchPerson={onSelectSearchPerson}

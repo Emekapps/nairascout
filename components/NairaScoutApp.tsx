@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'motion/react';
 import type {
@@ -15,6 +15,7 @@ import type {
   SellerPlanId,
   SupportCase,
 } from '@/lib/nairascout-store';
+import { NIGERIAN_STATES_SEED } from '@/lib/constants/nigeria-and-categories';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import type { NavTab } from './HeaderNav';
 import { AppShell } from './layout/AppShell';
@@ -26,6 +27,8 @@ import SellerHubView from './SellerHubView';
 import CheckoutDrawer from './CheckoutDrawer';
 import ReferProductModal from './ReferProductModal';
 import TrustGuideDrawer from './TrustGuideDrawer';
+import { MobileSearchView } from './search/MobileSearchView';
+import { LocationPickerSheet } from './location/LocationPickerSheet';
 
 interface NairaScoutAppProps {
   initialSnapshot: NairaScoutSnapshot;
@@ -42,6 +45,9 @@ export default function NairaScoutApp({
     initialRefEvent ? 'referrals' : 'marketplace'
   );
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const [locationFilter, setLocationFilter] = useState<string>('All');
+  const [locationSheetOpen, setLocationSheetOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [marketplaceCategoryFilter, setMarketplaceCategoryFilter] = useState<string>('All');
   const [selectedProductIdFromSearch, setSelectedProductIdFromSearch] = useState<string | null>(null);
   const [networkSubTab, setNetworkSubTab] = useState<'explorer' | 'scouts_list' | 'simulator'>(
@@ -55,6 +61,43 @@ export default function NairaScoutApp({
   const [referModalProduct, setReferModalProduct] = useState<ProductListing | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; message: string } | null>(null);
+
+  const availableStates = useMemo(() => {
+    const dbStates =
+      snapshot.states && snapshot.states.length > 0
+        ? snapshot.states.map((s) => s.name)
+        : NIGERIAN_STATES_SEED.map((s) => s.name);
+    const productCities = snapshot.products.map((p) => p.sellerCity).filter(Boolean);
+    return Array.from(new Set([...dbStates, ...productCities]));
+  }, [snapshot.states, snapshot.products]);
+
+  const handleSelectSearchProduct = (product: GlobalSearchProductHit) => {
+    setSelectedProductIdFromSearch(product.id);
+    setMarketplaceCategoryFilter('All');
+    setGlobalSearchQuery('');
+    setActiveTab('marketplace');
+  };
+
+  const handleSelectSearchCategory = (cat: GlobalSearchCategoryHit) => {
+    setSelectedProductIdFromSearch(null);
+    setMarketplaceCategoryFilter(cat.name);
+    setGlobalSearchQuery('');
+    setActiveTab('marketplace');
+  };
+
+  const handleSelectSearchPerson = (person: GlobalSearchPersonHit) => {
+    setSelectedProductIdFromSearch(null);
+    if (!snapshot.authenticated && person.isSeller && person.sellerName) {
+      setMarketplaceCategoryFilter('All');
+      setGlobalSearchQuery(person.sellerName);
+      setActiveTab('marketplace');
+    } else {
+      setGlobalSearchQuery('');
+      setNetworkSubTab('scouts_list');
+      setNetworkScoutSearch(person.username);
+      setActiveTab('network');
+    }
+  };
 
   const showFeedback = (type: 'ok' | 'err', message: string) => {
     setFeedback({ type, message });
@@ -349,36 +392,17 @@ export default function NairaScoutApp({
         activeScout={snapshot.activeScout}
         onLogout={handleLogout}
         searchQuery={globalSearchQuery}
+        selectedLocation={locationFilter}
         onSearchChange={(q) => setGlobalSearchQuery(q)}
         onSearchSubmit={() => {
           setSelectedProductIdFromSearch(null);
           setActiveTab('marketplace');
         }}
-        onSelectSearchProduct={(product: GlobalSearchProductHit) => {
-          setSelectedProductIdFromSearch(product.id);
-          setMarketplaceCategoryFilter('All');
-          setGlobalSearchQuery('');
-          setActiveTab('marketplace');
-        }}
-        onSelectSearchCategory={(cat: GlobalSearchCategoryHit) => {
-          setSelectedProductIdFromSearch(null);
-          setMarketplaceCategoryFilter(cat.name);
-          setGlobalSearchQuery('');
-          setActiveTab('marketplace');
-        }}
-        onSelectSearchPerson={(person: GlobalSearchPersonHit) => {
-          setSelectedProductIdFromSearch(null);
-          if (!snapshot.authenticated && person.isSeller && person.sellerName) {
-            setMarketplaceCategoryFilter('All');
-            setGlobalSearchQuery(person.sellerName);
-            setActiveTab('marketplace');
-          } else {
-            setGlobalSearchQuery('');
-            setNetworkSubTab('scouts_list');
-            setNetworkScoutSearch(person.username);
-            setActiveTab('network');
-          }
-        }}
+        onOpenLocationPicker={() => setLocationSheetOpen(true)}
+        onOpenMobileSearch={() => setMobileSearchOpen(true)}
+        onSelectSearchProduct={handleSelectSearchProduct}
+        onSelectSearchCategory={handleSelectSearchCategory}
+        onSelectSearchPerson={handleSelectSearchPerson}
         banners={banners}
         footer={footer}
       >
@@ -393,6 +417,8 @@ export default function NairaScoutApp({
               snapshot={snapshot}
               externalSearchQuery={globalSearchQuery}
               onExternalSearchChange={setGlobalSearchQuery}
+              externalLocationFilter={locationFilter}
+              onExternalLocationChange={setLocationFilter}
               externalCategoryFilter={marketplaceCategoryFilter}
               onExternalCategoryChange={setMarketplaceCategoryFilter}
               externalSelectedProductId={selectedProductIdFromSearch}
@@ -471,6 +497,35 @@ export default function NairaScoutApp({
         snapshot={snapshot}
         onClose={() => setGuideOpen(false)}
         onSubmitSupport={handleSubmitSupport}
+      />
+
+      <MobileSearchView
+        open={mobileSearchOpen}
+        searchQuery={globalSearchQuery}
+        selectedLocation={locationFilter}
+        onSearchChange={setGlobalSearchQuery}
+        onSearchSubmit={() => {
+          setSelectedProductIdFromSearch(null);
+          setActiveTab('marketplace');
+        }}
+        onOpenLocationPicker={() => setLocationSheetOpen(true)}
+        onSelectProduct={handleSelectSearchProduct}
+        onSelectCategory={handleSelectSearchCategory}
+        onSelectPerson={handleSelectSearchPerson}
+        onClose={() => setMobileSearchOpen(false)}
+      />
+
+      <LocationPickerSheet
+        open={locationSheetOpen}
+        selectedLocation={locationFilter}
+        states={availableStates}
+        onSelectLocation={(loc) => {
+          setLocationFilter(loc);
+          if (!mobileSearchOpen) {
+            setActiveTab('marketplace');
+          }
+        }}
+        onClose={() => setLocationSheetOpen(false)}
       />
     </>
   );

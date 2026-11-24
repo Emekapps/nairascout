@@ -92,7 +92,7 @@ export const SELLER_PLANS: Record<SellerPlanId, SellerPlanSpec> = {
     analyticsLevel: 'Basic',
     orderManagement: 'Basic',
     inventoryManagement: 'Basic',
-    promotionalPlacements: false,
+    promotionalPlacements: true,
     sellerTeamAccounts: false,
     maxTeamSeats: 0,
     advancedReporting: false,

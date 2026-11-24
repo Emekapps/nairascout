@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { motion, useDragControls, type PanInfo } from 'motion/react';
 import {
   AlertTriangle,
   Check,
@@ -42,6 +43,7 @@ export default function ReferProductModal({
   onClose,
   onSendReferral,
 }: ReferProductModalProps) {
+  const dragControls = useDragControls();
   const activeContacts = snapshot.scoutsList.filter((c) => !c.blocked);
   const [selectedIds, setSelectedIds] = useState<string[]>(() => {
     if (initialRecipientId) return [initialRecipientId];
@@ -128,18 +130,39 @@ export default function ReferProductModal({
   const atBatchCap = selectedIds.length >= MAX_RECIPIENTS;
 
   return (
-    <div
+    <motion.div
       role="dialog"
       aria-modal="true"
       aria-label="Referral Card"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.18 }}
       className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex items-end md:items-center justify-center md:p-4"
       onClick={handleClose}
     >
-      <div
+      <motion.div
+        initial={{ y: 40, opacity: 0.95 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ type: 'spring', damping: 30, stiffness: 320 }}
+        drag="y"
+        dragControls={dragControls}
+        dragListener={false}
+        dragConstraints={{ top: 0, bottom: 0 }}
+        dragElastic={{ top: 0, bottom: 0.6 }}
+        onDragEnd={(_, info: PanInfo) => {
+          if (info.offset.y > 90 || info.velocity.y > 450) {
+            handleClose();
+          }
+        }}
         className="w-full max-w-lg rounded-t-3xl md:rounded-2xl bg-card text-card-foreground border-t md:border border-border p-5 sm:p-6 space-y-5 max-h-[92vh] overflow-y-auto shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="md:hidden w-10 h-1.5 bg-muted-foreground/30 rounded-full mx-auto -mt-1" />
+        <div
+          onPointerDown={(e) => dragControls.start(e)}
+          className="touch-none pt-1 pb-2 -mt-2 flex justify-center cursor-grab active:cursor-grabbing"
+        >
+          <div className="w-12 h-1.5 rounded-full bg-muted-foreground/30" />
+        </div>
 
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -184,7 +207,7 @@ export default function ReferProductModal({
               href={whatsappHref}
               target="_blank"
               rel="noopener noreferrer"
-              className="w-full h-11 px-4 rounded-full bg-[#25D366] text-white font-sans text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-95 transition-opacity"
+              className="w-full h-11 px-4 rounded-full bg-[#292D2F] text-white hover:bg-[#292D2F]/90 dark:bg-white dark:text-black dark:hover:bg-white/90 font-sans text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
             >
               <MessageCircle className="w-4 h-4" aria-hidden="true" />
               Share on WhatsApp
@@ -194,7 +217,7 @@ export default function ReferProductModal({
               href={twitterHref}
               target="_blank"
               rel="noopener noreferrer"
-              className="w-full h-11 px-4 rounded-full bg-[#1DA1F2] text-white font-sans text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-95 transition-opacity"
+              className="w-full h-11 px-4 rounded-full bg-[#292D2F] text-white hover:bg-[#292D2F]/90 dark:bg-white dark:text-black dark:hover:bg-white/90 font-sans text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
             >
               <Share2 className="w-4 h-4" aria-hidden="true" />
               Share on X / Twitter
@@ -203,7 +226,7 @@ export default function ReferProductModal({
             <button
               type="button"
               onClick={handleCopyQuickLink}
-              className="w-full h-11 px-4 rounded-full bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 text-white font-sans text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-95 transition-opacity cursor-pointer"
+              className="w-full h-11 px-4 rounded-full bg-[#292D2F] text-white hover:bg-[#292D2F]/90 dark:bg-white dark:text-black dark:hover:bg-white/90 font-sans text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
               {copiedGeneral ? (
                 <Check className="w-4 h-4" aria-hidden="true" />
@@ -398,7 +421,7 @@ export default function ReferProductModal({
             </button>
           </form>
         )}
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
