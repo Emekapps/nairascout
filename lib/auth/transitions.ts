@@ -1,3 +1,4 @@
+// NS-ACC-002 & NS-VER-001: Decoupled 4-axis lifecycle state machines (Account, Seller, Verification, Subscription)
 export type AccountStatus =
   | 'PENDING_ACTIVATION'
   | 'ACTIVE'

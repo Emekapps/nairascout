@@ -1,3 +1,4 @@
+// NS-COM-001: 10% platform commission / 90% seller proceeds; 20% referral pool across full Gen 1–Gen 13 schedule
 export const COMMISSION_RULE_VERSION = 'v4.0-13G-2026.11';
 
 export interface ScheduleEntry {

@@ -10,6 +10,7 @@ import {
   getNairaScoutSnapshot,
 } from '@/lib/nairascout-store';
 
+// NS-ACC-001 & NS-REF-001: Authenticated idempotent PostgreSQL Scout provisioning & referral attribution
 export async function POST(req: NextRequest) {
   if (!verifyMutationOrigin(req)) {
     return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });

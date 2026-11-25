@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, inArray, or } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import {
   AncestorNode,
   CommissionBreakdown,
@@ -684,6 +684,7 @@ async function computeDownstreamFromDb(
 // ATOMIC SIGNUP / FIRST-LOGIN PROVISIONING (DRIZZLE POSTGRES TRANSACTION)
 // ============================================================================
 
+// NS-ACC-001 & NS-REF-001: Idempotent unified PostgreSQL user provisioning + permanent ancestry lock
 export async function ensureUserProvisionedInDb(
   identity: SupabaseSessionIdentity,
   input?: {
@@ -1780,6 +1781,7 @@ export async function getNairaScoutSnapshot(
 // SERVER-ENFORCED TRANSACTIONAL ACTIONS (100% DRIZZLE POSTGRESQL)
 // ============================================================================
 
+// NS-COM-001 & NS-ORD-001: Order checkout with integer kobo 13-generation ledger attribution & 10-day SLA
 export async function createOrderFromCheckout(
   actorUserId: string,
   input: {
@@ -2050,6 +2052,7 @@ export async function advanceOrderStatus(
   });
 }
 
+// NS-REF-002: Batch product referral creation (1..20 Scouts List recipients, block/mute filtering)
 export async function createReferralBatchForActor(
   actorUserId: string,
   input: {
@@ -2598,6 +2601,7 @@ export async function reportAbuseForActor(
 // SELLER ONBOARDING, DRAFTS, VERIFICATION GATE & TEAM MANAGEMENT
 // ============================================================================
 
+// NS-SEL-001 & NS-VER-001: Seller capability activation & SELLER verification initiation
 export async function activateSellerOnboarding(
   actorUserId: string,
   input: {
@@ -2732,6 +2736,7 @@ export async function activateSellerOnboarding(
   });
 }
 
+// NS-SEL-002: Create Seller draft product listing
 export async function createSellerDraftListing(
   actorUserId: string,
   input: {
@@ -2821,6 +2826,7 @@ export async function createSellerDraftListing(
   };
 }
 
+// NS-SEL-003 & NS-VER-002: Publish Seller listing (enforces SELLER VERIFIED gate & subscription caps)
 export async function publishSellerListingById(
   actorUserId: string,
   listingId: string
@@ -2955,6 +2961,7 @@ export async function upgradeSellerPlanForActor(actorUserId: string, planId: Sel
   });
 }
 
+// NS-SEL-004: Seller team seat management (Business Seller + Sprawl plan, max 5 seats)
 export async function manageSellerTeamForActor(
   actorUserId: string,
   input:
@@ -3375,6 +3382,7 @@ export async function submitVerificationEvidence(
  * Preserves Scout account (`users.accountStatus = 'ACTIVE'`), Scouts List,
  * permanent referral ancestry, and Scout referral wallet/commissions intact.
  */
+// NS-ACC-005 & NS-SEL-006: Voluntary Seller-only closure (preserves Scout identity & ancestry)
 export async function closeSellerCapabilityVoluntarily(actorUserId: string, reason?: string) {
   const db = requireDb();
   await ensureTablesReady(db);
@@ -3481,6 +3489,7 @@ export async function closeSellerCapabilityVoluntarily(actorUserId: string, reas
  * closes any Seller capabilities, revokes sessions, while preserving users,
  * referral_ancestry, product_referral_events, orders, and ledger records.
  */
+// NS-ACC-005 & NS-GOV-001: Voluntary account closure (retains immutable ancestry, orders, ledger & audit logs)
 export async function closeAccountVoluntarily(actorUserId: string, reason?: string) {
   const db = requireDb();
   await ensureTablesReady(db);
@@ -3886,6 +3895,7 @@ export async function getAdminConsoleSnapshot(actorUserId: string) {
   };
 }
 
+// NS-VER-003 & NS-GOV-001: Verification officer review with separation-of-duties and immutable audit trail
 export async function adminReviewVerification(
   actorUserId: string,
   input: {
@@ -4010,6 +4020,7 @@ export async function adminReviewVerification(
   });
 }
 
+// NS-GOV-002: Granular capability restriction impose/lift
 export async function adminManageRestriction(
   actorUserId: string,
   input:
@@ -4115,6 +4126,7 @@ export async function adminManageRestriction(
   });
 }
 
+// NS-GOV-002: Account/Seller/Subscription governance status enforcement
 export async function adminApplyUserAction(
   actorUserId: string,
   input: {
@@ -4374,6 +4386,7 @@ export async function adminApplyUserAction(
   });
 }
 
+// NS-GOV-003 & NS-REF-004: Maker-Checker request creation (ANCESTRY_OVERRIDE restricted strictly to SUPER_ADMIN)
 export async function adminCreateMakerCheckerRequest(
   actorUserId: string,
   input: {
@@ -4386,12 +4399,16 @@ export async function adminCreateMakerCheckerRequest(
 ) {
   const db = requireDb();
   const ctx = await loadDbAuthContext(actorUserId);
-  assertAdminRole(ctx, [
-    'FINANCE_OFFICER',
-    'PLATFORM_ADMIN',
-    'TRUST_AND_SAFETY',
-    'OPERATIONS_MANAGER',
-  ]);
+  if (input.actionType === 'ANCESTRY_OVERRIDE') {
+    assertAdminRole(ctx, ['SUPER_ADMIN']);
+  } else {
+    assertAdminRole(ctx, [
+      'FINANCE_OFFICER',
+      'PLATFORM_ADMIN',
+      'TRUST_AND_SAFETY',
+      'OPERATIONS_MANAGER',
+    ]);
+  }
 
   if (!isUuid(input.targetUserId)) {
     throw new AuthorizationError('Valid target user UUID is required.', 400, 'INVALID_TARGET');
@@ -4426,6 +4443,7 @@ export async function adminCreateMakerCheckerRequest(
   return created;
 }
 
+// NS-GOV-003 & NS-REF-004: Dual-control Maker-Checker execution (ANCESTRY_OVERRIDE requires dual SUPER_ADMIN + SET LOCAL)
 export async function adminDecideMakerCheckerRequest(
   actorUserId: string,
   input: {
@@ -4460,6 +4478,23 @@ export async function adminDecideMakerCheckerRequest(
 
     // Strict Dual-Control Check: maker_id !== checker_id
     assertMakerCheckerDistinct(reqRow.makerId, actorUserId);
+
+    // NS-REF-004: Strict dual-approved SUPER_ADMIN authorization for ANCESTRY_OVERRIDE
+    if (reqRow.actionType === 'ANCESTRY_OVERRIDE') {
+      assertAdminRole(ctx, ['SUPER_ADMIN']);
+      const makerRoleRows = await tx
+        .select({ adminRole: platformAdminRoles.adminRole })
+        .from(platformAdminRoles)
+        .where(eq(platformAdminRoles.userId, reqRow.makerId))
+        .limit(1);
+      if (normalizeAdminRole(makerRoleRows[0]?.adminRole) !== 'SUPER_ADMIN') {
+        throw new AuthorizationError(
+          'ANCESTRY_OVERRIDE requires dual-approved SUPER_ADMIN Maker-Checker authorization.',
+          403,
+          'SUPER_ADMIN_DUAL_CONTROL_REQUIRED'
+        );
+      }
+    }
 
     const now = new Date();
     const notes = input.checkerNotes.trim();
@@ -4535,6 +4570,34 @@ export async function adminDecideMakerCheckerRequest(
       if (newDirectReferrerId === reqRow.targetUserId) {
         throw new AuthorizationError('Self-referral ancestry override rejected.', 400, 'SELF_REFERRAL');
       }
+
+      if (newDirectReferrerId) {
+        const allAncestryRows = await tx
+          .select({
+            scoutUserId: referralAncestry.scoutUserId,
+            directReferrerId: referralAncestry.directReferrerId,
+          })
+          .from(referralAncestry);
+        const directReferrerMap: Record<string, string | null> = {};
+        for (const row of allAncestryRows) {
+          directReferrerMap[row.scoutUserId] = row.directReferrerId;
+        }
+        const cycleCheck = validateAncestryRelationship(
+          reqRow.targetUserId,
+          newDirectReferrerId,
+          directReferrerMap
+        );
+        if (!cycleCheck.valid) {
+          throw new AuthorizationError(
+            cycleCheck.reason || 'Circular referral ancestry rejected.',
+            400,
+            'CIRCULAR_ANCESTRY'
+          );
+        }
+      }
+
+      // NS-REF-004: Authorize PostgreSQL trg_protect_referral_ancestry strictly inside this transaction
+      await tx.execute(sql`SET LOCAL app.allow_ancestry_override = 'true'`);
       await tx
         .update(referralAncestry)
         .set({
@@ -4570,6 +4633,7 @@ export async function adminDecideMakerCheckerRequest(
   });
 }
 
+// NS-GOV-004: Independent Appeals Officer adjudication
 export async function adminDecideAppeal(
   actorUserId: string,
   input: {
@@ -4699,6 +4763,7 @@ export async function submitSupportCaseForActor(
   };
 }
 
+// NS-GOV-005: Admin-managed product listing categories (SUPER_ADMIN)
 export async function adminCreateListingCategory(
   actorUserId: string,
   input: {

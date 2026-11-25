@@ -3,8 +3,8 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  /* LIGHT MODE — Crisp Alabaster + Black BUY + Charcoal Black (#292D2F) REFER */
-  --background: 220 20% 98%;          /* #F8F9FB */
+  /* LIGHT MODE — Cool Surface (#F3F4F6) + Pure White Cards + Black BUY + Charcoal Black (#292D2F) REFER */
+  --background: 220 14% 96%;          /* #F3F4F6 */
   --foreground: 222 47% 11%;          /* #0F172A */
 
   --card: 0 0% 100%;                  /* #FFFFFF */

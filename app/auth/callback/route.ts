@@ -14,6 +14,7 @@ const VALID_EMAIL_OTP_TYPES = new Set<EmailOtpType>([
   'email',
 ]);
 
+// NS-ACC-001 & NS-ACC-002: Supabase Auth PKCE/OTP callback, session cookie persistence & PostgreSQL provisioning
 export async function GET(req: NextRequest) {
   const requestUrl = new URL(req.url);
   const rawForwardedHost = req.headers.get('x-forwarded-host') || req.headers.get('host');

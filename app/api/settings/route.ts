@@ -18,6 +18,7 @@ import {
 } from '@/lib/nairascout-store';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
+// NS-ACC-004 & NS-VER-001: Profile/privacy settings, unblock & KYC/Bank verification evidence submission
 export async function PATCH(req: NextRequest) {
   if (!verifyMutationOrigin(req)) {
     return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });
@@ -75,6 +76,7 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
+// NS-GOV-004, NS-SEL-006 & NS-ACC-005: Governance appeals, Seller-only closure & voluntary account closure
 export async function POST(req: NextRequest) {
   if (!verifyMutationOrigin(req)) {
     return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });

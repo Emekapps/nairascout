@@ -29,6 +29,7 @@ import {
   calculateThirteenGenerationCommissions,
 } from '@/lib/commission-engine';
 
+// NS-ACC-001 & NS-PRI-001: Session snapshot hydration & sanitized Scout directory feed
 export async function GET(req: NextRequest) {
   const identity = await extractSessionIdentityFromRequest(req);
   const refEvent = req.nextUrl.searchParams.get('refEvent') || req.cookies.get('ns_ref_event')?.value || null;
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const action = body?.action as string;
 
-    // Public stateless simulator does not require auth
+    // NS-COM-001: Public stateless 13-generation commission schedule simulator
     if (action === 'simulate_commission') {
       const merchNaira = Number(body.merchandiseNaira || 100000);
       const depth = Math.max(0, Math.min(13, Number(body.depth || 13)));
@@ -97,6 +98,7 @@ export async function POST(req: NextRequest) {
 
     const actorUserId = identity.userId;
 
+    // NS-ORD-001 & NS-COM-001: Authenticated checkout & integer kobo 13-generation commission ledger attribution
     if (action === 'checkout') {
       const order = await createOrderFromCheckout(actorUserId, {
         productListingId: String(body.productListingId || ''),
@@ -114,6 +116,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ order, snapshot: await getNairaScoutSnapshot(actorUserId) });
     }
 
+    // NS-REF-002: Batch product referral creation (1..20 recipients)
     if (action === 'refer_product') {
       const recipientIds: string[] = Array.isArray(body.recipientScoutIds)
         ? body.recipientScoutIds.map(String)
@@ -133,6 +136,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // NS-NET-001: Scouts List invitations, relationship blocks & abuse reporting
     if (action === 'invite_scout') {
       const invitation = await inviteToScoutsListForActor(
         actorUserId,

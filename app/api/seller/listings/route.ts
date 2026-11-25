@@ -9,6 +9,7 @@ import {
   getNairaScoutSnapshot,
 } from '@/lib/nairascout-store';
 
+// NS-SEL-002: Seller draft listing creation (available prior to verification; publishing remains gated)
 export async function POST(req: NextRequest) {
   if (!verifyMutationOrigin(req)) {
     return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });

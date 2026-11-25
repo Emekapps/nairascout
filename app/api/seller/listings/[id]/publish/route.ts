@@ -9,6 +9,7 @@ import {
   publishSellerListingById,
 } from '@/lib/nairascout-store';
 
+// NS-SEL-003 & NS-VER-002: Fail-secure listing publication (requires SELLER VERIFIED & subscription plan caps)
 export async function POST(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }

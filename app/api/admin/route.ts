@@ -23,6 +23,7 @@ import {
 } from '@/lib/nairascout-store';
 import { createSupabaseAdminClient } from '@/lib/supabase/server';
 
+// NS-GOV-001 & NS-PRI-002: Admin governance console read & private verification-docs signed URL access
 export async function GET(req: NextRequest) {
   const identity = await extractSessionIdentityFromRequest(req);
   if (!identity) {
@@ -61,6 +62,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
+// NS-GOV-001, NS-VER-003, NS-GOV-002, NS-GOV-003 & NS-GOV-004: Admin governance mutations
 export async function POST(req: NextRequest) {
   if (!verifyMutationOrigin(req)) {
     return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });

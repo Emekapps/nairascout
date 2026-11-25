@@ -13,6 +13,7 @@ import {
   manageSellerTeamForActor,
 } from '@/lib/nairascout-store';
 
+// NS-SEL-004: Business Seller team seat management (Sprawl plan, max 5 seats)
 export async function POST(req: NextRequest) {
   if (!verifyMutationOrigin(req)) {
     return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });

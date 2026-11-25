@@ -10,6 +10,7 @@ import {
   SellerPlanId,
 } from '@/lib/nairascout-store';
 
+// NS-SEL-001 & NS-VER-001: Seller capability activation & SELLER verification initiation
 export async function POST(req: NextRequest) {
   if (!verifyMutationOrigin(req)) {
     return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });

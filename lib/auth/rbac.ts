@@ -1,3 +1,4 @@
+// NS-ACC-002: Unified Identity & Decoupled Lifecycle RBAC Definitions
 import type { SellerTeamPermissions } from '@/lib/db/schema';
 import {
   AccountStatus,
@@ -358,6 +359,7 @@ export function assertCanManageSellerDrafts(ctx: UserAuthContext | null): void {
   }
 }
 
+// NS-SEL-003 & NS-VER-002: Fail-secure server enforcement of SELLER VERIFIED status and plan caps
 export function assertCanPublishListing(
   ctx: UserAuthContext | null,
   usage: {
@@ -444,6 +446,7 @@ export function assertCanPublishListing(
   }
 }
 
+// NS-SEL-004: Business Seller & Sprawl plan team-seat enforcement (max 5 seats)
 export function assertCanManageSellerTeam(ctx: UserAuthContext | null): void {
   assertAccountOperational(ctx);
   assertCapabilityNotRestricted(ctx, 'MANAGE_TEAM');
@@ -553,9 +556,7 @@ export function assertReferralBatchValid(
   return eligible;
 }
 
-/**
- * Enforces separation of duties on Seller / KYC verification review.
- */
+// NS-VER-003: Separation of duties on verification review
 export function assertCanReviewVerification(
   officerUserId: string,
   targetSellerOwnerId: string
@@ -569,9 +570,7 @@ export function assertCanReviewVerification(
   }
 }
 
-/**
- * Enforces Maker-Checker dual control (checker must be distinct from maker).
- */
+// NS-GOV-003: Maker-Checker dual-control distinct officer guard
 export function assertMakerCheckerDistinct(makerId: string, checkerId: string): void {
   if (makerId === checkerId) {
     throw new AuthorizationError(
@@ -639,6 +638,7 @@ export interface PublicScoutProfileDTO {
   totalSoldUnits: number;
 }
 
+// NS-PRI-001: Public Scout DTO sanitizer (strips private email, phone, bank, and ancestry fields)
 export function toPublicScoutProfileDTO(input: {
   userId: string;
   username: string;

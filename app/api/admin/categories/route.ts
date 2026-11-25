@@ -12,6 +12,7 @@ import {
   getListingCategories,
 } from '@/lib/nairascout-store';
 
+// NS-GOV-005: Admin-managed product listing categories (read for platform admins, write for SUPER_ADMIN)
 export async function GET(req: NextRequest) {
   const identity = await extractSessionIdentityFromRequest(req);
   if (!identity) {

@@ -34,9 +34,7 @@ export interface SupabaseSessionIdentity {
   userMetadata: Record<string, unknown>;
 }
 
-/**
- * Verifies same-origin for cookie-authenticated state-changing requests.
- */
+// NS-ACC-002: Same-origin verification for state-changing authenticated requests
 export function verifyMutationOrigin(req: NextRequest): boolean {
   const requestedWith = req.headers.get('x-requested-with');
   if (requestedWith === 'XMLHttpRequest' || requestedWith === 'NairaScout') {
@@ -53,10 +51,7 @@ export function verifyMutationOrigin(req: NextRequest): boolean {
   }
 }
 
-/**
- * Loads UserAuthContext directly from PostgreSQL via Drizzle ORM,
- * including granular capability_restrictions and normalized 4-axis statuses.
- */
+// NS-ACC-002 & NS-GOV-002: Load unified PostgreSQL auth context, roles, and active capability restrictions
 export async function loadDbAuthContext(userId: string): Promise<UserAuthContext | null> {
   const db = getDb();
   if (!db) return null;
@@ -167,9 +162,7 @@ export async function loadDbAuthContext(userId: string): Promise<UserAuthContext
   };
 }
 
-/**
- * Extracts verified Supabase Auth identity exclusively via @supabase/ssr.
- */
+// NS-ACC-001: Server-side Supabase Auth session verification
 export async function extractSessionIdentityFromRequest(
   req?: NextRequest
 ): Promise<SupabaseSessionIdentity | null> {

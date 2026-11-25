@@ -98,6 +98,7 @@ async function getStorageClientForActor(req: NextRequest) {
   return await createSupabaseServerClient();
 }
 
+// NS-SEL-005: Seller storefront profile image upload & storage confinement
 export async function POST(req: NextRequest) {
   if (!verifyMutationOrigin(req)) {
     return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });
