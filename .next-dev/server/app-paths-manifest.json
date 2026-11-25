@@ -1,8 +1,9 @@
 {
-  "/api/nairascout/route": "app/api/nairascout/route.js",
-  "/api/notifications/route": "app/api/notifications/route.js",
-  "/api/seller/listings/media/route": "app/api/seller/listings/media/route.js",
+  "/api/policies/route": "app/api/policies/route.js",
+  "/api/help/route": "app/api/help/route.js",
+  "/api/admin/content/route": "app/api/admin/content/route.js",
   "/page": "app/page.js",
-  "/notifications/page": "app/notifications/page.js",
-  "/seller/listings/new/page": "app/seller/listings/new/page.js"
+  "/help/page": "app/help/page.js",
+  "/programme-rules/page": "app/programme-rules/page.js",
+  "/admin/content/page": "app/admin/content/page.js"
 }

@@ -374,6 +374,44 @@ export async function ensureCommerceTables(
         FROM public.platform_notifications
         ON CONFLICT (id) DO NOTHING;
       `);
+      await executeSql(sql`
+        CREATE TABLE IF NOT EXISTS public.platform_policies (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          slug text NOT NULL UNIQUE,
+          title text NOT NULL,
+          summary text NOT NULL,
+          content_markdown text NOT NULL,
+          version text NOT NULL DEFAULT '1.0.0',
+          effective_date timestamptz NOT NULL DEFAULT now(),
+          is_published boolean NOT NULL DEFAULT true,
+          updated_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        );
+      `);
+      await executeSql(sql`
+        CREATE INDEX IF NOT EXISTS idx_platform_policies_published
+          ON public.platform_policies(is_published, slug);
+      `);
+      await executeSql(sql`
+        CREATE TABLE IF NOT EXISTS public.help_articles (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          slug text NOT NULL UNIQUE,
+          category text NOT NULL,
+          title text NOT NULL,
+          summary text NOT NULL,
+          body_markdown text NOT NULL,
+          audience_role text NOT NULL DEFAULT 'ALL',
+          sort_order integer NOT NULL DEFAULT 0,
+          is_published boolean NOT NULL DEFAULT true,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        );
+      `);
+      await executeSql(sql`
+        CREATE INDEX IF NOT EXISTS idx_help_articles_category_published
+          ON public.help_articles(is_published, category, sort_order);
+      `);
     })().catch((err) => {
       globalForDdl.__nsCommerceTablesReady = undefined;
       throw err;

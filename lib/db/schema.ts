@@ -473,3 +473,38 @@ export const listingCategories = pgTable('listing_categories', {
   createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+// ============================================================================
+// 7. PLATFORM POLICIES & HELP CENTRE KNOWLEDGE BASE (NS-FND-003, NS-FND-004)
+// ============================================================================
+
+// NS-FND-003: Versioned Platform Policies & Programme Rules
+export const platformPolicies = pgTable('platform_policies', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  slug: text('slug').notNull().unique(),
+  title: text('title').notNull(),
+  summary: text('summary').notNull(),
+  contentMarkdown: text('content_markdown').notNull(),
+  version: text('version').notNull().default('1.0.0'),
+  effectiveDate: timestamp('effective_date', { withTimezone: true }).defaultNow().notNull(),
+  isPublished: boolean('is_published').default(true).notNull(),
+  updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// NS-FND-004: Searchable Help Centre & Knowledge Base Articles
+export const helpArticles = pgTable('help_articles', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  slug: text('slug').notNull().unique(),
+  category: text('category').notNull(),
+  title: text('title').notNull(),
+  summary: text('summary').notNull(),
+  bodyMarkdown: text('body_markdown').notNull(),
+  audienceRole: text('audience_role').notNull().default('ALL'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  isPublished: boolean('is_published').default(true).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+

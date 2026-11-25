@@ -10,6 +10,10 @@ import {
   ShieldCheck,
   Wallet,
 } from 'lucide-react';
+import {
+  NAIRASCOUT_TAGLINE,
+  NAIRASCOUT_VALUE_PROPOSITION,
+} from '@/lib/constants/foundation-content';
 
 interface InFeedPromoCarouselProps {
   onGoToReferrals: () => void;
@@ -50,8 +54,8 @@ export function InFeedPromoCarousel({
     {
       id: 'hero-discover',
       eyebrow: 'Thirteen-Generation Social Commerce',
-      headline: 'Discover products worth sharing.',
-      body: 'Browse quality products from our favourite brands and vendors.',
+      headline: NAIRASCOUT_TAGLINE,
+      body: NAIRASCOUT_VALUE_PROPOSITION,
     },
     {
       id: 'hero-share',

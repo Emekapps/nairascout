@@ -13,6 +13,10 @@ import {
 } from 'lucide-react';
 import type { LedgerEntryStatus, NairaScoutSnapshot } from '@/lib/nairascout-store';
 import { formatKoboToNaira } from '@/lib/commission-engine';
+import {
+  NAIRASCOUT_ACCOUNTING_BOUNDARY,
+  NAIRASCOUT_EARNINGS_DISCLAIMER,
+} from '@/lib/constants/foundation-content';
 import { WalletHeroCard } from './wallet/WalletHeroCard';
 import { DismissibleNoticePanel } from './shared/DismissibleNoticePanel';
 
@@ -134,11 +138,11 @@ export default function WalletView({ snapshot }: WalletViewProps) {
         </div>
 
         <div className="bg-card border border-border rounded-2xl p-5">
-          <p className="text-xs text-muted-foreground">Pending</p>
+          <p className="text-xs text-muted-foreground">Pending Commission</p>
           <p className="mt-2 font-numeric text-xl font-bold text-amber-600 dark:text-amber-400 tabular-nums">
             {formatKoboToNaira(wallet.pendingKobo)}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">Not withdrawable yet</p>
+          <p className="mt-1 text-xs text-muted-foreground">Pending settlement · Not withdrawable</p>
         </div>
 
         <div className="bg-card border border-border rounded-2xl p-5">
@@ -214,7 +218,22 @@ export default function WalletView({ snapshot }: WalletViewProps) {
               ? 'Minimum ₦5,000 threshold satisfied'
               : 'Requires KYC, verified bank & ₦5,000 minimum'}
           </p>
+          <Link
+            href="/programme-rules?policy=payout-policy"
+            className="inline-block pt-1 text-xs font-semibold text-foreground hover:underline"
+          >
+            Read Payout Policy →
+          </Link>
         </div>
+      </section>
+
+      {/* NS-FND-001 & NS-FND-002: Platform Accounting Boundary & Earnings Disclosure */}
+      <section className="bg-card border border-border rounded-2xl p-5 space-y-2 text-xs text-muted-foreground">
+        <p className="font-semibold text-foreground">Platform Accounting Boundary</p>
+        <p className="leading-relaxed">{NAIRASCOUT_ACCOUNTING_BOUNDARY}</p>
+        <p className="leading-relaxed pt-1 border-t border-border/60">
+          {NAIRASCOUT_EARNINGS_DISCLAIMER}
+        </p>
       </section>
 
       {/* Immutable Ledger Table */}

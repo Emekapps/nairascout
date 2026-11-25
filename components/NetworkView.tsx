@@ -18,6 +18,10 @@ import {
 } from 'lucide-react';
 import type { NairaScoutSnapshot, ProductListing } from '@/lib/nairascout-store';
 import { CommissionBreakdown, formatKoboToNaira } from '@/lib/commission-engine';
+import {
+  NAIRASCOUT_EARNINGS_DISCLAIMER,
+  NAIRASCOUT_TAGLINE,
+} from '@/lib/constants/foundation-content';
 import { DismissibleNoticePanel } from './shared/DismissibleNoticePanel';
 import { UserIdentityRow } from './shared/UserIdentityRow';
 
@@ -1045,6 +1049,11 @@ export default function NetworkView({
                     </div>
                   )}
                 </div>
+
+                <div className="bg-card border border-border rounded-2xl p-4 text-xs text-muted-foreground leading-relaxed space-y-1">
+                  <p className="font-semibold text-foreground">{NAIRASCOUT_TAGLINE}</p>
+                  <p>{NAIRASCOUT_EARNINGS_DISCLAIMER}</p>
+                </div>
               </>
             )}
           </div>
@@ -1080,7 +1089,7 @@ export default function NetworkView({
                 <select
                   value={abuseReason}
                   onChange={(e) => setAbuseReason(e.target.value)}
-                  className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
+                  className="w-full appearance-none pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                 >
                   <option value="Unsolicited spam or harassment">
                     Unsolicited spam or harassment

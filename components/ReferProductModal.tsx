@@ -20,6 +20,10 @@ import type {
   ProductReferralEvent,
 } from '@/lib/nairascout-store';
 import { formatWholeNaira } from '@/lib/commission-engine';
+import {
+  NAIRASCOUT_EARNINGS_DISCLAIMER,
+  NAIRASCOUT_TAGLINE,
+} from '@/lib/constants/foundation-content';
 import { UserIdentityRow } from './shared/UserIdentityRow';
 
 const MAX_RECIPIENTS = 20;
@@ -421,6 +425,16 @@ export default function ReferProductModal({
             </button>
           </form>
         )}
+
+        <div className="pt-3 border-t border-border text-[11px] text-muted-foreground leading-relaxed space-y-1">
+          <p className="font-semibold text-foreground">{NAIRASCOUT_TAGLINE}</p>
+          <p>
+            {NAIRASCOUT_EARNINGS_DISCLAIMER}{' '}
+            <Link href="/programme-rules" onClick={handleClose} className="underline font-medium text-foreground">
+              Programme Rules
+            </Link>
+          </p>
+        </div>
       </motion.div>
     </motion.div>
   );

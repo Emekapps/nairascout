@@ -11,30 +11,35 @@
       "static/chunks/main-app.js",
       "static/chunks/app/page.js"
     ],
-    "/notifications/page": [
+    "/help/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/notifications/page.js"
+      "static/chunks/app/help/page.js"
     ],
-    "/seller/listings/new/page": [
+    "/programme-rules/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/seller/listings/new/page.js"
+      "static/chunks/app/programme-rules/page.js"
     ],
-    "/api/nairascout/route": [
+    "/admin/content/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/api/nairascout/route.js"
+      "static/chunks/app/admin/content/page.js"
     ],
-    "/api/notifications/route": [
+    "/api/policies/route": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/api/notifications/route.js"
+      "static/chunks/app/api/policies/route.js"
     ],
-    "/api/seller/listings/media/route": [
+    "/api/help/route": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/api/seller/listings/media/route.js"
+      "static/chunks/app/api/help/route.js"
+    ],
+    "/api/admin/content/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/admin/content/route.js"
     ]
   }
 }

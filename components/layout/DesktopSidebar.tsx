@@ -4,7 +4,9 @@ import Link from 'next/link';
 import {
   BookOpen,
   Compass,
+  HelpCircle,
   LogIn,
+  Scale,
   Send,
   Settings,
   Shield,
@@ -129,6 +131,22 @@ export function DesktopSidebar({
             <BookOpen className="w-4 h-4 shrink-0" aria-hidden="true" />
             <span>Trust &amp; Guide</span>
           </button>
+
+          <Link
+            href="/programme-rules"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-sidebar-foreground hover:bg-muted hover:text-foreground transition-colors"
+          >
+            <Scale className="w-4 h-4 shrink-0" aria-hidden="true" />
+            <span>Programme Rules</span>
+          </Link>
+
+          <Link
+            href="/help"
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-sidebar-foreground hover:bg-muted hover:text-foreground transition-colors"
+          >
+            <HelpCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
+            <span>Help Centre</span>
+          </Link>
         </div>
       </nav>
 

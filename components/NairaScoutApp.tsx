@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion } from 'motion/react';
 import type {
@@ -15,6 +16,10 @@ import type {
   SellerPlanId,
   SupportCase,
 } from '@/lib/nairascout-store';
+import {
+  NAIRASCOUT_EARNINGS_DISCLAIMER,
+  NAIRASCOUT_TAGLINE,
+} from '@/lib/constants/foundation-content';
 import { NIGERIAN_STATES_SEED } from '@/lib/constants/nigeria-and-categories';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import type { NavTab } from './HeaderNav';
@@ -337,33 +342,45 @@ export default function NairaScoutApp({
 
   const footer = (
     <footer className="border-t border-border bg-card/70 pb-20 md:pb-0">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-muted-foreground">
-        <p>
-          NairaScout · Thirteen-generation referral marketing &amp; social commerce. No income is
-          guaranteed; commissions arise strictly from genuine qualifying product sales.
-        </p>
-        <div className="flex items-center gap-5 shrink-0">
-          <button
-            type="button"
-            onClick={() => setGuideOpen(true)}
-            className="hover:text-foreground transition-colors cursor-pointer"
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 text-xs text-muted-foreground">
+        <div className="space-y-1 max-w-2xl">
+          <p className="font-semibold text-foreground">
+            NairaScout · {NAIRASCOUT_TAGLINE}
+          </p>
+          <p>{NAIRASCOUT_EARNINGS_DISCLAIMER}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 shrink-0">
+          <Link
+            href="/programme-rules?policy=programme-rules"
+            className="hover:text-foreground transition-colors"
           >
             Programme Rules
-          </button>
+          </Link>
           <button
             type="button"
-            onClick={() => setActiveTab('network')}
+            onClick={() => {
+              setNetworkSubTab('simulator');
+              setActiveTab('network');
+            }}
             className="hover:text-foreground transition-colors cursor-pointer"
           >
             Commission Calculator
           </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('wallet')}
-            className="hover:text-foreground transition-colors cursor-pointer"
+          <Link
+            href="/programme-rules?policy=payout-policy"
+            className="hover:text-foreground transition-colors"
           >
             Payout Policy
-          </button>
+          </Link>
+          <Link
+            href="/programme-rules?policy=platform-boundaries"
+            className="hover:text-foreground transition-colors"
+          >
+            Platform Boundaries
+          </Link>
+          <Link href="/help" className="hover:text-foreground transition-colors">
+            Help Centre
+          </Link>
         </div>
       </div>
     </footer>

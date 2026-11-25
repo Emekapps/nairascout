@@ -34,11 +34,14 @@ import type {
   AbuseReportRecord,
   AuditLogRecord,
   GovernanceAppealDTO,
+  HelpArticleDTO,
   ListingCategoryDTO,
   MakerCheckerActionType,
   MakerCheckerRequestDTO,
+  PlatformPolicyDTO,
   VerificationRecord,
 } from '@/lib/nairascout-store';
+import { AdminContentManager } from './admin/AdminContentManager';
 import { UserIdentityRow } from './shared/UserIdentityRow';
 import { ThemeToggle } from './layout/ThemeToggle';
 
@@ -90,6 +93,8 @@ export interface AdminConsoleData {
   abuseReports: AbuseReportRecord[];
   auditLogs: AuditLogRecord[];
   categories: ListingCategoryDTO[];
+  policies: PlatformPolicyDTO[];
+  helpArticles: HelpArticleDTO[];
 }
 
 export type AdminSection =
@@ -99,6 +104,7 @@ export type AdminSection =
   | 'approvals'
   | 'appeals'
   | 'categories'
+  | 'content'
   | 'audit_logs';
 
 interface AdminConsoleViewProps {
@@ -647,6 +653,11 @@ export default function AdminConsoleView({
                   id: 'categories',
                   label: `Categories (${activeCategoriesCount})`,
                 },
+                {
+                  href: '/admin/content',
+                  id: 'content',
+                  label: `Policies & Help (${(adminData.policies?.length ?? 0) + (adminData.helpArticles?.length ?? 0)})`,
+                },
                 { href: '/admin/audit-logs', id: 'audit_logs', label: 'Audit Logs' },
               ] as const
             ).map((nav) => (
@@ -700,7 +711,7 @@ export default function AdminConsoleView({
               </p>
             </div>
 
-            <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               <div className="bg-card border border-border rounded-2xl p-5">
                 <p className="text-xs text-muted-foreground">Verification Queue</p>
                 <p className="mt-1 font-numeric text-3xl font-bold text-amber-600 dark:text-amber-400 tabular-nums">
@@ -759,6 +770,18 @@ export default function AdminConsoleView({
                   className="mt-3 inline-block text-xs font-semibold text-foreground hover:underline"
                 >
                   Manage Categories →
+                </Link>
+              </div>
+              <div className="bg-card border border-border rounded-2xl p-5">
+                <p className="text-xs text-muted-foreground">Policies &amp; Help</p>
+                <p className="mt-1 font-numeric text-3xl font-bold text-foreground tabular-nums">
+                  {(adminData.policies?.length ?? 0) + (adminData.helpArticles?.length ?? 0)}
+                </p>
+                <Link
+                  href="/admin/content"
+                  className="mt-3 inline-block text-xs font-semibold text-foreground hover:underline"
+                >
+                  Manage Content →
                 </Link>
               </div>
               <div className="bg-card border border-border rounded-2xl p-5">
@@ -1885,6 +1908,18 @@ export default function AdminConsoleView({
               </div>
             </div>
           </section>
+        )}
+
+        {(initialSection === 'overview' || initialSection === 'content') && (
+          <AdminContentManager
+            adminRole={adminData.adminRole}
+            policies={adminData.policies ?? []}
+            helpArticles={adminData.helpArticles ?? []}
+            busy={busy}
+            setBusy={setBusy}
+            onFeedback={setFeedback}
+            onAdminUpdated={setAdminData}
+          />
         )}
 
         {(initialSection === 'overview' || initialSection === 'audit_logs') && (

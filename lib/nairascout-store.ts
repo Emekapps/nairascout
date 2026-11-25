@@ -56,10 +56,12 @@ import {
   auditLogs,
   capabilityRestrictions,
   governanceAppeals,
+  helpArticles,
   listingCategories,
   makerCheckerRequests,
   nigerianStates,
   platformAdminRoles,
+  platformPolicies,
   referralAncestry,
   scoutProfiles,
   scoutsListContacts,
@@ -92,6 +94,14 @@ import {
   NIGERIAN_STATES_SEED,
   slugifyCategoryName,
 } from './constants/nigeria-and-categories';
+import {
+  DEFAULT_HELP_ARTICLES_SEED,
+  DEFAULT_PLATFORM_POLICIES_SEED,
+  HELP_ARTICLE_CATEGORIES,
+  HELP_AUDIENCE_ROLES,
+  type HelpArticleCategory,
+  type HelpAudienceRole,
+} from './constants/foundation-content';
 import {
   SELLER_PLANS,
   SellerPlanId,
@@ -470,6 +480,32 @@ export interface ListingCategoryDTO {
   createdAt: string;
 }
 
+export interface PlatformPolicyDTO {
+  id: string;
+  slug: string;
+  title: string;
+  summary: string;
+  contentMarkdown: string;
+  version: string;
+  effectiveDate: string;
+  isPublished: boolean;
+  updatedBy: string | null;
+  updatedAt: string;
+}
+
+export interface HelpArticleDTO {
+  id: string;
+  slug: string;
+  category: HelpArticleCategory;
+  title: string;
+  summary: string;
+  bodyMarkdown: string;
+  audienceRole: HelpAudienceRole;
+  sortOrder: number;
+  isPublished: boolean;
+  updatedAt: string;
+}
+
 export interface NairaScoutSnapshot {
   authenticated: boolean;
   dbConfigured: boolean;
@@ -503,15 +539,57 @@ export interface NairaScoutSnapshot {
   allScoutsDirectory: PublicScoutProfileDTO[];
   states: NigerianStateDTO[];
   categories: ListingCategoryDTO[];
+  platformPolicies: PlatformPolicyDTO[];
 }
 
 // ============================================================================
 // INTERNAL POSTGRESQL HELPERS
 // ============================================================================
 
+const globalForFoundationSeed = globalThis as unknown as {
+  __nsFoundationSeeded?: Promise<void>;
+};
+
 async function ensureTablesReady(db: NairaScoutDb) {
   try {
     await ensureCommerceTables((q) => db.execute(q));
+    if (!globalForFoundationSeed.__nsFoundationSeeded) {
+      globalForFoundationSeed.__nsFoundationSeeded = (async () => {
+        for (const policy of DEFAULT_PLATFORM_POLICIES_SEED) {
+          await db
+            .insert(platformPolicies)
+            .values({
+              slug: policy.slug,
+              title: policy.title,
+              summary: policy.summary,
+              contentMarkdown: policy.contentMarkdown,
+              version: policy.version,
+              effectiveDate: new Date(policy.effectiveDate),
+              isPublished: policy.isPublished,
+            })
+            .onConflictDoNothing({ target: platformPolicies.slug });
+        }
+        for (const article of DEFAULT_HELP_ARTICLES_SEED) {
+          await db
+            .insert(helpArticles)
+            .values({
+              slug: article.slug,
+              category: article.category,
+              title: article.title,
+              summary: article.summary,
+              bodyMarkdown: article.bodyMarkdown,
+              audienceRole: article.audienceRole,
+              sortOrder: article.sortOrder,
+              isPublished: article.isPublished,
+            })
+            .onConflictDoNothing({ target: helpArticles.slug });
+        }
+      })().catch((seedErr) => {
+        globalForFoundationSeed.__nsFoundationSeeded = undefined;
+        throw seedErr;
+      });
+    }
+    await globalForFoundationSeed.__nsFoundationSeeded;
   } catch (err) {
     const formatted = formatPostgresError(err);
     console.error('[PostgreSQL DDL Error] ensureCommerceTables failed:', formatted, err);
@@ -1160,14 +1238,27 @@ export async function getNairaScoutSnapshot(
         sortOrder: c.sortOrder,
         createdAt: new Date(0).toISOString(),
       })),
+      platformPolicies: DEFAULT_PLATFORM_POLICIES_SEED.map((p, idx) => ({
+        id: `seed-policy-${idx + 1}`,
+        slug: p.slug,
+        title: p.title,
+        summary: p.summary,
+        contentMarkdown: p.contentMarkdown,
+        version: p.version,
+        effectiveDate: p.effectiveDate,
+        isPublished: p.isPublished,
+        updatedBy: null,
+        updatedAt: p.effectiveDate,
+      })),
     };
   }
 
   await ensureTablesReady(db);
 
-  const [statesList, activeCategoriesList] = await Promise.all([
+  const [statesList, activeCategoriesList, publishedPoliciesList] = await Promise.all([
     getNigerianStates(),
     getListingCategories({ includeInactive: false }),
+    getPublishedPlatformPolicies(),
   ]);
 
   const allSellers = await db.select().from(sellerProfiles);
@@ -1295,6 +1386,7 @@ export async function getNairaScoutSnapshot(
       allScoutsDirectory: [],
       states: statesList,
       categories: activeCategoriesList,
+      platformPolicies: publishedPoliciesList,
     };
   }
 
@@ -1804,6 +1896,7 @@ export async function getNairaScoutSnapshot(
     allScoutsDirectory,
     states: statesList,
     categories: activeCategoriesList,
+    platformPolicies: publishedPoliciesList,
   };
 }
 
@@ -3996,6 +4089,14 @@ export async function getAdminConsoleSnapshot(actorUserId: string) {
       createdAt: l.createdAt.toISOString(),
     })),
     categories: await getListingCategories({ includeInactive: true }),
+    policies:
+      ctx!.adminRole === 'SUPER_ADMIN' || ctx!.adminRole === 'PLATFORM_ADMIN'
+        ? await getAllPlatformPoliciesForAdmin(db)
+        : [],
+    helpArticles:
+      ctx!.adminRole === 'SUPER_ADMIN' || ctx!.adminRole === 'PLATFORM_ADMIN'
+        ? await getAllHelpArticlesForAdmin(db)
+        : [],
   };
 }
 
@@ -5344,5 +5445,446 @@ export async function markNotificationReadForActor(
 
   return getNotificationsForActor(actorUserId);
 }
+
+// ============================================================================
+// PLATFORM POLICIES & HELP CENTRE KNOWLEDGE BASE (NS-FND-003 .. NS-FND-007)
+// ============================================================================
+
+const VALID_HELP_CATEGORIES = new Set<string>(HELP_ARTICLE_CATEGORIES.map((c) => c.id));
+const VALID_HELP_ROLES = new Set<string>(HELP_AUDIENCE_ROLES.map((r) => r.id));
+
+function mapPolicyRow(row: typeof platformPolicies.$inferSelect): PlatformPolicyDTO {
+  return {
+    id: row.id,
+    slug: row.slug,
+    title: row.title,
+    summary: row.summary,
+    contentMarkdown: row.contentMarkdown,
+    version: row.version,
+    effectiveDate: row.effectiveDate.toISOString(),
+    isPublished: row.isPublished,
+    updatedBy: row.updatedBy ?? null,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function mapHelpArticleRow(row: typeof helpArticles.$inferSelect): HelpArticleDTO {
+  return {
+    id: row.id,
+    slug: row.slug,
+    category: (VALID_HELP_CATEGORIES.has(row.category)
+      ? row.category
+      : 'GETTING_STARTED') as HelpArticleCategory,
+    title: row.title,
+    summary: row.summary,
+    bodyMarkdown: row.bodyMarkdown,
+    audienceRole: (VALID_HELP_ROLES.has(row.audienceRole)
+      ? row.audienceRole
+      : 'ALL') as HelpAudienceRole,
+    sortOrder: row.sortOrder,
+    isPublished: row.isPublished,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+async function getAllPlatformPoliciesForAdmin(db: NairaScoutDb): Promise<PlatformPolicyDTO[]> {
+  const rows = await db.select().from(platformPolicies).orderBy(asc(platformPolicies.slug));
+  return rows.map(mapPolicyRow);
+}
+
+async function getAllHelpArticlesForAdmin(db: NairaScoutDb): Promise<HelpArticleDTO[]> {
+  const rows = await db
+    .select()
+    .from(helpArticles)
+    .orderBy(asc(helpArticles.sortOrder), asc(helpArticles.title));
+  return rows.map(mapHelpArticleRow);
+}
+
+// NS-FND-003 & NS-FND-006: Public read of published Platform Policies & Programme Rules
+export async function getPublishedPlatformPolicies(slug?: string): Promise<PlatformPolicyDTO[]> {
+  const fallback: PlatformPolicyDTO[] = DEFAULT_PLATFORM_POLICIES_SEED.map((p, idx) => ({
+    id: `seed-policy-${idx + 1}`,
+    slug: p.slug,
+    title: p.title,
+    summary: p.summary,
+    contentMarkdown: p.contentMarkdown,
+    version: p.version,
+    effectiveDate: p.effectiveDate,
+    isPublished: p.isPublished,
+    updatedBy: null,
+    updatedAt: p.effectiveDate,
+  })).filter((p) => !slug || p.slug === slug);
+
+  if (!isPostgresConfigured()) return fallback;
+  const db = getDb();
+  if (!db) return fallback;
+
+  await ensureTablesReady(db);
+  const rows = slug
+    ? await db
+        .select()
+        .from(platformPolicies)
+        .where(and(eq(platformPolicies.isPublished, true), eq(platformPolicies.slug, slug)))
+        .orderBy(asc(platformPolicies.slug))
+    : await db
+        .select()
+        .from(platformPolicies)
+        .where(eq(platformPolicies.isPublished, true))
+        .orderBy(asc(platformPolicies.slug));
+
+  return rows.length > 0 ? rows.map(mapPolicyRow) : fallback;
+}
+
+// NS-FND-004 & NS-FND-005: Public read & keyword search of published Help Centre articles
+export async function getPublishedHelpArticles(options?: {
+  q?: string;
+  category?: string;
+}): Promise<HelpArticleDTO[]> {
+  const query = (options?.q || '').trim().toLowerCase();
+  const category = (options?.category || '').trim().toUpperCase();
+
+  const filterInMemory = (list: HelpArticleDTO[]) =>
+    list.filter((article) => {
+      const catOk = !category || category === 'ALL' || article.category === category;
+      const textOk =
+        !query ||
+        article.title.toLowerCase().includes(query) ||
+        article.summary.toLowerCase().includes(query) ||
+        article.bodyMarkdown.toLowerCase().includes(query);
+      return catOk && textOk;
+    });
+
+  const fallback: HelpArticleDTO[] = DEFAULT_HELP_ARTICLES_SEED.map((a, idx) => ({
+    id: `seed-article-${idx + 1}`,
+    slug: a.slug,
+    category: a.category,
+    title: a.title,
+    summary: a.summary,
+    bodyMarkdown: a.bodyMarkdown,
+    audienceRole: a.audienceRole,
+    sortOrder: a.sortOrder,
+    isPublished: a.isPublished,
+    updatedAt: '2026-11-25T00:00:00.000Z',
+  }));
+
+  if (!isPostgresConfigured()) return filterInMemory(fallback);
+  const db = getDb();
+  if (!db) return filterInMemory(fallback);
+
+  await ensureTablesReady(db);
+
+  const whereClauses = [eq(helpArticles.isPublished, true)];
+  if (category && category !== 'ALL' && VALID_HELP_CATEGORIES.has(category)) {
+    whereClauses.push(eq(helpArticles.category, category));
+  }
+  if (query) {
+    const pattern = `%${query.replace(/[%_\\]/g, '\\$&')}%`;
+    const searchClause = or(
+      ilike(helpArticles.title, pattern),
+      ilike(helpArticles.summary, pattern),
+      ilike(helpArticles.bodyMarkdown, pattern)
+    );
+    if (searchClause) whereClauses.push(searchClause);
+  }
+
+  const rows = await db
+    .select()
+    .from(helpArticles)
+    .where(and(...whereClauses))
+    .orderBy(asc(helpArticles.sortOrder), asc(helpArticles.title));
+
+  return rows.map(mapHelpArticleRow);
+}
+
+// NS-FND-007: Admin content editor snapshot (SUPER_ADMIN & PLATFORM_ADMIN)
+export async function getAdminContentSnapshot(actorUserId: string): Promise<{
+  policies: PlatformPolicyDTO[];
+  helpArticles: HelpArticleDTO[];
+}> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAdminRole(ctx, ['SUPER_ADMIN', 'PLATFORM_ADMIN']);
+
+  const [policies, articles] = await Promise.all([
+    getAllPlatformPoliciesForAdmin(db),
+    getAllHelpArticlesForAdmin(db),
+  ]);
+
+  return { policies, helpArticles: articles };
+}
+
+// NS-FND-007: Create or update Platform Policy with version & audit trail
+export async function adminUpsertPlatformPolicy(
+  actorUserId: string,
+  input: {
+    id?: string;
+    slug: string;
+    title: string;
+    summary: string;
+    contentMarkdown: string;
+    version: string;
+    effectiveDate?: string;
+    isPublished: boolean;
+  }
+): Promise<PlatformPolicyDTO> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAdminRole(ctx, ['SUPER_ADMIN', 'PLATFORM_ADMIN']);
+
+  const cleanSlug = slugifyCategoryName(input.slug || input.title);
+  const title = (input.title || '').trim();
+  const summary = (input.summary || '').trim();
+  const contentMarkdown = (input.contentMarkdown || '').trim();
+  const version = (input.version || '1.0.0').trim();
+  const effectiveDate = input.effectiveDate ? new Date(input.effectiveDate) : new Date();
+
+  if (!cleanSlug || title.length < 3 || summary.length < 5 || contentMarkdown.length < 10) {
+    throw new AuthorizationError(
+      'Policy slug, title, summary, and markdown content are required.',
+      400,
+      'INVALID_POLICY_PAYLOAD'
+    );
+  }
+  if (Number.isNaN(effectiveDate.getTime())) {
+    throw new AuthorizationError('Valid effective date is required.', 400, 'INVALID_EFFECTIVE_DATE');
+  }
+
+  return db.transaction(async (tx) => {
+    const now = new Date();
+    let existing: typeof platformPolicies.$inferSelect | undefined;
+    if (input.id && isUuid(input.id)) {
+      const rows = await tx
+        .select()
+        .from(platformPolicies)
+        .where(eq(platformPolicies.id, input.id))
+        .limit(1);
+      existing = rows[0];
+    } else {
+      const rows = await tx
+        .select()
+        .from(platformPolicies)
+        .where(eq(platformPolicies.slug, cleanSlug))
+        .limit(1);
+      existing = rows[0];
+    }
+
+    if (existing) {
+      const [updated] = await tx
+        .update(platformPolicies)
+        .set({
+          slug: cleanSlug,
+          title,
+          summary,
+          contentMarkdown,
+          version,
+          effectiveDate,
+          isPublished: input.isPublished,
+          updatedBy: actorUserId,
+          updatedAt: now,
+        })
+        .where(eq(platformPolicies.id, existing.id))
+        .returning();
+
+      await tx.insert(auditLogs).values({
+        actorId: actorUserId,
+        affectedUserId: actorUserId,
+        action: 'UPDATE_PLATFORM_POLICY',
+        entityType: 'platform_policy',
+        entityId: updated.id,
+        previousValue: {
+          slug: existing.slug,
+          title: existing.title,
+          version: existing.version,
+          isPublished: existing.isPublished,
+        },
+        newValue: {
+          slug: updated.slug,
+          title: updated.title,
+          version: updated.version,
+          isPublished: updated.isPublished,
+        },
+        reason: `Admin updated platform policy "${updated.slug}" (v${updated.version})`,
+      });
+
+      return mapPolicyRow(updated);
+    }
+
+    const [created] = await tx
+      .insert(platformPolicies)
+      .values({
+        slug: cleanSlug,
+        title,
+        summary,
+        contentMarkdown,
+        version,
+        effectiveDate,
+        isPublished: input.isPublished,
+        updatedBy: actorUserId,
+        updatedAt: now,
+      })
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: actorUserId,
+      action: 'CREATE_PLATFORM_POLICY',
+      entityType: 'platform_policy',
+      entityId: created.id,
+      previousValue: null,
+      newValue: {
+        slug: created.slug,
+        title: created.title,
+        version: created.version,
+        isPublished: created.isPublished,
+      },
+      reason: `Admin created platform policy "${created.slug}" (v${created.version})`,
+    });
+
+    return mapPolicyRow(created);
+  });
+}
+
+// NS-FND-007: Create or update Help Centre article with audit trail
+export async function adminUpsertHelpArticle(
+  actorUserId: string,
+  input: {
+    id?: string;
+    slug: string;
+    category: string;
+    title: string;
+    summary: string;
+    bodyMarkdown: string;
+    audienceRole: string;
+    sortOrder?: number;
+    isPublished: boolean;
+  }
+): Promise<HelpArticleDTO> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAdminRole(ctx, ['SUPER_ADMIN', 'PLATFORM_ADMIN']);
+
+  const cleanSlug = slugifyCategoryName(input.slug || input.title);
+  const category = (input.category || '').trim().toUpperCase();
+  const title = (input.title || '').trim();
+  const summary = (input.summary || '').trim();
+  const bodyMarkdown = (input.bodyMarkdown || '').trim();
+  const audienceRole = (input.audienceRole || 'ALL').trim().toUpperCase();
+  const sortOrder = Number.isFinite(Number(input.sortOrder)) ? Number(input.sortOrder) : 0;
+
+  if (!cleanSlug || title.length < 3 || summary.length < 5 || bodyMarkdown.length < 10) {
+    throw new AuthorizationError(
+      'Article slug, title, summary, and markdown body are required.',
+      400,
+      'INVALID_HELP_ARTICLE_PAYLOAD'
+    );
+  }
+  if (!VALID_HELP_CATEGORIES.has(category)) {
+    throw new AuthorizationError('Invalid Help Centre article category.', 400, 'INVALID_CATEGORY');
+  }
+  if (!VALID_HELP_ROLES.has(audienceRole)) {
+    throw new AuthorizationError('Invalid audience role.', 400, 'INVALID_AUDIENCE_ROLE');
+  }
+
+  return db.transaction(async (tx) => {
+    const now = new Date();
+    let existing: typeof helpArticles.$inferSelect | undefined;
+    if (input.id && isUuid(input.id)) {
+      const rows = await tx
+        .select()
+        .from(helpArticles)
+        .where(eq(helpArticles.id, input.id))
+        .limit(1);
+      existing = rows[0];
+    } else {
+      const rows = await tx
+        .select()
+        .from(helpArticles)
+        .where(eq(helpArticles.slug, cleanSlug))
+        .limit(1);
+      existing = rows[0];
+    }
+
+    if (existing) {
+      const [updated] = await tx
+        .update(helpArticles)
+        .set({
+          slug: cleanSlug,
+          category,
+          title,
+          summary,
+          bodyMarkdown,
+          audienceRole,
+          sortOrder,
+          isPublished: input.isPublished,
+          updatedAt: now,
+        })
+        .where(eq(helpArticles.id, existing.id))
+        .returning();
+
+      await tx.insert(auditLogs).values({
+        actorId: actorUserId,
+        affectedUserId: actorUserId,
+        action: 'UPDATE_HELP_ARTICLE',
+        entityType: 'help_article',
+        entityId: updated.id,
+        previousValue: {
+          slug: existing.slug,
+          category: existing.category,
+          title: existing.title,
+          isPublished: existing.isPublished,
+        },
+        newValue: {
+          slug: updated.slug,
+          category: updated.category,
+          title: updated.title,
+          isPublished: updated.isPublished,
+        },
+        reason: `Admin updated help article "${updated.slug}"`,
+      });
+
+      return mapHelpArticleRow(updated);
+    }
+
+    const [created] = await tx
+      .insert(helpArticles)
+      .values({
+        slug: cleanSlug,
+        category,
+        title,
+        summary,
+        bodyMarkdown,
+        audienceRole,
+        sortOrder,
+        isPublished: input.isPublished,
+        updatedAt: now,
+      })
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: actorUserId,
+      action: 'CREATE_HELP_ARTICLE',
+      entityType: 'help_article',
+      entityId: created.id,
+      previousValue: null,
+      newValue: {
+        slug: created.slug,
+        category: created.category,
+        title: created.title,
+        isPublished: created.isPublished,
+      },
+      reason: `Admin created help article "${created.slug}"`,
+    });
+
+    return mapHelpArticleRow(created);
+  });
+}
+
 
 
