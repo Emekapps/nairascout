@@ -432,10 +432,10 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                   setTab(t.id);
                   setFeedback(null);
                 }}
-                className={`whitespace-nowrap shrink-0 snap-start rounded-full px-4 py-2 font-sans text-xs font-semibold transition-all cursor-pointer ${
+                className={`whitespace-nowrap shrink-0 snap-start rounded-full px-4 py-2 font-sans text-xs transition-colors cursor-pointer ${
                   tab === t.id
-                    ? 'bg-primary text-primary-foreground border border-primary-border shadow-xs'
-                    : 'bg-secondary/70 text-muted-foreground border border-transparent hover:bg-secondary hover:text-foreground'
+                    ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
+                    : 'bg-[#FFFFFF] text-[#000000] dark:bg-card dark:text-foreground font-medium border border-border/60 dark:border-border hover:opacity-90'
                 }`}
               >
                 {t.label}

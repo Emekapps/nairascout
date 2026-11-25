@@ -158,7 +158,7 @@ export default function MarketplaceView({
                 className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                   active
                     ? 'bg-commerce text-commerce-foreground'
-                    : 'bg-secondary text-secondary-foreground hover:bg-muted'
+                    : 'bg-[#FFFFFF] dark:bg-[#181818] text-foreground hover:bg-muted dark:hover:bg-muted'
                 }`}
               >
                 {cat}

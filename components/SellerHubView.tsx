@@ -356,7 +356,8 @@ export default function SellerHubView({
                   avatarUrl={logoUrl}
                   displayName={sellerName || scout.displayName}
                   username={scout.handle}
-                  size="xl"
+                  size="logo"
+                  shape="rounded-square"
                 />
                 <div className="flex-1 space-y-2">
                   <div>
@@ -636,88 +637,111 @@ export default function SellerHubView({
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-border pb-6">
-        <div className="flex items-start gap-3.5">
-          <div className="relative shrink-0">
-            <UserAvatar
-              avatarUrl={sellerProfile.logoUrl}
-              displayName={sellerProfile.sellerName}
-              username={scout.handle}
-              size="lg"
-            />
-            <input
-              ref={activeLogoInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              onChange={handleLogoFileChange}
-              className="sr-only"
-              aria-label="Update business profile photo"
-            />
-            <button
-              type="button"
-              disabled={logoBusy}
-              onClick={() => activeLogoInputRef.current?.click()}
-              title="Change Business Photo"
-              aria-label="Change Business Photo"
-              className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-card border border-border flex items-center justify-center text-foreground hover:bg-muted shadow-xs cursor-pointer"
-            >
-              {logoBusy ? (
-                <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
-              ) : (
-                <Camera className="w-3 h-3" aria-hidden="true" />
-              )}
-            </button>
-          </div>
-          <div>
+      <div className="flex flex-col gap-5 border-b border-border pb-6">
+        <div className="flex flex-col items-start gap-2.5">
+          {/* Row 1: Rounded-square Business Logo uploader alongside Dashboard heading */}
+          <div className="flex items-center gap-3.5">
+            <div className="relative shrink-0">
+              <UserAvatar
+                avatarUrl={sellerProfile.logoUrl}
+                displayName={sellerProfile.sellerName}
+                username={scout.handle}
+                size="logo"
+                shape="rounded-square"
+              />
+              <input
+                ref={activeLogoInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handleLogoFileChange}
+                className="sr-only"
+                aria-label="Update business profile photo"
+              />
+              <button
+                type="button"
+                disabled={logoBusy}
+                onClick={() => activeLogoInputRef.current?.click()}
+                title="Change Business Photo"
+                aria-label="Change Business Photo"
+                className="absolute -bottom-1.5 -right-1.5 w-7 h-7 rounded-lg bg-card border border-border flex items-center justify-center text-foreground hover:bg-muted shadow-xs cursor-pointer"
+              >
+                {logoBusy ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Camera className="w-3.5 h-3.5" aria-hidden="true" />
+                )}
+              </button>
+            </div>
             <h1 className="font-sans text-xl md:text-2xl font-bold tracking-tight text-foreground">
               Dashboard
             </h1>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-muted-foreground">
-                {sellerProfile.sellerName} ({sellerProfile.sellerType})
-              </span>
-              <span className="px-2 py-0.5 rounded-md bg-muted font-sans font-semibold text-foreground">
-                Seller: {sellerProfile.sellerStatus}
-              </span>
-              <span
-                className={`px-2 py-0.5 rounded-md font-sans font-semibold ${
-                  scout.sellerVerificationStatus === 'VERIFIED'
-                    ? 'bg-accent text-accent-foreground'
-                    : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                }`}
-              >
-                Verification: {scout.sellerVerificationStatus}
-              </span>
-              <span className="px-2 py-0.5 rounded-md bg-card border border-border font-sans text-muted-foreground">
-                Plan: {currentPlan.name} ({sellerProfile.subscriptionStatus})
-              </span>
-              <Link
-                href="/settings/closure"
-                className="text-xs font-medium text-muted-foreground hover:text-destructive underline ml-1"
-              >
-                Close Seller Capabilities
-              </Link>
-            </div>
-            {logoFeedback && (
-              <p
-                className={`mt-1.5 text-xs font-medium ${
-                  logoFeedback.type === 'ok' ? 'text-success' : 'text-destructive'
-                }`}
-              >
-                {logoFeedback.message}
-              </p>
-            )}
           </div>
+
+          {/* Row 2: Business Name */}
+          <p className="font-sans text-base md:text-lg font-bold text-foreground">
+            {sellerProfile.sellerName}{' '}
+            <span className="text-xs font-medium text-muted-foreground">
+              ({sellerProfile.sellerType})
+            </span>
+          </p>
+
+          {/* Row 3: Seller Status */}
+          <div>
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-md bg-muted font-sans text-xs font-semibold text-foreground">
+              Seller: {sellerProfile.sellerStatus}
+            </span>
+          </div>
+
+          {/* Row 4: Verification Status */}
+          <div>
+            <span
+              className={`inline-flex items-center px-2.5 py-0.5 rounded-md font-sans text-xs font-semibold ${
+                scout.sellerVerificationStatus === 'VERIFIED'
+                  ? 'bg-accent text-accent-foreground'
+                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+              }`}
+            >
+              Verification: {scout.sellerVerificationStatus}
+            </span>
+          </div>
+
+          {/* Row 5: Subscription Plan */}
+          <div>
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-md bg-card border border-border font-sans text-xs text-muted-foreground">
+              Plan: {currentPlan.name} ({sellerProfile.subscriptionStatus})
+            </span>
+          </div>
+
+          {/* Row 6: Close Seller Capabilities */}
+          <div>
+            <Link
+              href="/settings/closure"
+              className="text-xs font-medium text-muted-foreground hover:text-destructive underline"
+            >
+              Close Seller Capabilities
+            </Link>
+          </div>
+
+          {logoFeedback && (
+            <p
+              className={`text-xs font-medium ${
+                logoFeedback.type === 'ok' ? 'text-success' : 'text-destructive'
+              }`}
+            >
+              {logoFeedback.message}
+            </p>
+          )}
         </div>
 
-        <div className="flex items-center gap-1 p-1 bg-muted rounded-xl shrink-0 self-start overflow-x-auto">
+        {/* Navigation Pills directly under Close Seller Capabilities */}
+        <div className="flex items-center gap-1.5 p-1 bg-[#D1D5DB] dark:bg-[#181818] rounded-xl shrink-0 self-start overflow-x-auto max-w-full">
           <button
             type="button"
             onClick={() => setSubTab('operations')}
-            className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+            className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
               subTab === 'operations'
-                ? 'bg-card text-foreground shadow-xs'
-                : 'text-muted-foreground hover:text-foreground'
+                ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
+                : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
             }`}
           >
             Drafts, Listings &amp; Orders
@@ -725,10 +749,10 @@ export default function SellerHubView({
           <button
             type="button"
             onClick={() => setSubTab('plans')}
-            className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+            className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
               subTab === 'plans'
-                ? 'bg-card text-foreground shadow-xs'
-                : 'text-muted-foreground hover:text-foreground'
+                ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
+                : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
             }`}
           >
             Plans ({currentPlan.name})
@@ -737,10 +761,10 @@ export default function SellerHubView({
             <button
               type="button"
               onClick={() => setSubTab('team')}
-              className={`inline-flex items-center gap-1 px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+              className={`inline-flex items-center gap-1 px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
                 subTab === 'team'
-                  ? 'bg-card text-foreground shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground'
+                  ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
+                  : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
               }`}
             >
               <Users className="w-3.5 h-3.5" aria-hidden="true" />

@@ -149,7 +149,7 @@ export default function WalletView({ snapshot }: WalletViewProps) {
           <p className="mt-1 text-xs text-muted-foreground">Dispute or review hold</p>
         </div>
 
-        <div className="bg-muted/50 border border-border rounded-2xl p-5">
+        <div className="bg-[#FFFFFF] dark:bg-[#181818] border border-border rounded-2xl p-5">
           <p className="text-xs text-muted-foreground">Paid (Cumulative)</p>
           <p className="mt-2 font-numeric text-xl font-semibold text-foreground tabular-nums">
             {formatKoboToNaira(wallet.paidKobo)}
@@ -157,7 +157,7 @@ export default function WalletView({ snapshot }: WalletViewProps) {
           <p className="mt-1 text-xs text-muted-foreground">Settled to bank account</p>
         </div>
 
-        <div className="bg-muted/50 border border-border rounded-2xl p-5">
+        <div className="bg-[#FFFFFF] dark:bg-[#181818] border border-border rounded-2xl p-5">
           <p className="text-xs text-muted-foreground">Reversed (Cumulative)</p>
           <p className="mt-2 font-numeric text-xl font-semibold text-destructive tabular-nums">
             {formatKoboToNaira(wallet.reversedKobo)}
@@ -246,16 +246,16 @@ export default function WalletView({ snapshot }: WalletViewProps) {
               />
             </div>
 
-            <div className="flex items-center gap-1 p-1 bg-muted rounded-xl overflow-x-auto">
+            <div className="flex items-center gap-1 p-1 bg-[#D1D5DB] dark:bg-[#181818] rounded-xl overflow-x-auto">
               {['All', 'Available', 'Pending', 'On Hold', 'Paid', 'Reversed'].map((st) => (
                 <button
                   key={st}
                   type="button"
                   onClick={() => setStatusFilter(st)}
-                  className={`px-2.5 py-1 text-xs font-medium rounded-lg whitespace-nowrap cursor-pointer transition-colors ${
+                  className={`px-2.5 py-1 text-xs rounded-lg whitespace-nowrap cursor-pointer transition-colors ${
                     statusFilter === st
-                      ? 'bg-card text-foreground shadow-xs'
-                      : 'text-muted-foreground hover:text-foreground'
+                      ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
+                      : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
                   }`}
                 >
                   {st}

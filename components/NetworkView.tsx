@@ -166,18 +166,18 @@ export default function NetworkView({
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-5">
-        <h1 className="font-sans text-2xl md:text-3xl font-bold tracking-tight text-foreground">
+        <h1 className="font-sans text-xl md:text-2xl font-bold tracking-tight text-foreground">
           Network
         </h1>
 
-        <div className="flex items-center gap-1 p-1 bg-muted rounded-xl shrink-0 self-start overflow-x-auto">
+        <div className="flex items-center gap-1.5 p-1 bg-[#D1D5DB] dark:bg-[#181818] rounded-xl shrink-0 self-start overflow-x-auto">
           <button
             type="button"
             onClick={() => setSubTab('explorer')}
-            className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+            className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
               subTab === 'explorer'
-                ? 'bg-card text-foreground shadow-xs'
-                : 'text-muted-foreground hover:text-foreground'
+                ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
+                : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
             }`}
           >
             Ancestry
@@ -185,10 +185,10 @@ export default function NetworkView({
           <button
             type="button"
             onClick={() => setSubTab('scouts_list')}
-            className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+            className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
               subTab === 'scouts_list'
-                ? 'bg-card text-foreground shadow-xs'
-                : 'text-muted-foreground hover:text-foreground'
+                ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
+                : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
             }`}
           >
             Scouts
@@ -196,10 +196,10 @@ export default function NetworkView({
           <button
             type="button"
             onClick={() => setSubTab('simulator')}
-            className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+            className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
               subTab === 'simulator'
-                ? 'bg-card text-foreground shadow-xs'
-                : 'text-muted-foreground hover:text-foreground'
+                ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
+                : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
             }`}
           >
             Calculator
@@ -704,14 +704,14 @@ export default function NetworkView({
                   <h3 className="font-sans text-base font-semibold text-foreground">
                     Pending Invitations
                   </h3>
-                  <div className="flex items-center gap-1 p-0.5 bg-muted rounded-lg text-xs">
+                  <div className="flex items-center gap-1 p-1 bg-[#D1D5DB] dark:bg-[#181818] rounded-lg text-xs">
                     <button
                       type="button"
                       onClick={() => setInviteSubTab('received')}
-                      className={`px-2.5 py-1 rounded-md font-medium cursor-pointer ${
+                      className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors ${
                         inviteSubTab === 'received'
-                          ? 'bg-card text-foreground shadow-xs'
-                          : 'text-muted-foreground'
+                          ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
+                          : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
                       }`}
                     >
                       Received ({receivedInvites.length})
@@ -719,10 +719,10 @@ export default function NetworkView({
                     <button
                       type="button"
                       onClick={() => setInviteSubTab('sent')}
-                      className={`px-2.5 py-1 rounded-md font-medium cursor-pointer ${
+                      className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors ${
                         inviteSubTab === 'sent'
-                          ? 'bg-card text-foreground shadow-xs'
-                          : 'text-muted-foreground'
+                          ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
+                          : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
                       }`}
                     >
                       Sent ({sentInvites.length})
