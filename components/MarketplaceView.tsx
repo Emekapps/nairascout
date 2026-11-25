@@ -2,10 +2,11 @@
 
 import { Fragment, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Share2, ShoppingBag, X } from 'lucide-react';
+import { ExternalLink, Play, Share2, ShoppingBag, X } from 'lucide-react';
 import type { NairaScoutSnapshot, ProductListing } from '@/lib/nairascout-store';
 import { DEFAULT_LISTING_CATEGORIES_SEED } from '@/lib/constants/nigeria-and-categories';
 import { formatWholeNaira } from '@/lib/commission-engine';
+import { getVideoEmbedInfo } from '@/lib/media/video-links';
 import ProductImage from './ProductImage';
 import { ProductCard } from './marketplace/ProductCard';
 import { InFeedPromoCarousel } from './marketplace/InFeedPromoCarousel';
@@ -45,6 +46,8 @@ export default function MarketplaceView({
   const [localSearchQuery, setLocalSearchQuery] = useState('');
   const [localCityFilter, setLocalCityFilter] = useState<string>('All');
   const [selectedProduct, setSelectedProduct] = useState<ProductListing | null>(null);
+  const [modalImageIdx, setModalImageIdx] = useState(0);
+  const [modalVideoIdx, setModalVideoIdx] = useState<number | null>(null);
 
   const searchQuery = externalSearchQuery !== undefined ? externalSearchQuery : localSearchQuery;
   const setSearchQuery = onExternalSearchChange ?? setLocalSearchQuery;
@@ -130,6 +133,8 @@ export default function MarketplaceView({
 
   const closeProductModal = () => {
     setSelectedProduct(null);
+    setModalImageIdx(0);
+    setModalVideoIdx(null);
     onClearExternalProduct?.();
   };
 
@@ -217,6 +222,8 @@ export default function MarketplaceView({
                   product={product}
                   onInspect={(p) => {
                     onClearExternalProduct?.();
+                    setModalImageIdx(0);
+                    setModalVideoIdx(null);
                     setSelectedProduct(p);
                   }}
                   onBuyDirect={onStartDirectCheckout}
@@ -245,13 +252,80 @@ export default function MarketplaceView({
           className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex items-center justify-center p-4"
         >
           <div className="bg-card text-card-foreground border border-border rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto grid grid-cols-1 md:grid-cols-2">
-            <div className="aspect-[4/3] md:aspect-auto md:min-h-[380px]">
-              <ProductImage
-                src={activeSelectedProduct.imageUrl}
-                alt={activeSelectedProduct.title}
-                category={activeSelectedProduct.category}
-                className="w-full h-full"
-              />
+            <div className="flex flex-col bg-muted/40">
+              {(() => {
+                const modalImages =
+                  activeSelectedProduct.imageUrls && activeSelectedProduct.imageUrls.length > 0
+                    ? activeSelectedProduct.imageUrls
+                    : [activeSelectedProduct.imageUrl];
+                const safeImgIdx = Math.min(modalImageIdx, Math.max(0, modalImages.length - 1));
+                const modalVideos = activeSelectedProduct.videoLinks ?? [];
+                const activeVid =
+                  modalVideoIdx !== null && modalVideos[modalVideoIdx]
+                    ? getVideoEmbedInfo(modalVideos[modalVideoIdx], { autoplay: true })
+                    : null;
+
+                return (
+                  <>
+                    {activeVid && activeVid.embedUrl ? (
+                      <div className="relative w-full h-[280px] md:h-[360px] bg-black">
+                        <iframe
+                          src={activeVid.embedUrl}
+                          title={`${activeSelectedProduct.title} video`}
+                          allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+                          allowFullScreen
+                          referrerPolicy="strict-origin-when-cross-origin"
+                          className="w-full h-full border-0"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setModalVideoIdx(null)}
+                          aria-label="Return to product images"
+                          className="absolute top-2.5 right-2.5 w-8 h-8 rounded-full bg-black/75 text-white flex items-center justify-center cursor-pointer"
+                        >
+                          <X className="w-4 h-4" aria-hidden="true" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="aspect-[4/3] md:aspect-auto md:min-h-[340px] w-full">
+                        <ProductImage
+                          src={modalImages[safeImgIdx] || activeSelectedProduct.imageUrl}
+                          alt={activeSelectedProduct.title}
+                          category={activeSelectedProduct.category}
+                          className="w-full h-full"
+                        />
+                      </div>
+                    )}
+
+                    {modalImages.length > 1 && (
+                      <div className="p-3 flex items-center gap-2 overflow-x-auto no-scrollbar border-t border-border bg-card">
+                        {modalImages.map((imgUrl, idx) => (
+                          <button
+                            key={`modal-img-${idx}`}
+                            type="button"
+                            onClick={() => {
+                              setModalVideoIdx(null);
+                              setModalImageIdx(idx);
+                            }}
+                            className={`relative h-12 w-12 rounded-lg overflow-hidden shrink-0 border cursor-pointer ${
+                              modalVideoIdx === null && safeImgIdx === idx
+                                ? 'border-foreground ring-1 ring-foreground'
+                                : 'border-border opacity-80 hover:opacity-100'
+                            }`}
+                          >
+                            <ProductImage
+                              src={imgUrl}
+                              alt={`${activeSelectedProduct.title} photo ${idx + 1}`}
+                              category={activeSelectedProduct.category}
+                              className="w-full h-full"
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
 
             <div className="p-6 flex flex-col justify-between gap-6">
@@ -278,6 +352,7 @@ export default function MarketplaceView({
                     avatarUrl={activeSelectedProduct.sellerLogoUrl}
                     displayName={activeSelectedProduct.sellerName}
                     size="sm"
+                    shape="rounded-square"
                   />
                   <span className="text-muted-foreground">
                     Seller: {activeSelectedProduct.sellerName}
@@ -293,6 +368,48 @@ export default function MarketplaceView({
                 <p className="mt-4 text-sm text-muted-foreground leading-relaxed">
                   {activeSelectedProduct.description}
                 </p>
+
+                {activeSelectedProduct.videoLinks && activeSelectedProduct.videoLinks.length > 0 && (
+                  <div className="mt-4 pt-3 border-t border-border space-y-2">
+                    <p className="text-xs font-semibold text-foreground">
+                      Product Videos ({activeSelectedProduct.videoLinks.length})
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {activeSelectedProduct.videoLinks.map((vid, idx) => {
+                        const info = getVideoEmbedInfo(vid);
+                        const isPlaying = modalVideoIdx === idx;
+                        return (
+                          <div key={`modal-vid-${idx}`} className="flex items-center gap-1.5">
+                            {info.embedUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => setModalVideoIdx(isPlaying ? null : idx)}
+                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition-colors ${
+                                  isPlaying
+                                    ? 'bg-primary text-primary-foreground border-primary-border'
+                                    : 'bg-muted text-foreground border-border hover:bg-muted/80'
+                                }`}
+                              >
+                                <Play className="w-3 h-3 fill-current" aria-hidden="true" />
+                                {vid.platform} #{idx + 1}
+                              </button>
+                            ) : (
+                              <a
+                                href={info.safeHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-muted text-foreground border border-border hover:bg-muted/80"
+                              >
+                                <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                                {vid.platform} #{idx + 1}
+                              </a>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 <div className="mt-5 pt-4 border-t border-border space-y-2 text-xs text-muted-foreground">
                   <p className="font-semibold text-foreground">Specifications &amp; Terms</p>

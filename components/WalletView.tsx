@@ -246,7 +246,7 @@ export default function WalletView({ snapshot }: WalletViewProps) {
               />
             </div>
 
-            <div className="flex items-center gap-1 p-1 bg-[#D1D5DB] dark:bg-[#181818] rounded-xl overflow-x-auto">
+            <div className="flex items-center gap-1 p-1 bg-[#F3F4F6] dark:bg-[#181818] rounded-xl overflow-x-auto">
               {['All', 'Available', 'Pending', 'On Hold', 'Paid', 'Reversed'].map((st) => (
                 <button
                   key={st}

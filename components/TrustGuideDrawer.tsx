@@ -161,18 +161,28 @@ export default function TrustGuideDrawer({
             {snapshot.notifications.length === 0 ? (
               <p className="text-xs text-muted-foreground py-4">No notifications.</p>
             ) : (
-              snapshot.notifications.map((n) => (
-                <div key={n.id} className="py-3.5 first:pt-0 space-y-1">
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span className="font-sans uppercase tracking-wider font-semibold">
-                      {n.category}
-                    </span>
-                    <span className="font-numeric tabular-nums">{n.createdAt.slice(0, 10)}</span>
+              snapshot.notifications.map((n) => {
+                const isUnread = !(n.isRead ?? n.read);
+                return (
+                  <div key={n.id} className="py-3.5 first:pt-0 space-y-1">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <div className="flex items-center gap-2">
+                        {isUnread && (
+                          <span className="px-1.5 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-bold uppercase">
+                            New
+                          </span>
+                        )}
+                        <span className="font-sans uppercase tracking-wider font-semibold">
+                          {n.category}
+                        </span>
+                      </div>
+                      <span className="font-numeric tabular-nums">{n.createdAt.slice(0, 10)}</span>
+                    </div>
+                    <p className="text-sm font-semibold text-foreground">{n.title}</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">{n.body}</p>
                   </div>
-                  <p className="text-sm font-semibold text-foreground">{n.title}</p>
-                  <p className="text-xs text-muted-foreground leading-relaxed">{n.body}</p>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         )}

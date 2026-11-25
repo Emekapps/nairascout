@@ -33,16 +33,18 @@ import { LocationPickerSheet } from './location/LocationPickerSheet';
 interface NairaScoutAppProps {
   initialSnapshot: NairaScoutSnapshot;
   initialRefEvent?: string | null;
+  initialTab?: NavTab;
 }
 
 export default function NairaScoutApp({
   initialSnapshot,
   initialRefEvent,
+  initialTab,
 }: NairaScoutAppProps) {
   const router = useRouter();
   const [snapshot, setSnapshot] = useState<NairaScoutSnapshot>(initialSnapshot);
   const [activeTab, setActiveTab] = useState<NavTab>(
-    initialRefEvent ? 'referrals' : 'marketplace'
+    initialTab ?? (initialRefEvent ? 'referrals' : 'marketplace')
   );
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [locationFilter, setLocationFilter] = useState<string>('All');
@@ -251,19 +253,6 @@ export default function NairaScoutApp({
     return true;
   };
 
-  const handleCreateDraftListing = async (payload: {
-    title: string;
-    category: string;
-    priceNaira: number;
-    deliveryFeeNaira: number;
-    stock: number;
-    description: string;
-  }): Promise<boolean> => {
-    const data = await callJsonApi('/api/seller/listings', payload);
-    if (!data?.listing) return false;
-    showFeedback('ok', `Draft listing "${data.listing.title}" saved.`);
-    return true;
-  };
 
   const handlePublishListing = async (listingId: string) => {
     const data = await callJsonApi(`/api/seller/listings/${encodeURIComponent(listingId)}/publish`, {});
@@ -462,7 +451,6 @@ export default function NairaScoutApp({
             <SellerHubView
               snapshot={snapshot}
               onAdvanceOrder={handleAdvanceOrder}
-              onCreateDraftListing={handleCreateDraftListing}
               onPublishListing={handlePublishListing}
               onSelectPlan={handleSelectPlan}
               onActivateSeller={handleActivateSeller}

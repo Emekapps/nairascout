@@ -10,6 +10,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { CommissionBreakdown } from '@/lib/commission-engine';
+import type { ListingVideoLink } from '@/lib/media/video-links';
 import { users, sellerProfiles } from './schema';
 
 export const productListings = pgTable('product_listings', {
@@ -32,6 +33,8 @@ export const productListings = pgTable('product_listings', {
   status: text('status').default('DRAFT').notNull(), // 'DRAFT' | 'PUBLISHED' | 'EXPIRED'
   imageSeed: text('image_seed').notNull(),
   imageUrl: text('image_url').notNull(),
+  imageUrls: jsonb('image_urls').$type<string[]>().default([]).notNull(),
+  videoLinks: jsonb('video_links').$type<ListingVideoLink[]>().default([]).notNull(),
   daysRemaining: integer('days_remaining').default(10).notNull(),
   specifications: jsonb('specifications').$type<string[]>().default([]).notNull(),
   returnPolicy: text('return_policy').notNull(),
@@ -119,6 +122,20 @@ export const platformNotifications = pgTable('platform_notifications', {
   title: text('title').notNull(),
   body: text('body').notNull(),
   read: boolean('read').default(false).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const notifications = pgTable('notifications', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  category: text('category').default('SYSTEM').notNull(),
+  title: text('title').notNull(),
+  body: text('body').notNull(),
+  actionUrl: text('action_url'),
+  isRead: boolean('is_read').default(false).notNull(),
+  readAt: timestamp('read_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -321,6 +338,41 @@ export async function ensureCommerceTables(
       await executeSql(sql`
         ALTER TABLE public.seller_profiles
           ADD COLUMN IF NOT EXISTS logo_url text;
+      `);
+      await executeSql(sql`
+        ALTER TABLE public.product_listings
+          ADD COLUMN IF NOT EXISTS image_urls jsonb NOT NULL DEFAULT '[]'::jsonb,
+          ADD COLUMN IF NOT EXISTS video_links jsonb NOT NULL DEFAULT '[]'::jsonb;
+      `);
+      await executeSql(sql`
+        UPDATE public.product_listings
+        SET image_urls = jsonb_build_array(image_url)
+        WHERE jsonb_array_length(image_urls) = 0
+          AND image_url IS NOT NULL
+          AND image_url <> '';
+      `);
+      await executeSql(sql`
+        CREATE TABLE IF NOT EXISTS public.notifications (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+          category text NOT NULL DEFAULT 'SYSTEM',
+          title text NOT NULL,
+          body text NOT NULL,
+          action_url text,
+          is_read boolean NOT NULL DEFAULT false,
+          read_at timestamptz,
+          created_at timestamptz NOT NULL DEFAULT now()
+        );
+      `);
+      await executeSql(sql`
+        CREATE INDEX IF NOT EXISTS idx_notifications_user_unread
+          ON public.notifications(user_id, is_read, created_at DESC);
+      `);
+      await executeSql(sql`
+        INSERT INTO public.notifications (id, user_id, category, title, body, is_read, created_at)
+        SELECT id, user_id, UPPER(category), title, body, read, created_at
+        FROM public.platform_notifications
+        ON CONFLICT (id) DO NOTHING;
       `);
     })().catch((err) => {
       globalForDdl.__nsCommerceTablesReady = undefined;

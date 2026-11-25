@@ -36,14 +36,6 @@ import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 interface SellerHubViewProps {
   snapshot: NairaScoutSnapshot;
   onAdvanceOrder: (orderId: string, nextStatus: OrderFulfilmentStatus) => Promise<void>;
-  onCreateDraftListing: (payload: {
-    title: string;
-    category: string;
-    priceNaira: number;
-    deliveryFeeNaira: number;
-    stock: number;
-    description: string;
-  }) => Promise<boolean>;
   onPublishListing: (listingId: string) => Promise<void>;
   onSelectPlan: (planId: SellerPlanId) => Promise<void>;
   onActivateSeller: (payload: {
@@ -65,7 +57,6 @@ interface SellerHubViewProps {
 export default function SellerHubView({
   snapshot,
   onAdvanceOrder,
-  onCreateDraftListing,
   onPublishListing,
   onSelectPlan,
   onActivateSeller,
@@ -80,13 +71,6 @@ export default function SellerHubView({
       : DEFAULT_LISTING_CATEGORIES_SEED.map((c) => c.name);
   const defaultCategory = activeCategoryNames[0] || 'Fashion & Apparel';
 
-  // Draft listing form
-  const [title, setTitle] = useState('');
-  const [category, setCategory] = useState(defaultCategory);
-  const [priceNaira, setPriceNaira] = useState('18500');
-  const [deliveryFeeNaira, setDeliveryFeeNaira] = useState('2500');
-  const [stock, setStock] = useState('10');
-  const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   // Onboarding wizard state
@@ -602,24 +586,6 @@ export default function SellerHubView({
     (m) => m.role !== 'BUSINESS_OWNER'
   ).length;
 
-  const handleCreateDraft = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim() || !description.trim()) return;
-    setSubmitting(true);
-    const ok = await onCreateDraftListing({
-      title,
-      category,
-      priceNaira: Number(priceNaira),
-      deliveryFeeNaira: Number(deliveryFeeNaira),
-      stock: Number(stock),
-      description,
-    });
-    if (ok) {
-      setTitle('');
-      setDescription('');
-    }
-    setSubmitting(false);
-  };
 
   const handleInviteTeam = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -639,7 +605,7 @@ export default function SellerHubView({
     <div className="space-y-8">
       <div className="flex flex-col gap-5 border-b border-border pb-6">
         <div className="flex flex-col items-start gap-2.5">
-          {/* Row 1: Rounded-square Business Logo uploader alongside Dashboard heading */}
+          {/* Row 1: Rounded-square Business Logo uploader alongside Seller Hub heading */}
           <div className="flex items-center gap-3.5">
             <div className="relative shrink-0">
               <UserAvatar
@@ -673,7 +639,7 @@ export default function SellerHubView({
               </button>
             </div>
             <h1 className="font-sans text-xl md:text-2xl font-bold tracking-tight text-foreground">
-              Dashboard
+              Seller Hub
             </h1>
           </div>
 
@@ -685,38 +651,30 @@ export default function SellerHubView({
             </span>
           </p>
 
-          {/* Row 3: Seller Status */}
-          <div>
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-md bg-muted font-sans text-xs font-semibold text-foreground">
+          {/* Row 3: Seller Status alongside Verification Status */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-md bg-[#D1D5D8] dark:bg-muted font-sans text-xs font-semibold text-foreground">
               Seller: {sellerProfile.sellerStatus}
             </span>
-          </div>
-
-          {/* Row 4: Verification Status */}
-          <div>
             <span
               className={`inline-flex items-center px-2.5 py-0.5 rounded-md font-sans text-xs font-semibold ${
                 scout.sellerVerificationStatus === 'VERIFIED'
-                  ? 'bg-accent text-accent-foreground'
-                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                  ? 'bg-[#D1D5D8] dark:bg-accent text-success dark:text-accent-foreground'
+                  : 'bg-[#D1D5D8] dark:bg-amber-500/15 text-amber-700 dark:text-amber-400'
               }`}
             >
               Verification: {scout.sellerVerificationStatus}
             </span>
           </div>
 
-          {/* Row 5: Subscription Plan */}
-          <div>
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-md bg-card border border-border font-sans text-xs text-muted-foreground">
+          {/* Row 4: Subscription Plan alongside red Close Seller Capabilities link */}
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-md bg-[#FFFFFF] text-[#000000] dark:bg-card dark:text-muted-foreground border border-border font-sans text-xs font-medium">
               Plan: {currentPlan.name} ({sellerProfile.subscriptionStatus})
             </span>
-          </div>
-
-          {/* Row 6: Close Seller Capabilities */}
-          <div>
             <Link
               href="/settings/closure"
-              className="text-xs font-medium text-muted-foreground hover:text-destructive underline"
+              className="text-xs font-semibold text-destructive hover:text-destructive/80 underline"
             >
               Close Seller Capabilities
             </Link>
@@ -733,8 +691,8 @@ export default function SellerHubView({
           )}
         </div>
 
-        {/* Navigation Pills directly under Close Seller Capabilities */}
-        <div className="flex items-center gap-1.5 p-1 bg-[#D1D5DB] dark:bg-[#181818] rounded-xl shrink-0 self-start overflow-x-auto max-w-full">
+        {/* Navigation Pills directly under Row 4 */}
+        <div className="flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] rounded-xl shrink-0 self-start overflow-x-auto max-w-full">
           <button
             type="button"
             onClick={() => setSubTab('operations')}
@@ -837,285 +795,187 @@ export default function SellerHubView({
             </div>
           </section>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-            <div className="lg:col-span-7 space-y-8">
-              {/* Seller Listings */}
-              <section className="space-y-3">
+          <div className="space-y-8">
+            {/* Seller Listings */}
+            <section className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="font-sans text-lg font-bold text-foreground">
                   Your Listings ({snapshot.sellerListings.length})
                 </h2>
-                <div className="bg-card border border-border rounded-2xl divide-y divide-border">
-                  {snapshot.sellerListings.length === 0 ? (
-                    <div className="p-6 text-sm text-muted-foreground">
-                      No listings yet. Create a Draft listing on the right.
+                {canPublishNow ? (
+                  <Link
+                    href="/seller/listings/new"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-[#292D2F] text-white dark:bg-white dark:text-black hover:opacity-90 transition-opacity"
+                  >
+                    <PackagePlus className="w-3.5 h-3.5" aria-hidden="true" />
+                    Create Listing
+                  </Link>
+                ) : (
+                  <Link
+                    href="/seller/listings/new"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl border border-border bg-card text-foreground hover:bg-muted transition-colors"
+                  >
+                    <PackagePlus className="w-3.5 h-3.5" aria-hidden="true" />
+                    Create Draft
+                  </Link>
+                )}
+              </div>
+              <div className="bg-card border border-border rounded-2xl divide-y divide-border">
+                {snapshot.sellerListings.length === 0 ? (
+                  <div className="p-6 text-sm text-muted-foreground">
+                    No listings yet. Create a product draft using the Create Listing wizard.
+                  </div>
+                ) : (
+                  snapshot.sellerListings.map((lst) => (
+                    <div
+                      key={lst.id}
+                      className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div>
+                        <p className="font-sans text-xs text-muted-foreground">
+                          {lst.id} · {lst.category} ·{' '}
+                          <span
+                            className={
+                              lst.status === 'PUBLISHED'
+                                ? 'text-success font-semibold'
+                                : 'text-amber-600 dark:text-amber-400 font-semibold'
+                            }
+                          >
+                            {lst.status}
+                          </span>
+                        </p>
+                        <p className="font-sans text-sm font-semibold text-foreground mt-0.5">
+                          {lst.title}
+                        </p>
+                        <p className="font-numeric text-xs text-muted-foreground mt-0.5 tabular-nums">
+                          {formatWholeNaira(lst.priceKobo)} · {lst.stock} in stock ·{' '}
+                          {lst.imageUrls?.length || 1} image{(lst.imageUrls?.length || 1) === 1 ? '' : 's'}
+                          {lst.videoLinks && lst.videoLinks.length > 0
+                            ? ` · ${lst.videoLinks.length} video${lst.videoLinks.length === 1 ? '' : 's'}`
+                            : ''}
+                        </p>
+                      </div>
+
+                      {lst.status === 'DRAFT' && (
+                        <button
+                          type="button"
+                          disabled={!canPublishNow}
+                          title={
+                            canPublishNow
+                              ? 'Publish listing to Marketplace'
+                              : 'SELLER verification must be VERIFIED and Seller status ACTIVE before publishing'
+                          }
+                          onClick={() => onPublishListing(lst.id)}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-45 shrink-0 cursor-pointer"
+                        >
+                          {canPublishNow ? (
+                            <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
+                          ) : (
+                            <Lock className="w-3.5 h-3.5" aria-hidden="true" />
+                          )}
+                          Publish Listing
+                        </button>
+                      )}
                     </div>
-                  ) : (
-                    snapshot.sellerListings.map((lst) => (
-                      <div
-                        key={lst.id}
-                        className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                      >
+                  ))
+                )}
+              </div>
+            </section>
+
+            {/* Orders & Fulfilment */}
+            <section className="space-y-3">
+              <div>
+                <h2 className="font-sans text-lg font-bold text-foreground">
+                  Order Fulfilment &amp; Commission Release Pipeline
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Confirming delivery transitions linked Scout commissions from Pending to
+                  Available in the immutable ledger.
+                </p>
+              </div>
+
+              <div className="bg-card border border-border rounded-2xl divide-y divide-border">
+                {snapshot.orders.length === 0 ? (
+                  <div className="p-6 text-sm text-muted-foreground">No orders yet.</div>
+                ) : (
+                  snapshot.orders.map((order) => (
+                    <div key={order.id} className="p-5 space-y-3">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
                         <div>
-                          <p className="font-sans text-xs text-muted-foreground">
-                            {lst.id} · {lst.category} ·{' '}
-                            <span
-                              className={
-                                lst.status === 'PUBLISHED'
-                                  ? 'text-success font-semibold'
-                                  : 'text-amber-600 dark:text-amber-400 font-semibold'
-                              }
-                            >
-                              {lst.status}
+                          <p className="font-sans text-xs font-semibold text-success">
+                            {order.id} ·{' '}
+                            {order.attributionType === 'referral_card'
+                              ? `Referral-Generated (${order.referralEventId})`
+                              : 'Direct Marketplace'}
+                          </p>
+                          <h3 className="mt-1 font-sans text-base font-semibold text-foreground">
+                            {order.productTitle} (×{order.quantity})
+                          </h3>
+                          <p className="text-xs text-muted-foreground">
+                            Seller: {order.sellerName} · Merchandise:{' '}
+                            <span className="font-numeric text-foreground tabular-nums">
+                              {formatKoboToNaira(order.eligibleMerchandiseKobo)}
                             </span>
                           </p>
-                          <p className="font-sans text-sm font-semibold text-foreground mt-0.5">
-                            {lst.title}
-                          </p>
-                          <p className="font-numeric text-xs text-muted-foreground mt-0.5 tabular-nums">
-                            {formatWholeNaira(lst.priceKobo)} · {lst.stock} in stock
-                          </p>
                         </div>
 
-                        {lst.status === 'DRAFT' && (
-                          <button
-                            type="button"
-                            disabled={!canPublishNow}
-                            title={
-                              canPublishNow
-                                ? 'Publish listing to Marketplace'
-                                : 'SELLER verification must be VERIFIED and Seller status ACTIVE before publishing'
-                            }
-                            onClick={() => onPublishListing(lst.id)}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-45 shrink-0 cursor-pointer"
-                          >
-                            {canPublishNow ? (
-                              <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
-                            ) : (
-                              <Lock className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span className="font-sans text-xs font-semibold px-2.5 py-1 rounded-lg bg-muted text-foreground">
+                          {order.fulfilmentStatus}
+                        </span>
+                      </div>
+
+                      {order.fulfilmentStatus !== 'Delivered' &&
+                        order.fulfilmentStatus !== 'Refunded' && (
+                          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
+                            {order.fulfilmentStatus === 'Paid' && (
+                              <button
+                                type="button"
+                                onClick={() => onAdvanceOrder(order.id, 'Processing')}
+                                className="px-3 py-1.5 text-xs font-medium bg-secondary hover:bg-muted rounded-lg text-secondary-foreground cursor-pointer"
+                              >
+                                Mark Processing
+                              </button>
                             )}
-                            Publish Listing
-                          </button>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </section>
-
-              {/* Orders & Fulfilment */}
-              <section className="space-y-3">
-                <div>
-                  <h2 className="font-sans text-lg font-bold text-foreground">
-                    Order Fulfilment &amp; Commission Release Pipeline
-                  </h2>
-                  <p className="text-xs text-muted-foreground">
-                    Confirming delivery transitions linked Scout commissions from Pending to
-                    Available in the immutable ledger.
-                  </p>
-                </div>
-
-                <div className="bg-card border border-border rounded-2xl divide-y divide-border">
-                  {snapshot.orders.length === 0 ? (
-                    <div className="p-6 text-sm text-muted-foreground">No orders yet.</div>
-                  ) : (
-                    snapshot.orders.map((order) => (
-                      <div key={order.id} className="p-5 space-y-3">
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div>
-                            <p className="font-sans text-xs font-semibold text-success">
-                              {order.id} ·{' '}
-                              {order.attributionType === 'referral_card'
-                                ? `Referral-Generated (${order.referralEventId})`
-                                : 'Direct Marketplace'}
-                            </p>
-                            <h3 className="mt-1 font-sans text-base font-semibold text-foreground">
-                              {order.productTitle} (×{order.quantity})
-                            </h3>
-                            <p className="text-xs text-muted-foreground">
-                              Seller: {order.sellerName} · Merchandise:{' '}
-                              <span className="font-numeric text-foreground tabular-nums">
-                                {formatKoboToNaira(order.eligibleMerchandiseKobo)}
-                              </span>
-                            </p>
+                            {(order.fulfilmentStatus === 'Paid' ||
+                              order.fulfilmentStatus === 'Processing') && (
+                              <button
+                                type="button"
+                                onClick={() => onAdvanceOrder(order.id, 'Dispatched')}
+                                className="px-3 py-1.5 text-xs font-medium bg-secondary hover:bg-muted rounded-lg text-secondary-foreground cursor-pointer"
+                              >
+                                Mark Dispatched
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => onAdvanceOrder(order.id, 'Delivered')}
+                              className="px-3 py-1.5 text-xs font-semibold bg-primary border border-primary-border hover:bg-primary/90 rounded-lg text-primary-foreground cursor-pointer"
+                            >
+                              Confirm Delivery (Release Commission)
+                            </button>
+                            {order.fulfilmentStatus !== 'Disputed' && (
+                              <button
+                                type="button"
+                                onClick={() => onAdvanceOrder(order.id, 'Disputed')}
+                                className="px-3 py-1.5 text-xs font-medium border border-amber-500/40 text-amber-600 dark:text-amber-400 rounded-lg hover:bg-amber-500/10 cursor-pointer"
+                              >
+                                Hold (Dispute)
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => onAdvanceOrder(order.id, 'Refunded')}
+                              className="px-3 py-1.5 text-xs font-medium border border-destructive/30 text-destructive rounded-lg hover:bg-destructive/10 cursor-pointer"
+                            >
+                              Refund &amp; Reverse
+                            </button>
                           </div>
-
-                          <span className="font-sans text-xs font-semibold px-2.5 py-1 rounded-lg bg-muted text-foreground">
-                            {order.fulfilmentStatus}
-                          </span>
-                        </div>
-
-                        {order.fulfilmentStatus !== 'Delivered' &&
-                          order.fulfilmentStatus !== 'Refunded' && (
-                            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
-                              {order.fulfilmentStatus === 'Paid' && (
-                                <button
-                                  type="button"
-                                  onClick={() => onAdvanceOrder(order.id, 'Processing')}
-                                  className="px-3 py-1.5 text-xs font-medium bg-secondary hover:bg-muted rounded-lg text-secondary-foreground cursor-pointer"
-                                >
-                                  Mark Processing
-                                </button>
-                              )}
-                              {(order.fulfilmentStatus === 'Paid' ||
-                                order.fulfilmentStatus === 'Processing') && (
-                                <button
-                                  type="button"
-                                  onClick={() => onAdvanceOrder(order.id, 'Dispatched')}
-                                  className="px-3 py-1.5 text-xs font-medium bg-secondary hover:bg-muted rounded-lg text-secondary-foreground cursor-pointer"
-                                >
-                                  Mark Dispatched
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => onAdvanceOrder(order.id, 'Delivered')}
-                                className="px-3 py-1.5 text-xs font-semibold bg-primary border border-primary-border hover:bg-primary/90 rounded-lg text-primary-foreground cursor-pointer"
-                              >
-                                Confirm Delivery (Release Commission)
-                              </button>
-                              {order.fulfilmentStatus !== 'Disputed' && (
-                                <button
-                                  type="button"
-                                  onClick={() => onAdvanceOrder(order.id, 'Disputed')}
-                                  className="px-3 py-1.5 text-xs font-medium border border-amber-500/40 text-amber-600 dark:text-amber-400 rounded-lg hover:bg-amber-500/10 cursor-pointer"
-                                >
-                                  Hold (Dispute)
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => onAdvanceOrder(order.id, 'Refunded')}
-                                className="px-3 py-1.5 text-xs font-medium border border-destructive/30 text-destructive rounded-lg hover:bg-destructive/10 cursor-pointer"
-                              >
-                                Refund &amp; Reverse
-                              </button>
-                            </div>
-                          )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </section>
-            </div>
-
-            {/* Create Listing Form */}
-            <div className="lg:col-span-5 bg-card border border-border rounded-2xl p-6 space-y-4 self-start">
-              <div className="flex items-center gap-2">
-                <PackagePlus className="w-4 h-4 text-foreground" aria-hidden="true" />
-                <h2 className="font-sans text-base font-bold text-foreground">
-                  Create Listing
-                </h2>
+                        )}
+                    </div>
+                  ))
+                )}
               </div>
-              <p className="text-xs text-muted-foreground">
-                Drafts can be created anytime during onboarding. Publishing consumes a monthly
-                publication slot and requires Seller verification approval.
-              </p>
-
-              <form onSubmit={handleCreateDraft} className="space-y-4">
-                <div>
-                  <label htmlFor="lst-title" className="block text-xs font-medium text-muted-foreground mb-1">
-                    Product Name
-                  </label>
-                  <input
-                    id="lst-title"
-                    type="text"
-                    required
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="e.g., Abeokuta Adire Cotton Cushion Set"
-                    className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl focus:outline-none focus:border-ring"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label htmlFor="lst-cat" className="block text-xs font-medium text-muted-foreground mb-1">
-                      Category
-                    </label>
-                    <select
-                      id="lst-cat"
-                      value={category}
-                      onChange={(e) => setCategory(e.target.value)}
-                      className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground focus:outline-none focus:border-ring"
-                    >
-                      {activeCategoryNames.map((catName) => (
-                        <option key={catName} value={catName}>
-                          {catName}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="lst-stock" className="block text-xs font-medium text-muted-foreground mb-1">
-                      Quantity
-                    </label>
-                    <input
-                      id="lst-stock"
-                      type="number"
-                      min={1}
-                      required
-                      value={stock}
-                      onChange={(e) => setStock(e.target.value)}
-                      className="w-full px-3 py-2 text-sm font-numeric tabular-nums bg-background text-foreground border border-input rounded-xl focus:outline-none focus:border-ring"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label htmlFor="lst-price" className="block text-xs font-medium text-muted-foreground mb-1">
-                      Unit Price (₦)
-                    </label>
-                    <input
-                      id="lst-price"
-                      type="number"
-                      min={500}
-                      required
-                      value={priceNaira}
-                      onChange={(e) => setPriceNaira(e.target.value)}
-                      className="w-full px-3 py-2 text-sm font-numeric tabular-nums bg-background text-foreground border border-input rounded-xl focus:outline-none focus:border-ring"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="lst-deliv" className="block text-xs font-medium text-muted-foreground mb-1">
-                      Delivery Fee (₦)
-                    </label>
-                    <input
-                      id="lst-deliv"
-                      type="number"
-                      min={0}
-                      required
-                      value={deliveryFeeNaira}
-                      onChange={(e) => setDeliveryFeeNaira(e.target.value)}
-                      className="w-full px-3 py-2 text-sm font-numeric tabular-nums bg-background text-foreground border border-input rounded-xl focus:outline-none focus:border-ring"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label htmlFor="lst-desc" className="block text-xs font-medium text-muted-foreground mb-1">
-                    Description
-                  </label>
-                  <textarea
-                    id="lst-desc"
-                    rows={3}
-                    required
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Material details, sizing, and fulfilment notes..."
-                    className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl focus:outline-none focus:border-ring"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="w-full py-2.5 px-4 text-xs font-semibold text-commerce-foreground bg-commerce rounded-xl hover:bg-commerce/90 disabled:opacity-45 cursor-pointer"
-                >
-                  {submitting ? 'Saving Draft...' : 'Save Draft'}
-                </button>
-              </form>
-            </div>
+            </section>
           </div>
         </div>
       )}

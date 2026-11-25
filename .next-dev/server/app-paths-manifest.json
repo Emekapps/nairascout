@@ -1,4 +1,8 @@
 {
-  "/api/search/route": "app/api/search/route.js",
-  "/page": "app/page.js"
+  "/api/nairascout/route": "app/api/nairascout/route.js",
+  "/api/notifications/route": "app/api/notifications/route.js",
+  "/api/seller/listings/media/route": "app/api/seller/listings/media/route.js",
+  "/page": "app/page.js",
+  "/notifications/page": "app/notifications/page.js",
+  "/seller/listings/new/page": "app/seller/listings/new/page.js"
 }

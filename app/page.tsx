@@ -7,8 +7,10 @@ import NairaScoutApp from '@/components/NairaScoutApp';
 export const dynamic = 'force-dynamic';
 
 interface HomePageProps {
-  searchParams: Promise<{ refEvent?: string; refScout?: string }>;
+  searchParams: Promise<{ refEvent?: string; refScout?: string; tab?: string }>;
 }
+
+const VALID_TABS = new Set(['marketplace', 'referrals', 'network', 'wallet', 'seller']);
 
 export default async function HomePage({ searchParams }: HomePageProps) {
   const params = await searchParams;
@@ -29,11 +31,15 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   }
 
   const initialSnapshot = await getNairaScoutSnapshot(identity?.userId ?? null, refEvent);
+  const requestedTab = params.tab && VALID_TABS.has(params.tab) ? params.tab : undefined;
 
   return (
     <NairaScoutApp
       initialSnapshot={initialSnapshot}
       initialRefEvent={params.refEvent ?? null}
+      initialTab={
+        requestedTab as 'marketplace' | 'referrals' | 'network' | 'wallet' | 'seller' | undefined
+      }
     />
   );
 }

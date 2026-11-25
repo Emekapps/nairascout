@@ -11,10 +11,30 @@
       "static/chunks/main-app.js",
       "static/chunks/app/page.js"
     ],
-    "/api/search/route": [
+    "/notifications/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/api/search/route.js"
+      "static/chunks/app/notifications/page.js"
+    ],
+    "/seller/listings/new/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/seller/listings/new/page.js"
+    ],
+    "/api/nairascout/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/nairascout/route.js"
+    ],
+    "/api/notifications/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/notifications/route.js"
+    ],
+    "/api/seller/listings/media/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/seller/listings/media/route.js"
     ]
   }
 }

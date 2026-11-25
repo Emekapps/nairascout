@@ -35,7 +35,6 @@ interface TopUtilityBarProps {
   onSelectSearchCategory?: (category: GlobalSearchCategoryHit) => void;
   onSelectSearchPerson?: (person: GlobalSearchPersonHit) => void;
   onSelectHome: () => void;
-  onOpenGuide: () => void;
   notifications: PlatformNotification[];
   authenticated: boolean;
 }
@@ -56,30 +55,28 @@ export function TopUtilityBar({
   onSelectSearchCategory,
   onSelectSearchPerson,
   onSelectHome,
-  onOpenGuide,
   notifications,
   authenticated,
 }: TopUtilityBarProps) {
-  const [noticesOpen, setNoticesOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<GlobalSearchResponse | null>(null);
   const [activeIndex, setActiveIndex] = useState(-1);
 
   const searchContainerRef = useRef<HTMLDivElement | null>(null);
-  const noticesContainerRef = useRef<HTMLDivElement | null>(null);
 
   const trimmedQuery = searchQuery.trim();
+  const unreadCount = useMemo(
+    () => notifications.filter((n) => !(n.isRead ?? n.read)).length,
+    [notifications]
+  );
 
-  // Click-outside dismissal for both search dropdown and notices popover
+  // Click-outside dismissal for search dropdown
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as Node;
       if (searchContainerRef.current && !searchContainerRef.current.contains(target)) {
         setDropdownOpen(false);
-      }
-      if (noticesContainerRef.current && !noticesContainerRef.current.contains(target)) {
-        setNoticesOpen(false);
       }
     };
     document.addEventListener('mousedown', handlePointerDown);
@@ -497,62 +494,24 @@ export function TopUtilityBar({
             <Search className="w-4 h-4" aria-hidden="true" />
           </button>
 
-          {/* Notifications Bell wired to PostgreSQL notifications */}
-          <div ref={noticesContainerRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setNoticesOpen((prev) => !prev)}
-              aria-label={`Notifications (${notifications.length})`}
-              aria-expanded={noticesOpen}
-              className="relative inline-flex items-center justify-center w-10 h-10 rounded-lg border border-border bg-card text-foreground hover:bg-muted transition-colors cursor-pointer"
-            >
-              <Bell className="w-4 h-4" aria-hidden="true" />
-              {notifications.length > 0 && (
-                <span
-                  aria-hidden="true"
-                  className="absolute top-2 right-2 w-2 h-2 rounded-full bg-success"
-                />
-              )}
-            </button>
-
-            {noticesOpen && (
-              <div className="absolute right-0 mt-2 w-80 bg-popover text-popover-foreground border border-border rounded-2xl shadow-lg p-3 z-50 space-y-2">
-                <div className="flex items-center justify-between px-1 pb-2 border-b border-border">
-                  <span className="font-sans text-xs font-bold text-foreground">
-                    Notices ({notifications.length})
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setNoticesOpen(false);
-                      onOpenGuide();
-                    }}
-                    className="text-[11px] font-semibold text-foreground hover:underline cursor-pointer"
-                  >
-                    Open Trust &amp; Guide
-                  </button>
-                </div>
-                {notifications.length === 0 ? (
-                  <p className="text-xs text-muted-foreground py-4 text-center">
-                    No active notifications.
-                  </p>
-                ) : (
-                  <div className="max-h-64 overflow-y-auto divide-y divide-border">
-                    {notifications.slice(0, 5).map((n) => (
-                      <div key={n.id} className="py-2.5 px-1 space-y-0.5">
-                        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                          <span className="font-sans uppercase font-semibold">{n.category}</span>
-                          <span className="font-numeric tabular-nums">{n.createdAt.slice(0, 10)}</span>
-                        </div>
-                        <p className="text-xs font-semibold text-foreground">{n.title}</p>
-                        <p className="text-[11px] text-muted-foreground line-clamp-2">{n.body}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+          {/* Notifications Bell navigating directly to dedicated Notifications page */}
+          <Link
+            href="/notifications"
+            aria-label={
+              unreadCount > 0 ? `Notifications (${unreadCount} unread)` : 'Notifications'
+            }
+            className="relative inline-flex items-center justify-center w-10 h-10 rounded-lg border border-border bg-card text-foreground hover:bg-muted transition-colors"
+          >
+            <Bell className="w-4 h-4" aria-hidden="true" />
+            {unreadCount > 0 && (
+              <span
+                aria-hidden="true"
+                className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-white font-numeric text-[10px] font-bold tabular-nums flex items-center justify-center shadow-xs"
+              >
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
             )}
-          </div>
+          </Link>
 
           {!authenticated && (
             <Link

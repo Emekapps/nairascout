@@ -9,7 +9,7 @@ import {
   getNairaScoutSnapshot,
 } from '@/lib/nairascout-store';
 
-// NS-SEL-002: Seller draft listing creation (available prior to verification; publishing remains gated)
+// NS-SEL-002 & NS-SEL-006: Seller draft listing creation with up to 10 images and plan-capped video links
 export async function POST(req: NextRequest) {
   if (!verifyMutationOrigin(req)) {
     return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });
@@ -29,6 +29,8 @@ export async function POST(req: NextRequest) {
       deliveryFeeNaira: Number(body.deliveryFeeNaira || 0),
       stock: Number(body.stock || 1),
       description: String(body.description || ''),
+      imageUrls: Array.isArray(body.imageUrls) ? body.imageUrls : undefined,
+      videoLinks: Array.isArray(body.videoLinks) ? body.videoLinks : undefined,
     });
 
     return NextResponse.json({

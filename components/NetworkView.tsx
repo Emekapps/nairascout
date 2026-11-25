@@ -170,7 +170,7 @@ export default function NetworkView({
           Network
         </h1>
 
-        <div className="flex items-center gap-1.5 p-1 bg-[#D1D5DB] dark:bg-[#181818] rounded-xl shrink-0 self-start overflow-x-auto">
+        <div className="flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] rounded-xl shrink-0 self-start overflow-x-auto">
           <button
             type="button"
             onClick={() => setSubTab('explorer')}
@@ -711,7 +711,7 @@ export default function NetworkView({
                       className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors ${
                         inviteSubTab === 'received'
                           ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
-                          : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
+                          : 'bg-[#D1D5D8] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
                       }`}
                     >
                       Received ({receivedInvites.length})
@@ -722,7 +722,7 @@ export default function NetworkView({
                       className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors ${
                         inviteSubTab === 'sent'
                           ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
-                          : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
+                          : 'bg-[#D1D5D8] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
                       }`}
                     >
                       Sent ({sentInvites.length})

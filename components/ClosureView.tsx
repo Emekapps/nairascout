@@ -8,6 +8,7 @@ import type { NairaScoutSnapshot } from '@/lib/nairascout-store';
 import { formatKoboToNaira } from '@/lib/commission-engine';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { ThemeToggle } from './layout/ThemeToggle';
+import { VerifiedSellerFab } from './seller/VerifiedSellerFab';
 
 interface ClosureViewProps {
   initialSnapshot: NairaScoutSnapshot;
@@ -323,6 +324,11 @@ export default function ClosureView({ initialSnapshot }: ClosureViewProps) {
           </section>
         </div>
       </main>
+
+      <VerifiedSellerFab
+        authenticated={snapshot.authenticated}
+        activeScout={snapshot.activeScout}
+      />
     </div>
   );
 }

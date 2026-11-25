@@ -17,6 +17,7 @@ import {
   MAX_SELLER_TEAM_SEATS,
   PublicScoutProfileDTO,
   RestrictionScope,
+  SELLER_PLAN_ENTITLEMENTS,
   SELLER_TEAM_ROLE_PERMISSIONS,
   SellerStatus,
   SellerTeamRole,
@@ -74,11 +75,18 @@ import {
   commissionLedgerEntries,
   ensureCommerceTables,
   marketplaceOrders,
-  platformNotifications,
+  notifications,
   productListings,
   productReferralEvents,
   supportCases,
 } from './db/commerce-schema';
+import {
+  ListingVideoLink,
+  MAX_LISTING_IMAGES,
+  parseAndNormalizeVideoLink,
+  sanitizeListingImageUrls,
+  sanitizeStoredVideoLinks,
+} from './media/video-links';
 import {
   DEFAULT_LISTING_CATEGORIES_SEED,
   NIGERIAN_STATES_SEED,
@@ -237,6 +245,8 @@ export interface ProductListing {
   status: 'DRAFT' | 'PUBLISHED' | 'EXPIRED';
   imageSeed: string;
   imageUrl: string;
+  imageUrls: string[];
+  videoLinks: ListingVideoLink[];
   daysRemaining: number;
   specifications: string[];
   returnPolicy: string;
@@ -387,11 +397,14 @@ export interface SupportCase {
 export interface PlatformNotification {
   id: string;
   userId: string;
-  category: 'referral' | 'order' | 'commission' | 'payout' | 'trust';
+  category: string;
   title: string;
   body: string;
+  actionUrl?: string | null;
   createdAt: string;
+  isRead: boolean;
   read: boolean;
+  readAt?: string | null;
 }
 
 export interface WalletSummary {
@@ -976,14 +989,16 @@ export async function ensureUserProvisionedInDb(
 
         // 6. Welcome notification
         await tx
-          .insert(platformNotifications)
+          .insert(notifications)
           .values({
             userId: identity.userId,
-            category: 'trust',
+            category: 'TRUST',
             title: 'Free Scout Account Provisioned',
             body: directReferrerId
               ? `Your permanent referral ancestry (${attributionSource}) is locked. You can refer products or activate Seller capabilities anytime.`
               : 'Welcome to NairaScout. Browse the marketplace, connect on Scouts List, or activate Seller capabilities anytime.',
+            actionUrl: '/',
+            isRead: false,
           })
           .onConflictDoNothing();
       }
@@ -1179,6 +1194,9 @@ export async function getNairaScoutSnapshot(
 
   const publishedProducts: ProductListing[] = publishedRows.map((p) => {
     const flags = getSellerFlags(p.sellerProfileId);
+    const cleanedImages = sanitizeListingImageUrls(p.imageUrls);
+    const resolvedImages = cleanedImages.length > 0 ? cleanedImages : p.imageUrl ? [p.imageUrl] : [];
+    const cleanedVideos = sanitizeStoredVideoLinks(p.videoLinks);
     return {
       id: p.id,
       productId: p.productId,
@@ -1195,7 +1213,9 @@ export async function getNairaScoutSnapshot(
       ...flags,
       status: p.status as ProductListing['status'],
       imageSeed: p.imageSeed,
-      imageUrl: p.imageUrl,
+      imageUrl: resolvedImages[0] || p.imageUrl,
+      imageUrls: resolvedImages,
+      videoLinks: cleanedVideos,
       daysRemaining: p.daysRemaining,
       specifications: p.specifications,
       returnPolicy: p.returnPolicy,
@@ -1331,30 +1351,37 @@ export async function getNairaScoutSnapshot(
         .orderBy(desc(productListings.createdAt))
     : [];
 
-  const sellerListings: ProductListing[] = sellerListingRows.map((p) => ({
-    id: p.id,
-    productId: p.productId,
-    title: p.title,
-    description: p.description,
-    category: p.category,
-    priceKobo: Number(p.priceKobo),
-    deliveryFeeKobo: Number(p.deliveryFeeKobo),
-    stock: p.stock,
-    sellerScoutId: p.sellerScoutId,
-    sellerProfileId: p.sellerProfileId,
-    sellerName: p.sellerName,
-    sellerCity: p.sellerCity,
-    ...getSellerFlags(p.sellerProfileId),
-    status: p.status as ProductListing['status'],
-    imageSeed: p.imageSeed,
-    imageUrl: p.imageUrl,
-    daysRemaining: p.daysRemaining,
-    specifications: p.specifications,
-    returnPolicy: p.returnPolicy,
-    warranty: p.warranty,
-    impressions: p.impressions,
-    referralShares: p.referralShares,
-  }));
+  const sellerListings: ProductListing[] = sellerListingRows.map((p) => {
+    const cleanedImages = sanitizeListingImageUrls(p.imageUrls);
+    const resolvedImages = cleanedImages.length > 0 ? cleanedImages : p.imageUrl ? [p.imageUrl] : [];
+    const cleanedVideos = sanitizeStoredVideoLinks(p.videoLinks);
+    return {
+      id: p.id,
+      productId: p.productId,
+      title: p.title,
+      description: p.description,
+      category: p.category,
+      priceKobo: Number(p.priceKobo),
+      deliveryFeeKobo: Number(p.deliveryFeeKobo),
+      stock: p.stock,
+      sellerScoutId: p.sellerScoutId,
+      sellerProfileId: p.sellerProfileId,
+      sellerName: p.sellerName,
+      sellerCity: p.sellerCity,
+      ...getSellerFlags(p.sellerProfileId),
+      status: p.status as ProductListing['status'],
+      imageSeed: p.imageSeed,
+      imageUrl: resolvedImages[0] || p.imageUrl,
+      imageUrls: resolvedImages,
+      videoLinks: cleanedVideos,
+      daysRemaining: p.daysRemaining,
+      specifications: p.specifications,
+      returnPolicy: p.returnPolicy,
+      warranty: p.warranty,
+      impressions: p.impressions,
+      referralShares: p.referralShares,
+    };
+  });
 
   const teamRows = sellerProfile
     ? await db
@@ -1708,9 +1735,9 @@ export async function getNairaScoutSnapshot(
 
   const notifRows = await db
     .select()
-    .from(platformNotifications)
-    .where(eq(platformNotifications.userId, viewerUserId))
-    .orderBy(desc(platformNotifications.createdAt));
+    .from(notifications)
+    .where(eq(notifications.userId, viewerUserId))
+    .orderBy(desc(notifications.createdAt));
 
   const supportRows = await db
     .select()
@@ -1756,11 +1783,14 @@ export async function getNairaScoutSnapshot(
     notifications: notifRows.map((n) => ({
       id: n.id,
       userId: n.userId,
-      category: n.category as PlatformNotification['category'],
+      category: n.category,
       title: n.title,
       body: n.body,
+      actionUrl: n.actionUrl ?? null,
       createdAt: n.createdAt.toISOString(),
-      read: n.read,
+      isRead: n.isRead,
+      read: n.isRead,
+      readAt: n.readAt?.toISOString() ?? null,
     })),
     supportCases: supportRows.map((c) => ({
       id: c.id,
@@ -1917,13 +1947,15 @@ export async function createOrderFromCheckout(
       });
     }
 
-    await tx.insert(platformNotifications).values({
+    await tx.insert(notifications).values({
       userId: actorUserId,
-      category: 'order',
+      category: 'ORDER',
       title: `Order ${orderId} confirmed (${isReferral ? 'Referral-Attributed' : 'Direct'})`,
       body: isReferral
         ? `Referral event preserved. Pending commissions calculated across Seller ancestry (${breakdown.actualAncestryDepth} generations).`
         : 'Direct marketplace checkout completed. No referral commission generated.',
+      actionUrl: '/?tab=wallet',
+      isRead: false,
     });
 
     return {
@@ -2736,7 +2768,7 @@ export async function activateSellerOnboarding(
   });
 }
 
-// NS-SEL-002: Create Seller draft product listing
+// NS-SEL-002 & NS-SEL-006: Create Seller draft product listing with multi-image and plan-capped video links
 export async function createSellerDraftListing(
   actorUserId: string,
   input: {
@@ -2746,6 +2778,8 @@ export async function createSellerDraftListing(
     deliveryFeeNaira: number;
     stock: number;
     description: string;
+    imageUrls?: string[];
+    videoLinks?: Array<string | { url: string; platform?: string }>;
   }
 ): Promise<ProductListing> {
   const db = requireDb();
@@ -2753,6 +2787,19 @@ export async function createSellerDraftListing(
 
   const ctx = await loadDbAuthContext(actorUserId);
   assertCanManageSellerDrafts(ctx);
+
+  const title = input.title.trim();
+  const description = input.description.trim();
+  const category = input.category.trim();
+  if (!title) {
+    throw new AuthorizationError('Product Name is required.', 400, 'TITLE_REQUIRED');
+  }
+  if (!category) {
+    throw new AuthorizationError('Category is required.', 400, 'CATEGORY_REQUIRED');
+  }
+  if (!description) {
+    throw new AuthorizationError('Description is required.', 400, 'DESCRIPTION_REQUIRED');
+  }
 
   const sellerRows = await db
     .select()
@@ -2768,19 +2815,60 @@ export async function createSellerDraftListing(
   const ownerScout = ownerScoutRows[0];
 
   const planSpec = SELLER_PLANS[planEnumToId(seller.subscriptionPlan as SubscriptionPlan)];
+  const planEntitlements = SELLER_PLAN_ENTITLEMENTS[seller.subscriptionPlan as SubscriptionPlan];
+
+  const rawImageInputs = Array.isArray(input.imageUrls) ? input.imageUrls : [];
+  if (rawImageInputs.length > MAX_LISTING_IMAGES) {
+    throw new AuthorizationError(
+      `A maximum of ${MAX_LISTING_IMAGES} images can be attached to a listing.`,
+      400,
+      'IMAGE_LIMIT_EXCEEDED'
+    );
+  }
+  const cleanedImages = sanitizeListingImageUrls(rawImageInputs);
+
+  const rawVideoEntries = (Array.isArray(input.videoLinks) ? input.videoLinks : [])
+    .map((v) => (typeof v === 'string' ? v.trim() : typeof v?.url === 'string' ? v.url.trim() : ''))
+    .filter(Boolean);
+
+  if (rawVideoEntries.length > planEntitlements.maxVideosPerListing) {
+    throw new AuthorizationError(
+      planEntitlements.maxVideosPerListing === 0
+        ? `Your ${planSpec.name} plan does not include product video links. Upgrade to Traction, Growth, or Sprawl to attach videos.`
+        : `Your ${planSpec.name} plan allows up to ${planEntitlements.maxVideosPerListing} video link(s) per listing.`,
+      403,
+      'VIDEO_QUOTA_EXCEEDED'
+    );
+  }
+
+  const validatedVideos: ListingVideoLink[] = [];
+  for (const rawUrl of rawVideoEntries) {
+    const parsed = parseAndNormalizeVideoLink(rawUrl);
+    if (!parsed) {
+      throw new AuthorizationError(
+        `Invalid video link "${rawUrl}". Only valid YouTube or TikTok URLs are permitted.`,
+        400,
+        'INVALID_VIDEO_URL'
+      );
+    }
+    validatedVideos.push(parsed);
+  }
+
   const suffix = `${Date.now().toString().slice(-5)}${Math.floor(10 + Math.random() * 89)}`;
   const id = `LST-${suffix}`;
   const productId = `PRD-${suffix}`;
   const seed = `nairascout-item-${suffix}`;
+  const fallbackImageUrl = `https://picsum.photos/seed/${seed}/800/600`;
+  const resolvedImages = cleanedImages.length > 0 ? cleanedImages : [fallbackImageUrl];
 
   const [inserted] = await db
     .insert(productListings)
     .values({
       id,
       productId,
-      title: input.title.trim(),
-      description: input.description.trim(),
-      category: input.category,
+      title,
+      description,
+      category,
       priceKobo: Math.round(Math.max(500, input.priceNaira) * 100),
       deliveryFeeKobo: Math.round(Math.max(0, input.deliveryFeeNaira) * 100),
       stock: Math.max(1, Math.round(input.stock)),
@@ -2790,7 +2878,9 @@ export async function createSellerDraftListing(
       sellerCity: ownerScout?.locationState || 'Lagos',
       status: 'DRAFT',
       imageSeed: seed,
-      imageUrl: `https://picsum.photos/seed/${seed}/800/600`,
+      imageUrl: resolvedImages[0],
+      imageUrls: resolvedImages,
+      videoLinks: validatedVideos,
       daysRemaining: planSpec.listingDurationDays,
       specifications: ['Seller draft listing', '10-day publication duration once published'],
       returnPolicy: 'Standard 7-day NairaScout return terms',
@@ -2817,6 +2907,8 @@ export async function createSellerDraftListing(
     status: 'DRAFT',
     imageSeed: inserted.imageSeed,
     imageUrl: inserted.imageUrl,
+    imageUrls: sanitizeListingImageUrls(inserted.imageUrls),
+    videoLinks: sanitizeStoredVideoLinks(inserted.videoLinks),
     daysRemaining: inserted.daysRemaining,
     specifications: inserted.specifications,
     returnPolicy: inserted.returnPolicy,
@@ -2878,6 +2970,14 @@ export async function publishSellerListingById(
       .where(eq(productListings.id, listing.id));
   }
 
+  const cleanedImages = sanitizeListingImageUrls(listing.imageUrls);
+  const resolvedImages = cleanedImages.length > 0 ? cleanedImages : listing.imageUrl ? [listing.imageUrl] : [];
+  const sellerRows = await db
+    .select({ logoUrl: sellerProfiles.logoUrl })
+    .from(sellerProfiles)
+    .where(eq(sellerProfiles.id, listing.sellerProfileId))
+    .limit(1);
+
   return {
     id: listing.id,
     productId: listing.productId,
@@ -2890,13 +2990,15 @@ export async function publishSellerListingById(
     sellerScoutId: listing.sellerScoutId,
     sellerProfileId: listing.sellerProfileId,
     sellerName: listing.sellerName,
-    sellerLogoUrl: null,
+    sellerLogoUrl: sellerRows[0]?.logoUrl ?? null,
     sellerCity: listing.sellerCity,
     hasActiveSellerBadge: true,
     isSellerVerified: true,
     status: 'PUBLISHED',
     imageSeed: listing.imageSeed,
-    imageUrl: listing.imageUrl,
+    imageUrl: resolvedImages[0] || listing.imageUrl,
+    imageUrls: resolvedImages,
+    videoLinks: sanitizeStoredVideoLinks(listing.videoLinks),
     daysRemaining: listing.daysRemaining,
     specifications: listing.specifications,
     returnPolicy: listing.returnPolicy,
@@ -3474,11 +3576,13 @@ export async function closeSellerCapabilityVoluntarily(actorUserId: string, reas
       reason: closureReason,
     });
 
-    await tx.insert(platformNotifications).values({
+    await tx.insert(notifications).values({
       userId: seller.ownerUserId,
-      category: 'trust',
+      category: 'TRUST',
       title: 'Seller Capabilities Closed (Scout Account Active)',
       body: 'Your Seller storefront and listings have been closed. Your Scout browsing, Scouts List, referrals, and wallet remain active.',
+      actionUrl: '/?tab=seller',
+      isRead: false,
     });
   });
 }
@@ -4009,11 +4113,13 @@ export async function adminReviewVerification(
       reason: notes,
     });
 
-    await tx.insert(platformNotifications).values({
+    await tx.insert(notifications).values({
       userId: verif.userId,
-      category: 'trust',
+      category: 'TRUST',
       title: `${verif.category} verification ${canonicalDecision}`,
       body: notes,
+      actionUrl: '/settings',
+      isRead: false,
     });
 
     return updated;
@@ -4117,11 +4223,13 @@ export async function adminManageRestriction(
       reason,
     });
 
-    await tx.insert(platformNotifications).values({
+    await tx.insert(notifications).values({
       userId: input.targetUserId,
-      category: 'trust',
+      category: 'TRUST',
       title: `Capability Restricted: ${input.capabilityCode}`,
       body: `${reason}. You may submit an independent appeal from Account Settings if you believe this is in error.`,
+      actionUrl: '/settings',
+      isRead: false,
     });
   });
 }
@@ -4714,11 +4822,13 @@ export async function adminDecideAppeal(
       reason: notes,
     });
 
-    await tx.insert(platformNotifications).values({
+    await tx.insert(notifications).values({
       userId: appeal.appellantUserId,
-      category: 'trust',
+      category: 'TRUST',
       title: `Appeal ${input.decision}`,
       body: notes,
+      actionUrl: '/settings',
+      isRead: false,
     });
 
     return updated;
@@ -5166,4 +5276,73 @@ export async function searchGlobalDirectory(
     people,
   };
 }
+
+// NS-NOT-001: Fetch notifications and unread count for the authenticated user
+export async function getNotificationsForActor(actorUserId: string): Promise<{
+  notifications: PlatformNotification[];
+  unreadCount: number;
+}> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const rows = await db
+    .select()
+    .from(notifications)
+    .where(eq(notifications.userId, actorUserId))
+    .orderBy(desc(notifications.createdAt));
+
+  const mapped: PlatformNotification[] = rows.map((n) => ({
+    id: n.id,
+    userId: n.userId,
+    category: n.category,
+    title: n.title,
+    body: n.body,
+    actionUrl: n.actionUrl ?? null,
+    createdAt: n.createdAt.toISOString(),
+    isRead: n.isRead,
+    read: n.isRead,
+    readAt: n.readAt?.toISOString() ?? null,
+  }));
+
+  return {
+    notifications: mapped,
+    unreadCount: mapped.filter((n) => !n.isRead).length,
+  };
+}
+
+// NS-NOT-001: Mark single or all notifications as read for the authenticated user
+export async function markNotificationReadForActor(
+  actorUserId: string,
+  options: { notificationId?: string; markAll?: boolean }
+): Promise<{
+  notifications: PlatformNotification[];
+  unreadCount: number;
+}> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const now = new Date();
+  if (options.markAll) {
+    await db
+      .update(notifications)
+      .set({ isRead: true, readAt: now })
+      .where(and(eq(notifications.userId, actorUserId), eq(notifications.isRead, false)));
+  } else if (options.notificationId && isUuid(options.notificationId)) {
+    await db
+      .update(notifications)
+      .set({ isRead: true, readAt: now })
+      .where(
+        and(
+          eq(notifications.id, options.notificationId),
+          eq(notifications.userId, actorUserId),
+          eq(notifications.isRead, false)
+        )
+      );
+  } else {
+    throw new AuthorizationError('Valid notification ID or markAll flag is required.', 400, 'INVALID_NOTIFICATION_ID');
+  }
+
+  return getNotificationsForActor(actorUserId);
+}
+
 

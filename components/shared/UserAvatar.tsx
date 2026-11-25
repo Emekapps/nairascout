@@ -45,7 +45,12 @@ export function UserAvatar({
   const cleanUrl = avatarUrl?.trim() || null;
   const showImage = Boolean(cleanUrl && failedSrc !== cleanUrl);
   const initials = getInitials(displayName, username);
-  const shapeClass = shape === 'rounded-square' ? 'rounded-2xl' : 'rounded-full';
+  const shapeClass =
+    shape === 'rounded-square'
+      ? size === 'xs' || size === 'sm' || size === 'md'
+        ? 'rounded-lg'
+        : 'rounded-2xl'
+      : 'rounded-full';
 
   return (
     <span

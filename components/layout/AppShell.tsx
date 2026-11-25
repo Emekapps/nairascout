@@ -11,6 +11,7 @@ import type { NavTab } from '@/components/HeaderNav';
 import { DesktopSidebar } from './DesktopSidebar';
 import { TopUtilityBar } from './TopUtilityBar';
 import { MobileBottomNav } from './MobileBottomNav';
+import { VerifiedSellerFab } from '@/components/seller/VerifiedSellerFab';
 
 interface AppShellProps {
   activeTab: NavTab;
@@ -80,7 +81,6 @@ export function AppShell({
           onSelectSearchCategory={onSelectSearchCategory}
           onSelectSearchPerson={onSelectSearchPerson}
           onSelectHome={() => onSelectTab('marketplace')}
-          onOpenGuide={onOpenGuide}
           notifications={notifications}
           authenticated={authenticated}
         />
@@ -103,6 +103,8 @@ export function AppShell({
         activeScout={activeScout}
         onLogout={onLogout}
       />
+
+      <VerifiedSellerFab authenticated={authenticated} activeScout={activeScout} />
     </div>
   );
 }

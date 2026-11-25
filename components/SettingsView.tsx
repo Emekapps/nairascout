@@ -30,6 +30,7 @@ import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { UserAvatar } from './shared/UserAvatar';
 import { UserIdentityRow } from './shared/UserIdentityRow';
 import { ThemeToggle } from './layout/ThemeToggle';
+import { VerifiedSellerFab } from './seller/VerifiedSellerFab';
 
 interface SettingsViewProps {
   initialSnapshot: NairaScoutSnapshot;
@@ -1128,6 +1129,11 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
           </div>
         )}
       </main>
+
+      <VerifiedSellerFab
+        authenticated={snapshot.authenticated}
+        activeScout={snapshot.activeScout}
+      />
     </div>
   );
 }
