@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import type {
   GlobalSearchCategoryHit,
@@ -26,7 +27,7 @@ import type { NavTab } from './HeaderNav';
 import { AppShell } from './layout/AppShell';
 import MarketplaceView from './MarketplaceView';
 import ReferralsView from './ReferralsView';
-import NetworkView from './NetworkView';
+import NetworkView, { type NetworkSubTab } from './NetworkView';
 import WalletView from './WalletView';
 import SellerHubView from './SellerHubView';
 import CheckoutDrawer from './CheckoutDrawer';
@@ -47,6 +48,7 @@ export default function NairaScoutApp({
   initialTab,
 }: NairaScoutAppProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [snapshot, setSnapshot] = useState<NairaScoutSnapshot>(initialSnapshot);
   const [activeTab, setActiveTab] = useState<NavTab>(
     initialTab ?? (initialRefEvent ? 'referrals' : 'marketplace')
@@ -57,8 +59,8 @@ export default function NairaScoutApp({
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [marketplaceCategoryFilter, setMarketplaceCategoryFilter] = useState<string>('All');
   const [selectedProductIdFromSearch, setSelectedProductIdFromSearch] = useState<string | null>(null);
-  const [networkSubTab, setNetworkSubTab] = useState<'explorer' | 'scouts_list' | 'simulator'>(
-    'explorer'
+  const [networkSubTab, setNetworkSubTab] = useState<NetworkSubTab>(
+    initialSnapshot.authenticated ? 'overview' : 'explorer'
   );
   const [networkScoutSearch, setNetworkScoutSearch] = useState('');
   const [checkoutSession, setCheckoutSession] = useState<{
@@ -104,6 +106,27 @@ export default function NairaScoutApp({
       setNetworkScoutSearch(person.username);
       setActiveTab('network');
     }
+  };
+
+  useEffect(() => {
+    if (!initialRefEvent) return;
+    void fetch('/api/nairascout', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'NairaScout',
+      },
+      body: JSON.stringify({
+        action: 'mark_referral_opened',
+        referralEventId: initialRefEvent,
+      }),
+    }).catch(() => undefined);
+  }, [initialRefEvent]);
+
+  const invalidateScoutQueries = () => {
+    void queryClient.invalidateQueries({ queryKey: ['scout-stats'] });
+    void queryClient.invalidateQueries({ queryKey: ['scout-activity'] });
+    void queryClient.invalidateQueries({ queryKey: ['scout-commissions'] });
   };
 
   const showFeedback = (type: 'ok' | 'err', message: string) => {
@@ -158,6 +181,7 @@ export default function NairaScoutApp({
   }): Promise<MarketplaceOrder | null> => {
     const data = await callApi({ action: 'checkout', ...payload });
     if (!data?.order) return null;
+    invalidateScoutQueries();
     showFeedback(
       'ok',
       `Order ${data.order.id} placed (${
@@ -179,6 +203,7 @@ export default function NairaScoutApp({
         ? [data.event]
         : [];
     if (events.length === 0) return null;
+    invalidateScoutQueries();
     showFeedback(
       'ok',
       events.length === 1
@@ -191,6 +216,7 @@ export default function NairaScoutApp({
   const handleAdvanceOrder = async (orderId: string, nextStatus: OrderFulfilmentStatus) => {
     const data = await callApi({ action: 'advance_order', orderId, nextStatus });
     if (data?.order) {
+      invalidateScoutQueries();
       showFeedback('ok', `Order ${orderId} updated to ${nextStatus}. Ledger updated.`);
     }
   };
@@ -467,6 +493,7 @@ export default function NairaScoutApp({
               onExternalSubTabChange={setNetworkSubTab}
               externalScoutSearch={networkScoutSearch}
               onExternalScoutSearchChange={setNetworkScoutSearch}
+              onNavigateMainTab={setActiveTab}
               onInviteScout={handleInviteScout}
               onRespondInvite={handleRespondInvite}
               onManageContact={handleManageContact}
@@ -475,7 +502,9 @@ export default function NairaScoutApp({
             />
           )}
 
-          {activeTab === 'wallet' && <WalletView snapshot={snapshot} />}
+          {activeTab === 'wallet' && (
+            <WalletView snapshot={snapshot} onSnapshotUpdated={setSnapshot} />
+          )}
 
           {activeTab === 'seller' && (
             <SellerHubView

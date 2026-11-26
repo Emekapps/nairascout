@@ -60,6 +60,8 @@ export const productReferralEvents = pgTable('product_referral_events', {
   ancestryPathSignature: text('ancestry_path_signature').notNull(),
   status: text('status').default('active').notNull(), // 'active' | 'expired' | 'converted'
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  openedAt: timestamp('opened_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -455,6 +457,50 @@ export async function ensureCommerceTables(
           last_run_at timestamptz,
           created_at timestamptz NOT NULL DEFAULT now(),
           updated_at timestamptz NOT NULL DEFAULT now()
+        );
+      `);
+      // NS-SCT-010, NS-SCT-015, NS-SCT-056, NS-SCT-075, NS-SCT-076: Module 5 columns & tables
+      await executeSql(sql`
+        ALTER TABLE public.scout_profiles
+          ADD COLUMN IF NOT EXISTS location_lga text;
+      `);
+      await executeSql(sql`
+        ALTER TABLE public.scout_profiles
+          ALTER COLUMN profile_visibility SET DEFAULT 'PRIVATE';
+      `);
+      await executeSql(sql`
+        ALTER TABLE public.product_referral_events
+          ADD COLUMN IF NOT EXISTS delivered_at timestamptz,
+          ADD COLUMN IF NOT EXISTS opened_at timestamptz;
+      `);
+      await executeSql(sql`
+        UPDATE public.product_referral_events
+        SET delivered_at = created_at
+        WHERE delivered_at IS NULL;
+      `);
+      await executeSql(sql`
+        CREATE TABLE IF NOT EXISTS public.notification_preferences (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+          category_code text NOT NULL,
+          in_app_enabled boolean NOT NULL DEFAULT true,
+          email_enabled boolean NOT NULL DEFAULT true,
+          is_essential boolean NOT NULL DEFAULT false,
+          updated_at timestamptz NOT NULL DEFAULT now(),
+          CONSTRAINT notification_preferences_user_category_unique UNIQUE (user_id, category_code)
+        );
+      `);
+      await executeSql(sql`
+        CREATE TABLE IF NOT EXISTS public.withdrawal_requests (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE RESTRICT,
+          amount_kobo bigint NOT NULL CHECK (amount_kobo >= 500000),
+          bank_summary text NOT NULL,
+          scheduled_payout_date text NOT NULL,
+          status text NOT NULL DEFAULT 'PENDING',
+          failure_reason text,
+          requested_at timestamptz NOT NULL DEFAULT now(),
+          processed_at timestamptz
         );
       `);
     })().catch((err) => {

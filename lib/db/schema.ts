@@ -4,6 +4,7 @@ import {
   uuid,
   text,
   integer,
+  bigint,
   boolean,
   timestamp,
   jsonb,
@@ -154,6 +155,7 @@ export const users = pgTable('users', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+// NS-SCT-010 & NS-SCT-015: Scout profile with optional LGA & Private-by-Default visibility
 export const scoutProfiles = pgTable('scout_profiles', {
   userId: uuid('user_id')
     .primaryKey()
@@ -163,10 +165,11 @@ export const scoutProfiles = pgTable('scout_profiles', {
   avatarUrl: text('avatar_url'),
   bio: text('bio'),
   locationState: text('location_state'),
+  locationLga: text('location_lga'),
   preferredCategories: jsonb('preferred_categories').$type<string[]>().default([]).notNull(),
   invitationPolicy: invitationPolicyEnum('invitation_policy').default('EVERYONE').notNull(),
   muteReferrals: boolean('mute_referrals').default(false).notNull(),
-  profileVisibility: text('profile_visibility').default('PUBLIC').notNull(),
+  profileVisibility: text('profile_visibility').default('PRIVATE').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -558,5 +561,47 @@ export const dataRetentionSchedule = pgTable('data_retention_schedule', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+// ============================================================================
+// 9. MODULE 5: NOTIFICATION PREFERENCES & AUTHORITATIVE WITHDRAWALS (NS-SCT-075, NS-SCT-076)
+// ============================================================================
+
+// NS-SCT-076: 8-group notification preferences with essential alert locking
+export const notificationPreferences = pgTable(
+  'notification_preferences',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    categoryCode: text('category_code').notNull(),
+    inAppEnabled: boolean('in_app_enabled').default(true).notNull(),
+    emailEnabled: boolean('email_enabled').default(true).notNull(),
+    isEssential: boolean('is_essential').default(false).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('notification_preferences_user_category_unique').on(
+      table.userId,
+      table.categoryCode
+    ),
+  ]
+);
+
+// NS-SCT-075: Authoritative withdrawal requests (verified server-side against ledger balance)
+export const withdrawalRequests = pgTable('withdrawal_requests', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'restrict' }),
+  amountKobo: bigint('amount_kobo', { mode: 'number' }).notNull(),
+  bankSummary: text('bank_summary').notNull(),
+  scheduledPayoutDate: text('scheduled_payout_date').notNull(),
+  status: text('status').default('PENDING').notNull(), // 'PENDING' | 'PROCESSING' | 'PAID' | 'FAILED' | 'CANCELLED'
+  failureReason: text('failure_reason'),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).defaultNow().notNull(),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+});
+
 
 

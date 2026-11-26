@@ -54,7 +54,7 @@ export function UserAvatar({
 
   return (
     <span
-      className={`relative inline-flex items-center justify-center ${shapeClass} overflow-hidden shrink-0 bg-primary text-primary-foreground border border-primary-border font-sans font-bold select-none ${SIZE_CLASSES[size]} ${className}`}
+      className={`relative aspect-square inline-flex items-center justify-center ${shapeClass} overflow-hidden shrink-0 bg-primary text-primary-foreground border border-primary-border font-sans font-bold select-none ${SIZE_CLASSES[size]} ${className}`}
     >
       {showImage && cleanUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -63,7 +63,7 @@ export function UserAvatar({
           alt={displayName || username || 'User avatar'}
           referrerPolicy="no-referrer"
           onError={() => setFailedSrc(cleanUrl)}
-          className="h-full w-full object-cover"
+          className="h-full w-full aspect-square object-cover"
         />
       ) : (
         <span aria-hidden="true">{initials}</span>

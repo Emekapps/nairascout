@@ -22,15 +22,22 @@ import {
   NAIRASCOUT_EARNINGS_DISCLAIMER,
   NAIRASCOUT_TAGLINE,
 } from '@/lib/constants/foundation-content';
+import type { NavTab } from './HeaderNav';
 import { DismissibleNoticePanel } from './shared/DismissibleNoticePanel';
+import { RestrictionNoticeBanner } from './shared/RestrictionNoticeBanner';
 import { UserIdentityRow } from './shared/UserIdentityRow';
+import { ScoutOverviewDashboard } from './scout/ScoutOverviewDashboard';
+import { ScoutActivityFeed } from './scout/ScoutActivityFeed';
+
+export type NetworkSubTab = 'overview' | 'activity' | 'explorer' | 'scouts_list' | 'simulator';
 
 interface NetworkViewProps {
   snapshot: NairaScoutSnapshot;
-  externalSubTab?: 'explorer' | 'scouts_list' | 'simulator';
-  onExternalSubTabChange?: (tab: 'explorer' | 'scouts_list' | 'simulator') => void;
+  externalSubTab?: NetworkSubTab;
+  onExternalSubTabChange?: (tab: NetworkSubTab) => void;
   externalScoutSearch?: string;
   onExternalScoutSearchChange?: (q: string) => void;
+  onNavigateMainTab?: (tab: NavTab) => void;
   onInviteScout: (targetScoutId: string) => Promise<void>;
   onRespondInvite: (invitationId: string, decision: 'accept' | 'reject' | 'withdraw') => Promise<void>;
   onManageContact: (payload: {
@@ -52,13 +59,16 @@ export default function NetworkView({
   onExternalSubTabChange,
   externalScoutSearch,
   onExternalScoutSearchChange,
+  onNavigateMainTab,
   onInviteScout,
   onRespondInvite,
   onManageContact,
   onReportAbuse,
   onOpenReferForProduct,
 }: NetworkViewProps) {
-  const [localSubTab, setLocalSubTab] = useState<'explorer' | 'scouts_list' | 'simulator'>('explorer');
+  const [localSubTab, setLocalSubTab] = useState<NetworkSubTab>(
+    snapshot.authenticated ? 'overview' : 'explorer'
+  );
   const [inviteSubTab, setInviteSubTab] = useState<'received' | 'sent'>('received');
   const [localScoutSearch, setLocalScoutSearch] = useState('');
 
@@ -144,7 +154,8 @@ export default function NetworkView({
         !q ||
         s.username.toLowerCase().includes(q) ||
         s.displayName.toLowerCase().includes(q) ||
-        (s.locationState || '').toLowerCase().includes(q)
+        (s.locationState || '').toLowerCase().includes(q) ||
+        (s.locationLga || '').toLowerCase().includes(q)
     );
   }, [snapshot.allScoutsDirectory, scoutSearch]);
 
@@ -167,55 +178,66 @@ export default function NetworkView({
     }
   };
 
+  const unreadNotificationsCount = snapshot.notifications.filter((n) => !n.isRead).length;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-5">
         <h1 className="font-sans text-xl md:text-2xl font-bold tracking-tight text-foreground">
-          Network
+          Scout Hub &amp; Network
         </h1>
 
-        <div className="flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] rounded-xl shrink-0 self-start overflow-x-auto">
-          <button
-            type="button"
-            onClick={() => setSubTab('explorer')}
-            className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
-              subTab === 'explorer'
-                ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
-                : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
-            }`}
-          >
-            Ancestry
-          </button>
-          <button
-            type="button"
-            onClick={() => setSubTab('scouts_list')}
-            className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
-              subTab === 'scouts_list'
-                ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
-                : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
-            }`}
-          >
-            Scouts
-          </button>
-          <button
-            type="button"
-            onClick={() => setSubTab('simulator')}
-            className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
-              subTab === 'simulator'
-                ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
-                : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
-            }`}
-          >
-            Calculator
-          </button>
+        <div className="flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] rounded-xl shrink-0 self-start overflow-x-auto max-w-full">
+          {(
+            [
+              ...(snapshot.authenticated
+                ? [
+                    { id: 'overview', label: 'Overview' },
+                    { id: 'activity', label: 'Activity' },
+                  ]
+                : []),
+              { id: 'explorer', label: 'Ancestry' },
+              { id: 'scouts_list', label: 'Scouts' },
+              { id: 'simulator', label: 'Calculator' },
+            ] as { id: NetworkSubTab; label: string }[]
+          ).map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setSubTab(item.id)}
+              className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+                subTab === item.id
+                  ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
+                  : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
       </div>
 
+      {subTab !== 'overview' && <RestrictionNoticeBanner activeScout={snapshot.activeScout} />}
+
       <DismissibleNoticePanel
         storageKey="nairascout_network_explainer_notice_v1"
-        description="Inspect your permanent referral ancestry, manage Scouts List with strict privacy controls, or calculate your Commissions"
+        description="Track your Scout performance, chronological activity, permanent referral ancestry, Scouts List with private-by-default controls, or calculate 13-Gen commissions."
         ariaLabel="Network Explainer Notice"
       />
+
+      {subTab === 'overview' && snapshot.authenticated && snapshot.activeScout && (
+        <ScoutOverviewDashboard
+          activeScout={snapshot.activeScout}
+          unreadNotificationsCount={unreadNotificationsCount}
+          onNavigateTab={(tab) => onNavigateMainTab?.(tab)}
+          onOpenScoutsList={() => setSubTab('scouts_list')}
+          onOpenActivityFeed={() => setSubTab('activity')}
+        />
+      )}
+
+      {subTab === 'activity' && snapshot.authenticated && snapshot.activeScout && (
+        <ScoutActivityFeed userId={snapshot.activeScout.id} />
+      )}
 
       {subTab === 'explorer' && (
         !snapshot.authenticated ? (
@@ -668,7 +690,15 @@ export default function NetworkView({
                               )}
                             </>
                           }
-                          subtitle={`${scout.locationState || 'Nigeria'} · Working with ${scout.workingWithCount} Scouts · ${scout.totalSoldUnits} units sold`}
+                          subtitle={`${
+                            scout.locationState
+                              ? [scout.locationLga, scout.locationState].filter(Boolean).join(', ')
+                              : 'Private location'
+                          } · Working with ${scout.workingWithCount} Scouts · ${scout.totalSoldUnits} units sold${
+                            scout.preferredCategories && scout.preferredCategories.length > 0
+                              ? ` · ${scout.preferredCategories.slice(0, 2).join(', ')}`
+                              : ''
+                          }`}
                         />
 
                         <div className="shrink-0">

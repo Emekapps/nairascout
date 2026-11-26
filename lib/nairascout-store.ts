@@ -15,6 +15,7 @@ import {
   AuthorizationError,
   CapabilityCode,
   MAX_SELLER_TEAM_SEATS,
+  ProfileVisibility,
   PublicScoutProfileDTO,
   RestrictionScope,
   SELLER_PLAN_ENTITLEMENTS,
@@ -67,6 +68,7 @@ import {
   listingCategories,
   makerCheckerRequests,
   nigerianStates,
+  notificationPreferences,
   platformAdminRoles,
   platformPolicies,
   referralAncestry,
@@ -79,6 +81,7 @@ import {
   userBlocks,
   users,
   verificationRecords,
+  withdrawalRequests,
 } from './db/schema';
 import {
   commissionLedgerEntries,
@@ -89,6 +92,21 @@ import {
   productReferralEvents,
   supportCases,
 } from './db/commerce-schema';
+import {
+  NOTIFICATION_PREFERENCE_GROUPS,
+  NotificationCategoryCode,
+  SCOUT_BIO_MAX_LENGTH,
+  containsReservedImpersonationTerm,
+} from './constants/notification-preferences';
+import {
+  StatsPeriodPreset,
+  formatLagosDate,
+  formatLagosDateTime,
+  lagosDayEndUtc,
+  lagosDayStartUtc,
+  resolveLagosPeriodBounds,
+  toLagosDateKey,
+} from './utils/africa-lagos';
 import {
   ListingVideoLink,
   MAX_LISTING_IMAGES,
@@ -439,6 +457,111 @@ export interface WalletSummary {
   nextPayoutDate: string;
   precedingMonthAvailableKobo: number;
   eligibleForNextPayout: boolean;
+  pendingWithdrawalKobo?: number;
+  withdrawableNowKobo?: number;
+}
+
+export interface NotificationPreferenceDTO {
+  categoryCode: NotificationCategoryCode;
+  label: string;
+  description: string;
+  isEssential: boolean;
+  inAppEnabled: boolean;
+  emailEnabled: boolean;
+  updatedAt: string;
+}
+
+export type ScoutActivityCategory =
+  | 'Account'
+  | 'Scouts List'
+  | 'Product Referrals'
+  | 'Purchases'
+  | 'Commissions'
+  | 'Wallet'
+  | 'Notifications'
+  | 'Restrictions';
+
+export interface ScoutActivityItemDTO {
+  id: string;
+  category: ScoutActivityCategory;
+  title: string;
+  summary: string;
+  timestamp: string;
+  lagosDateKey: string;
+  lagosDateLabel: string;
+  lagosTimeLabel: string;
+  statusBadge?: string;
+  amountKobo?: number;
+}
+
+export interface ScoutOverviewStatsDTO {
+  period: StatsPeriodPreset;
+  startDate: string;
+  endDate: string;
+  computedAt: string;
+  computedAtLagos: string;
+  wallet: WalletSummary & {
+    pendingWithdrawalKobo: number;
+    withdrawableNowKobo: number;
+    thresholdProgressPct: number;
+  };
+  referrals: {
+    sentCount: number;
+    deliveredCount: number;
+    openedCount: number;
+    openRatePct: number;
+    attributedPurchasesCount: number;
+    conversionRatePct: number;
+    eligibleSalesKobo: number;
+  };
+  commissions: {
+    pendingKobo: number;
+    availableKobo: number;
+    recentItems: Array<{
+      id: string;
+      reference: string;
+      orderId: string;
+      productTitle: string;
+      generation: number;
+      amountKobo: number;
+      status: LedgerEntryStatus;
+      createdAt: string;
+      createdAtLagos: string;
+    }>;
+  };
+  recentActivity: ScoutActivityItemDTO[];
+}
+
+export interface CommissionHistoryRowDTO {
+  id: string;
+  reference: string;
+  orderId: string;
+  productId: string;
+  productTitle: string;
+  referralEventId: string | null;
+  generation: number;
+  fractionLabel: string;
+  amountKobo: number;
+  status: LedgerEntryStatus;
+  displayStatus: 'Pending' | 'Available' | 'Withdrawn' | 'Reversed / Adjusted' | 'On Hold';
+  description: string;
+  reversalReason: string | null;
+  linkedToReference: string | null;
+  createdAt: string;
+  createdAtLagos: string;
+  releasedAt: string | null;
+  releasedAtLagos: string | null;
+}
+
+export interface WithdrawalRequestDTO {
+  id: string;
+  amountKobo: number;
+  bankSummary: string;
+  scheduledPayoutDate: string;
+  status: string;
+  failureReason: string | null;
+  requestedAt: string;
+  requestedAtLagos: string;
 }
 
 export interface ActiveScoutDTO {
@@ -449,6 +572,8 @@ export interface ActiveScoutDTO {
   avatarUrl?: string | null;
   bio: string | null;
   city: string;
+  locationLga?: string | null;
+  accountCreatedAt?: string;
   preferredCategories: string[];
   accountStatus: AccountStatus;
   restrictionReason: string | null;
@@ -460,7 +585,7 @@ export interface ActiveScoutDTO {
   mfaEnabled: boolean;
   invitePolicy: InvitationPolicy;
   muteReferrals: boolean;
-  profileVisibility: 'PUBLIC' | 'NETWORK_ONLY';
+  profileVisibility: ProfileVisibility;
   kycVerified: boolean;
   bankVerified: boolean;
   bankSummary: string;
@@ -703,6 +828,23 @@ async function computeWalletFromDb(
   );
   const minimumPayoutKobo = 500000;
 
+  let pendingWithdrawalKobo = 0;
+  try {
+    const wrRows = await db
+      .select({ amountKobo: withdrawalRequests.amountKobo, status: withdrawalRequests.status })
+      .from(withdrawalRequests)
+      .where(
+        and(
+          eq(withdrawalRequests.userId, scoutId),
+          inArray(withdrawalRequests.status, ['PENDING', 'PROCESSING'])
+        )
+      );
+    pendingWithdrawalKobo = wrRows.reduce((s, r) => s + Number(r.amountKobo), 0);
+  } catch {
+    pendingWithdrawalKobo = 0;
+  }
+  const withdrawableNowKobo = Math.max(0, availableKobo - pendingWithdrawalKobo);
+
   return {
     pendingKobo,
     availableKobo,
@@ -712,7 +854,9 @@ async function computeWalletFromDb(
     minimumPayoutKobo,
     nextPayoutDate: '2026-12-15',
     precedingMonthAvailableKobo: availableKobo,
-    eligibleForNextPayout: availableKobo >= minimumPayoutKobo && kycOk && bankOk,
+    eligibleForNextPayout: withdrawableNowKobo >= minimumPayoutKobo && kycOk && bankOk,
+    pendingWithdrawalKobo,
+    withdrawableNowKobo,
   };
 }
 
@@ -1050,7 +1194,7 @@ export async function ensureUserProvisionedInDb(
             preferredCategories: [],
             invitationPolicy: 'EVERYONE',
             muteReferrals: false,
-            profileVisibility: 'PUBLIC',
+            profileVisibility: 'PRIVATE',
           })
           .onConflictDoNothing();
 
@@ -1072,7 +1216,7 @@ export async function ensureUserProvisionedInDb(
               preferredCategories: [],
               invitationPolicy: 'EVERYONE',
               muteReferrals: false,
-              profileVisibility: 'PUBLIC',
+              profileVisibility: 'PRIVATE',
             })
             .onConflictDoNothing();
 
@@ -1201,6 +1345,20 @@ export async function ensureUserProvisionedInDb(
             isRead: false,
           })
           .onConflictDoNothing();
+
+        // 7. Seed 8-group notification preferences (NS-SCT-076)
+        for (const group of NOTIFICATION_PREFERENCE_GROUPS) {
+          await tx
+            .insert(notificationPreferences)
+            .values({
+              userId: identity.userId,
+              categoryCode: group.categoryCode,
+              inAppEnabled: true,
+              emailEnabled: true,
+              isEssential: group.isEssential,
+            })
+            .onConflictDoNothing();
+        }
       }
 
       return anyCreated;
@@ -1711,6 +1869,8 @@ export async function getNairaScoutSnapshot(
     avatarUrl: viewerScout.avatarUrl ?? null,
     bio: viewerScout.bio,
     city: viewerScout.locationState || 'Lagos',
+    locationLga: viewerScout.locationLga ?? null,
+    accountCreatedAt: viewerUser.createdAt.toISOString(),
     preferredCategories: viewerScout.preferredCategories,
     accountStatus: normalizeAccountStatus(viewerUser.accountStatus),
     restrictionReason: viewerUser.restrictionReason,
@@ -1722,9 +1882,12 @@ export async function getNairaScoutSnapshot(
     mfaEnabled: Boolean(viewerUser.mfaEnabled),
     invitePolicy: viewerScout.invitationPolicy as InvitationPolicy,
     muteReferrals: viewerScout.muteReferrals,
-    profileVisibility: (viewerScout.profileVisibility === 'NETWORK_ONLY'
-      ? 'NETWORK_ONLY'
-      : 'PUBLIC'),
+    profileVisibility:
+      viewerScout.profileVisibility === 'PUBLIC'
+        ? 'PUBLIC'
+        : viewerScout.profileVisibility === 'NETWORK_ONLY'
+          ? 'NETWORK_ONLY'
+          : 'PRIVATE',
     kycVerified,
     bankVerified,
     bankSummary: payoutBankRec?.reviewerNotes || (bankVerified ? 'Verified Naira Account' : 'Not submitted'),
@@ -1921,8 +2084,9 @@ export async function getNairaScoutSnapshot(
     0
   );
 
-  // Sanitized Directory Search (PostgreSQL only)
+  // Sanitized Directory Search (PostgreSQL only; Private-by-Default NS-SCT-015)
   const allContactsRows = await db.select().from(scoutsListContacts);
+  const myContactIds = new Set(myContacts.map((c) => c.scoutId));
   const allScoutsDirectory: PublicScoutProfileDTO[] = allScouts
     .filter((s) => {
       if (s.userId === viewerUserId) return false;
@@ -1950,6 +2114,10 @@ export async function getNairaScoutSnapshot(
         avatarUrl: s.avatarUrl,
         bio: s.bio,
         locationState: s.locationState,
+        locationLga: s.locationLga ?? null,
+        preferredCategories: s.preferredCategories,
+        profileVisibility: s.profileVisibility,
+        isViewerContact: myContactIds.has(s.userId),
         sellerStatus: seller ? normalizeSellerStatus(seller.sellerStatus) : null,
         sellerVerificationStatus: sellerVerif
           ? normalizeVerificationStatus(sellerVerif.status)
@@ -2111,7 +2279,11 @@ export async function createOrderFromCheckout(
       validReferralEventId = refEvent.id;
       await tx
         .update(productReferralEvents)
-        .set({ status: 'converted' })
+        .set({
+          status: 'converted',
+          deliveredAt: refEvent.deliveredAt ?? refEvent.createdAt,
+          openedAt: refEvent.openedAt ?? new Date(),
+        })
         .where(eq(productReferralEvents.id, refEvent.id));
     }
 
@@ -2448,6 +2620,7 @@ export async function createReferralBatchForActor(
           ancestryPathSignature: pathSignature,
           status: 'active',
           expiresAt,
+          deliveredAt: new Date(),
         })
         .returning();
 
@@ -3451,6 +3624,7 @@ export async function manageSellerTeamForActor(
 // SETTINGS, PRIVACY, VERIFICATION SUBMISSIONS, APPEALS & TWO-TRACK CLOSURE
 // ============================================================================
 
+// NS-SCT-010, NS-SCT-015: Profile & Privacy update with 250-char bio cap, LGA, anti-impersonation check, and PRIVATE default
 export async function updateProfileAndPrivacy(
   actorUserId: string,
   input: {
@@ -3458,10 +3632,11 @@ export async function updateProfileAndPrivacy(
     username?: string;
     bio?: string;
     locationState?: string;
+    locationLga?: string | null;
     preferredCategories?: string[];
     invitationPolicy?: InvitationPolicy;
     muteReferrals?: boolean;
-    profileVisibility?: 'PUBLIC' | 'NETWORK_ONLY';
+    profileVisibility?: ProfileVisibility;
   }
 ) {
   const db = requireDb();
@@ -3479,9 +3654,45 @@ export async function updateProfileAndPrivacy(
     throw new AuthorizationError('Scout profile not found.', 404, 'NOT_FOUND');
   }
 
+  let nextDisplayName = scout.displayName;
+  if (input.displayName !== undefined) {
+    const trimmed = input.displayName.trim();
+    if (trimmed.length < 2 || trimmed.length > 60) {
+      throw new AuthorizationError(
+        'Display Name must be between 2 and 60 characters.',
+        400,
+        'INVALID_DISPLAY_NAME'
+      );
+    }
+    const reservedHit = containsReservedImpersonationTerm(trimmed);
+    if (reservedHit && !ctx.adminRole) {
+      throw new AuthorizationError(
+        `Display Name cannot contain reserved platform term "${reservedHit}".`,
+        400,
+        'IMPERSONATION_BLOCKED'
+      );
+    }
+    nextDisplayName = trimmed;
+  }
+
   let nextUsername = scout.username;
-  if (input.username && input.username.trim().toLowerCase() !== scout.username.toLowerCase()) {
+  if (input.username !== undefined && input.username.trim().toLowerCase() !== scout.username.toLowerCase()) {
     const cleanUsername = input.username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
+    if (!/^[a-z0-9_]{3,30}$/.test(cleanUsername)) {
+      throw new AuthorizationError(
+        'Username must be 3–30 URL-safe characters (letters, numbers, underscores).',
+        400,
+        'INVALID_USERNAME'
+      );
+    }
+    const reservedHit = containsReservedImpersonationTerm(cleanUsername);
+    if (reservedHit && !ctx.adminRole) {
+      throw new AuthorizationError(
+        `Username cannot contain reserved platform term "${reservedHit}".`,
+        400,
+        'IMPERSONATION_BLOCKED'
+      );
+    }
     const conflict = await db
       .select({ userId: scoutProfiles.userId })
       .from(scoutProfiles)
@@ -3493,27 +3704,85 @@ export async function updateProfileAndPrivacy(
     nextUsername = cleanUsername;
   }
 
-  await db
-    .update(scoutProfiles)
-    .set({
-      username: nextUsername,
-      displayName: input.displayName !== undefined ? input.displayName.trim() || scout.displayName : scout.displayName,
-      bio: input.bio !== undefined ? input.bio.trim() || null : scout.bio,
-      locationState:
-        input.locationState !== undefined
-          ? input.locationState.trim() || scout.locationState
-          : scout.locationState,
-      preferredCategories:
-        input.preferredCategories !== undefined
-          ? input.preferredCategories
-          : scout.preferredCategories,
-      invitationPolicy: input.invitationPolicy ?? scout.invitationPolicy,
-      muteReferrals:
-        input.muteReferrals !== undefined ? input.muteReferrals : scout.muteReferrals,
-      profileVisibility: input.profileVisibility ?? scout.profileVisibility,
-      updatedAt: new Date(),
-    })
-    .where(eq(scoutProfiles.userId, actorUserId));
+  let nextBio = scout.bio;
+  if (input.bio !== undefined) {
+    const trimmedBio = input.bio.trim();
+    if (trimmedBio.length > SCOUT_BIO_MAX_LENGTH) {
+      throw new AuthorizationError(
+        `Short biography must be ${SCOUT_BIO_MAX_LENGTH} characters or fewer.`,
+        400,
+        'BIO_TOO_LONG'
+      );
+    }
+    nextBio = trimmedBio || null;
+  }
+
+  const nextVisibility: ProfileVisibility =
+    input.profileVisibility === 'PUBLIC' ||
+    input.profileVisibility === 'NETWORK_ONLY' ||
+    input.profileVisibility === 'PRIVATE'
+      ? input.profileVisibility
+      : scout.profileVisibility === 'PUBLIC'
+        ? 'PUBLIC'
+        : scout.profileVisibility === 'NETWORK_ONLY'
+          ? 'NETWORK_ONLY'
+          : 'PRIVATE';
+
+  const nextLga =
+    input.locationLga !== undefined
+      ? (input.locationLga ?? '').trim() || null
+      : scout.locationLga;
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(scoutProfiles)
+      .set({
+        username: nextUsername,
+        displayName: nextDisplayName,
+        bio: nextBio,
+        locationState:
+          input.locationState !== undefined
+            ? input.locationState.trim() || scout.locationState
+            : scout.locationState,
+        locationLga: nextLga,
+        preferredCategories:
+          input.preferredCategories !== undefined
+            ? input.preferredCategories
+            : scout.preferredCategories,
+        invitationPolicy: input.invitationPolicy ?? scout.invitationPolicy,
+        muteReferrals:
+          input.muteReferrals !== undefined ? input.muteReferrals : scout.muteReferrals,
+        profileVisibility: nextVisibility,
+        updatedAt: new Date(),
+      })
+      .where(eq(scoutProfiles.userId, actorUserId));
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: actorUserId,
+      action: 'PROFILE_UPDATED',
+      entityType: 'scout_profile',
+      entityId: actorUserId,
+      previousValue: {
+        displayName: scout.displayName,
+        username: scout.username,
+        locationState: scout.locationState,
+        locationLga: scout.locationLga,
+        profileVisibility: scout.profileVisibility,
+      },
+      newValue: {
+        displayName: nextDisplayName,
+        username: nextUsername,
+        locationState:
+          input.locationState !== undefined
+            ? input.locationState.trim() || scout.locationState
+            : scout.locationState,
+        locationLga: nextLga,
+        profileVisibility: nextVisibility,
+      },
+      reason: 'Scout updated profile or privacy preferences',
+    });
+  });
 }
 
 export async function updateScoutAvatarForActor(
@@ -6762,6 +7031,998 @@ export async function getDataRetentionScheduleForAdmin(actorUserId: string) {
   assertAdminRole(ctx, ALL_PLATFORM_ADMIN_ROLES);
   return db.select().from(dataRetentionSchedule).orderBy(asc(dataRetentionSchedule.tableName));
 }
+
+// ============================================================================
+// MODULE 5: SCOUT STATS, ACTIVITY FEED, CURSOR COMMISSIONS, NOTIF PREFS & WITHDRAWALS
+// ============================================================================
+
+// NS-SCT-056: Record first open of a referral event (deduplicated once per event)
+export async function markReferralEventOpenedForActor(
+  actorUserId: string | null,
+  referralEventId: string
+): Promise<{ ok: boolean; openedAt: string | null }> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+  if (!isUuid(referralEventId)) {
+    return { ok: false, openedAt: null };
+  }
+  const rows = await db
+    .select()
+    .from(productReferralEvents)
+    .where(eq(productReferralEvents.id, referralEventId))
+    .limit(1);
+  const ev = rows[0];
+  if (!ev) return { ok: false, openedAt: null };
+  // Never count sender opening their own referral card as a recipient open
+  if (actorUserId && ev.senderScoutId === actorUserId) {
+    return { ok: false, openedAt: ev.openedAt?.toISOString() ?? null };
+  }
+  if (ev.openedAt) {
+    return { ok: true, openedAt: ev.openedAt.toISOString() };
+  }
+  const now = new Date();
+  await db
+    .update(productReferralEvents)
+    .set({
+      deliveredAt: ev.deliveredAt ?? ev.createdAt,
+      openedAt: now,
+    })
+    .where(
+      and(
+        eq(productReferralEvents.id, referralEventId),
+        sql`${productReferralEvents.openedAt} IS NULL`
+      )
+    );
+  return { ok: true, openedAt: now.toISOString() };
+}
+
+// NS-SCT-076 - NS-SCT-083: 8-Group Notification Preferences (Essential alerts locked ON)
+export async function getNotificationPreferencesForActor(
+  actorUserId: string
+): Promise<NotificationPreferenceDTO[]> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAccountOperational(ctx);
+
+  const existing = await db
+    .select()
+    .from(notificationPreferences)
+    .where(eq(notificationPreferences.userId, actorUserId));
+
+  const existingMap = new Map(existing.map((row) => [row.categoryCode, row]));
+  const missing = NOTIFICATION_PREFERENCE_GROUPS.filter((g) => !existingMap.has(g.categoryCode));
+
+  if (missing.length > 0) {
+    for (const g of missing) {
+      await db
+        .insert(notificationPreferences)
+        .values({
+          userId: actorUserId,
+          categoryCode: g.categoryCode,
+          inAppEnabled: true,
+          emailEnabled: true,
+          isEssential: g.isEssential,
+        })
+        .onConflictDoNothing();
+    }
+    const refreshed = await db
+      .select()
+      .from(notificationPreferences)
+      .where(eq(notificationPreferences.userId, actorUserId));
+    for (const r of refreshed) existingMap.set(r.categoryCode, r);
+  }
+
+  return NOTIFICATION_PREFERENCE_GROUPS.map((meta) => {
+    const row = existingMap.get(meta.categoryCode);
+    return {
+      categoryCode: meta.categoryCode,
+      label: meta.label,
+      description: meta.description,
+      isEssential: meta.isEssential,
+      inAppEnabled: meta.isEssential ? true : (row?.inAppEnabled ?? true),
+      emailEnabled: meta.isEssential ? true : (row?.emailEnabled ?? true),
+      updatedAt: row?.updatedAt.toISOString() ?? new Date().toISOString(),
+    };
+  });
+}
+
+export async function updateNotificationPreferencesForActor(
+  actorUserId: string,
+  updates: Array<{
+    categoryCode: string;
+    inAppEnabled?: boolean;
+    emailEnabled?: boolean;
+  }>
+): Promise<NotificationPreferenceDTO[]> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAccountOperational(ctx);
+
+  const metaByCode = new Map(NOTIFICATION_PREFERENCE_GROUPS.map((g) => [g.categoryCode, g]));
+  const current = await getNotificationPreferencesForActor(actorUserId);
+  const currentMap = new Map(current.map((c) => [c.categoryCode, c]));
+
+  for (const item of updates) {
+    const meta = metaByCode.get(item.categoryCode as NotificationCategoryCode);
+    if (!meta) {
+      throw new AuthorizationError(
+        `Unknown notification category: ${item.categoryCode}`,
+        400,
+        'UNKNOWN_NOTIFICATION_CATEGORY'
+      );
+    }
+    const nextInApp =
+      typeof item.inAppEnabled === 'boolean'
+        ? item.inAppEnabled
+        : (currentMap.get(meta.categoryCode)?.inAppEnabled ?? true);
+    const nextEmail =
+      typeof item.emailEnabled === 'boolean'
+        ? item.emailEnabled
+        : (currentMap.get(meta.categoryCode)?.emailEnabled ?? true);
+
+    if (meta.isEssential && (!nextInApp || !nextEmail)) {
+      throw new AuthorizationError(
+        `${meta.label} notifications are essential platform alerts and cannot be disabled.`,
+        400,
+        'ESSENTIAL_NOTIFICATION_LOCKED'
+      );
+    }
+  }
+
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    for (const item of updates) {
+      const meta = metaByCode.get(item.categoryCode as NotificationCategoryCode)!;
+      const prev = currentMap.get(meta.categoryCode);
+      const nextInApp = meta.isEssential
+        ? true
+        : (typeof item.inAppEnabled === 'boolean' ? item.inAppEnabled : (prev?.inAppEnabled ?? true));
+      const nextEmail = meta.isEssential
+        ? true
+        : (typeof item.emailEnabled === 'boolean' ? item.emailEnabled : (prev?.emailEnabled ?? true));
+
+      await tx
+        .insert(notificationPreferences)
+        .values({
+          userId: actorUserId,
+          categoryCode: meta.categoryCode,
+          inAppEnabled: nextInApp,
+          emailEnabled: nextEmail,
+          isEssential: meta.isEssential,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: [notificationPreferences.userId, notificationPreferences.categoryCode],
+          set: {
+            inAppEnabled: nextInApp,
+            emailEnabled: nextEmail,
+            isEssential: meta.isEssential,
+            updatedAt: now,
+          },
+        });
+    }
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: actorUserId,
+      action: 'NOTIFICATION_PREFERENCES_UPDATED',
+      entityType: 'notification_preferences',
+      entityId: actorUserId,
+      newValue: { updatedCategories: updates.map((u) => u.categoryCode) },
+      reason: 'Scout updated notification channel preferences',
+    });
+  });
+
+  return getNotificationPreferencesForActor(actorUserId);
+}
+
+// NS-SCT-035 - NS-SCT-044: Chronological Scout Activity Feed across 8 categories
+export async function getScoutActivityFeed(
+  actorUserId: string,
+  input: {
+    category?: string | null;
+    from?: string | null;
+    to?: string | null;
+    page?: number;
+    pageSize?: number;
+  } = {}
+): Promise<{
+  items: ScoutActivityItemDTO[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+}> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAccountOperational(ctx);
+
+  const page = Math.max(1, Math.floor(Number(input.page || 1)));
+  const pageSize = Math.min(50, Math.max(1, Math.floor(Number(input.pageSize || 20))));
+
+  const [
+    auditRows,
+    inviteRows,
+    contactRows,
+    refRows,
+    orderRows,
+    ledgerRows,
+    withdrawalRows,
+    notifRows,
+    restrictionRows,
+    allProducts,
+    allScouts,
+  ] = await Promise.all([
+    db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.affectedUserId, actorUserId))
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(120),
+    db
+      .select()
+      .from(scoutsListInvitations)
+      .where(
+        or(
+          eq(scoutsListInvitations.senderId, actorUserId),
+          eq(scoutsListInvitations.recipientId, actorUserId)
+        )
+      )
+      .orderBy(desc(scoutsListInvitations.createdAt))
+      .limit(100),
+    db
+      .select()
+      .from(scoutsListContacts)
+      .where(eq(scoutsListContacts.ownerUserId, actorUserId))
+      .orderBy(desc(scoutsListContacts.createdAt))
+      .limit(100),
+    db
+      .select()
+      .from(productReferralEvents)
+      .where(
+        or(
+          eq(productReferralEvents.senderScoutId, actorUserId),
+          eq(productReferralEvents.recipientScoutId, actorUserId)
+        )
+      )
+      .orderBy(desc(productReferralEvents.createdAt))
+      .limit(150),
+    db
+      .select()
+      .from(marketplaceOrders)
+      .orderBy(desc(marketplaceOrders.createdAt))
+      .limit(200),
+    db
+      .select()
+      .from(commissionLedgerEntries)
+      .where(eq(commissionLedgerEntries.beneficiaryScoutId, actorUserId))
+      .orderBy(desc(commissionLedgerEntries.createdAt))
+      .limit(150),
+    db
+      .select()
+      .from(withdrawalRequests)
+      .where(eq(withdrawalRequests.userId, actorUserId))
+      .orderBy(desc(withdrawalRequests.requestedAt))
+      .limit(50),
+    db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.userId, actorUserId))
+      .orderBy(desc(notifications.createdAt))
+      .limit(100),
+    db
+      .select()
+      .from(capabilityRestrictions)
+      .where(eq(capabilityRestrictions.userId, actorUserId))
+      .orderBy(desc(capabilityRestrictions.createdAt))
+      .limit(50),
+    db.select({ id: productListings.id, title: productListings.title }).from(productListings),
+    db
+      .select({ userId: scoutProfiles.userId, username: scoutProfiles.username })
+      .from(scoutProfiles),
+  ]);
+
+  const productTitleById = new Map(allProducts.map((p) => [p.id, p.title]));
+  const handleByUserId = new Map(allScouts.map((s) => [s.userId, s.username]));
+  const myRefIds = new Set(
+    refRows.filter((r) => r.senderScoutId === actorUserId).map((r) => r.id)
+  );
+
+  const events: ScoutActivityItemDTO[] = [];
+  const pushEvent = (
+    id: string,
+    category: ScoutActivityCategory,
+    title: string,
+    summary: string,
+    at: Date,
+    extra?: { statusBadge?: string; amountKobo?: number }
+  ) => {
+    const formatted = formatLagosDateTime(at);
+    const timePart = formatted.split(',').pop()?.trim() || formatted;
+    events.push({
+      id,
+      category,
+      title,
+      summary,
+      timestamp: at.toISOString(),
+      lagosDateKey: toLagosDateKey(at),
+      lagosDateLabel: formatLagosDate(at),
+      lagosTimeLabel: timePart,
+      statusBadge: extra?.statusBadge,
+      amountKobo: extra?.amountKobo,
+    });
+  };
+
+  // 1. Account (registration, profile, password/2FA/security)
+  for (const a of auditRows) {
+    if (
+      [
+        'USER_PROVISIONED',
+        'PROFILE_UPDATED',
+        'AVATAR_UPDATED',
+        'AVATAR_REMOVED',
+        'PASSWORD_CHANGED',
+        'EMAIL_CHANGE_REQUESTED',
+        'MFA_ENABLED',
+        'MFA_DISABLED',
+        'OTHER_SESSIONS_REVOKED',
+        'NOTIFICATION_PREFERENCES_UPDATED',
+        'ACCOUNT_RECOVERY_APPROVED',
+      ].includes(a.action)
+    ) {
+      const labelMap: Record<string, string> = {
+        USER_PROVISIONED: 'Scout account activated',
+        PROFILE_UPDATED: 'Profile & privacy preferences updated',
+        AVATAR_UPDATED: 'Profile photo updated',
+        AVATAR_REMOVED: 'Profile photo removed',
+        PASSWORD_CHANGED: 'Account password updated',
+        EMAIL_CHANGE_REQUESTED: 'Email change verification requested',
+        MFA_ENABLED: 'Two-factor authentication enabled',
+        MFA_DISABLED: 'Two-factor authentication removed',
+        OTHER_SESSIONS_REVOKED: 'Other active sessions signed out',
+        NOTIFICATION_PREFERENCES_UPDATED: 'Notification preferences updated',
+        ACCOUNT_RECOVERY_APPROVED: 'Account recovery completed (24h security lock applied)',
+      };
+      pushEvent(
+        `acc_${a.id}`,
+        'Account',
+        labelMap[a.action] || a.action.replace(/_/g, ' '),
+        a.reason || 'Recorded on your Scout account security & profile ledger.',
+        a.createdAt,
+        { statusBadge: 'Account' }
+      );
+    } else if (a.action === 'CONTACT_REMOVED' || a.action === 'USER_BLOCKED') {
+      pushEvent(
+        `sl_audit_${a.id}`,
+        'Scouts List',
+        a.action === 'CONTACT_REMOVED' ? 'Scouts List contact removed' : 'Account blocked',
+        a.reason || 'Scouts List privacy relationship updated.',
+        a.createdAt,
+        { statusBadge: a.action === 'CONTACT_REMOVED' ? 'Removed' : 'Blocked' }
+      );
+    }
+  }
+
+  // 2. Scouts List
+  for (const inv of inviteRows) {
+    const isIncoming = inv.recipientId === actorUserId;
+    const otherHandle = handleByUserId.get(isIncoming ? inv.senderId : inv.recipientId) || 'scout';
+    const statusLabel =
+      inv.status === 'PENDING' && inv.expiresAt.getTime() < Date.now()
+        ? 'Expired'
+        : inv.status.charAt(0) + inv.status.slice(1).toLowerCase();
+    pushEvent(
+      `inv_${inv.id}`,
+      'Scouts List',
+      isIncoming
+        ? `Scouts List invitation from @${otherHandle}`
+        : `Scouts List invitation sent to @${otherHandle}`,
+      `Status: ${statusLabel}.`,
+      inv.respondedAt ?? inv.createdAt,
+      { statusBadge: statusLabel }
+    );
+  }
+  for (const c of contactRows) {
+    const contactHandle = handleByUserId.get(c.contactUserId) || 'scout';
+    pushEvent(
+      `contact_${c.id}`,
+      'Scouts List',
+      `Connected with @${contactHandle}`,
+      'Added to your Scouts List for direct product referrals.',
+      c.createdAt,
+      { statusBadge: 'Connected' }
+    );
+  }
+
+  // 3. Product Referrals
+  for (const r of refRows) {
+    const isSender = r.senderScoutId === actorUserId;
+    const prodName = productTitleById.get(r.productListingId) || r.productListingId;
+    const peerHandle = isSender
+      ? handleByUserId.get(r.recipientScoutId) || 'scout'
+      : handleByUserId.get(r.senderScoutId) || 'scout';
+    const isExpired = r.status === 'expired' || (r.status === 'active' && r.expiresAt.getTime() < Date.now());
+    const statusLabel =
+      r.status === 'converted'
+        ? 'Converted'
+        : isExpired
+          ? 'Expired'
+          : r.openedAt
+            ? 'Opened'
+            : r.deliveredAt
+              ? 'Delivered'
+              : 'Sent';
+    pushEvent(
+      `ref_${r.id}`,
+      'Product Referrals',
+      isSender
+        ? `Referred "${prodName}" to @${peerHandle}`
+        : `Received referral for "${prodName}" from @${peerHandle}`,
+      `Referral event ${r.id.slice(0, 8)}… · ${statusLabel}`,
+      r.openedAt ?? r.deliveredAt ?? r.createdAt,
+      { statusBadge: statusLabel }
+    );
+  }
+
+  // 4. Purchases (Direct buyer purchases + anonymized referral-attributed purchases)
+  for (const o of orderRows) {
+    if (o.buyerScoutId === actorUserId) {
+      pushEvent(
+        `ord_buy_${o.id}`,
+        'Purchases',
+        `Purchase: ${o.productTitle}`,
+        `Order ${o.id} (${o.attributionType === 'referral_card' ? 'Referral-attributed' : 'Direct marketplace purchase'}) · ${o.fulfilmentStatus}.`,
+        o.createdAt,
+        { statusBadge: o.fulfilmentStatus, amountKobo: Number(o.eligibleMerchandiseKobo) }
+      );
+    } else if (o.referralEventId && myRefIds.has(o.referralEventId)) {
+      // Never expose downstream buyer's name or private contact details
+      pushEvent(
+        `ord_ref_${o.id}`,
+        'Purchases',
+        `Referral-attributed purchase: ${o.productTitle}`,
+        `Order ${o.id} completed from your referral event · Fulfilment: ${o.fulfilmentStatus}.`,
+        o.createdAt,
+        { statusBadge: o.fulfilmentStatus, amountKobo: Number(o.eligibleMerchandiseKobo) }
+      );
+    }
+  }
+
+  // 5. Commissions
+  for (const l of ledgerRows) {
+    pushEvent(
+      `led_${l.id}`,
+      'Commissions',
+      `Commission ${l.status}: ${l.reference}`,
+      `Gen ${l.generation} (${l.fractionLabel}) · Order ${l.orderId} · ${l.description}`,
+      l.createdAt,
+      { statusBadge: l.status, amountKobo: Number(l.amountKobo) }
+    );
+  }
+
+  // 6. Wallet
+  for (const w of withdrawalRows) {
+    pushEvent(
+      `wd_${w.id}`,
+      'Wallet',
+      `Withdrawal ${w.status.toLowerCase()}`,
+      `Scheduled payout run ${w.scheduledPayoutDate} · ${w.bankSummary}${w.failureReason ? ` · ${w.failureReason}` : ''}`,
+      w.processedAt ?? w.requestedAt,
+      { statusBadge: w.status, amountKobo: Number(w.amountKobo) }
+    );
+  }
+
+  // 7. Notifications
+  for (const n of notifRows) {
+    pushEvent(
+      `notif_${n.id}`,
+      'Notifications',
+      n.title,
+      n.body,
+      n.createdAt,
+      { statusBadge: n.isRead ? 'Read' : 'Unread' }
+    );
+  }
+
+  // 8. Restrictions
+  for (const cr of restrictionRows) {
+    pushEvent(
+      `rest_${cr.id}`,
+      'Restrictions',
+      cr.status === 'LIFTED'
+        ? `Restriction lifted (${cr.capabilityCode.replace(/_/g, ' ')})`
+        : `Restriction active (${cr.capabilityCode.replace(/_/g, ' ')})`,
+      cr.reason,
+      cr.liftedAt ?? cr.createdAt,
+      { statusBadge: cr.status }
+    );
+  }
+
+  const fromUtc = input.from && /^\d{4}-\d{2}-\d{2}$/.test(input.from) ? lagosDayStartUtc(input.from) : null;
+  const toUtc = input.to && /^\d{4}-\d{2}-\d{2}$/.test(input.to) ? lagosDayEndUtc(input.to) : null;
+
+  const filtered = events
+    .filter((ev) => {
+      if (input.category && input.category !== 'All' && ev.category !== input.category) {
+        return false;
+      }
+      const ts = new Date(ev.timestamp).getTime();
+      if (fromUtc && ts < fromUtc.getTime()) return false;
+      if (toUtc && ts > toUtc.getTime()) return false;
+      return true;
+    })
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  const total = filtered.length;
+  const offset = (page - 1) * pageSize;
+  const paged = filtered.slice(offset, offset + pageSize);
+
+  return {
+    items: paged,
+    total,
+    page,
+    pageSize,
+    hasMore: offset + paged.length < total,
+  };
+}
+
+// NS-SCT-019 - NS-SCT-026 & NS-SCT-054 - NS-SCT-064: Authoritative 6-Section Scout Overview & Referral Statistics
+export async function getScoutOverviewStats(
+  actorUserId: string,
+  input: {
+    period?: StatsPeriodPreset;
+    from?: string | null;
+    to?: string | null;
+  } = {}
+): Promise<ScoutOverviewStatsDTO> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAccountOperational(ctx);
+
+  const period: StatsPeriodPreset = input.period ?? 'last_30_days';
+  const bounds = resolveLagosPeriodBounds(period, input.from, input.to);
+
+  const [verifRows, sentRefRows, allOrders, ledgerRows, allProducts] = await Promise.all([
+    db.select().from(verificationRecords).where(eq(verificationRecords.userId, actorUserId)),
+    db
+      .select()
+      .from(productReferralEvents)
+      .where(eq(productReferralEvents.senderScoutId, actorUserId)),
+    db.select().from(marketplaceOrders),
+    db
+      .select()
+      .from(commissionLedgerEntries)
+      .where(eq(commissionLedgerEntries.beneficiaryScoutId, actorUserId))
+      .orderBy(desc(commissionLedgerEntries.createdAt)),
+    db.select({ id: productListings.id, title: productListings.title }).from(productListings),
+  ]);
+
+  const wallet = await computeWalletFromDb(db, actorUserId, verifRows);
+  const pendingWithdrawalKobo = wallet.pendingWithdrawalKobo ?? 0;
+  const withdrawableNowKobo = wallet.withdrawableNowKobo ?? wallet.availableKobo;
+  const thresholdProgressPct = Math.min(
+    100,
+    Math.round((withdrawableNowKobo / wallet.minimumPayoutKobo) * 100)
+  );
+
+  // Filter strictly event-based referrals within Africa/Lagos bounds
+  const periodRefs = sentRefRows.filter(
+    (r) => r.createdAt >= bounds.start && r.createdAt <= bounds.end
+  );
+  const sentCount = periodRefs.length;
+  const deliveredCount = periodRefs.filter(
+    (r) => r.deliveredAt != null || r.status === 'active' || r.status === 'converted'
+  ).length;
+  // Opened deduplicated once per distinct referral event
+  const openedEventIds = new Set(
+    periodRefs
+      .filter((r) => r.openedAt != null || r.status === 'converted')
+      .map((r) => r.id)
+  );
+  const openedCount = openedEventIds.size;
+  const openRatePct =
+    deliveredCount > 0 ? Math.round((openedCount / deliveredCount) * 1000) / 10 : 0;
+
+  // Attributed purchases (completed / non-refunded referral-attributed orders linked to Scout's events)
+  const mySentRefIds = new Set(sentRefRows.map((r) => r.id));
+  const attributedPeriodOrders = allOrders.filter(
+    (o) =>
+      o.attributionType === 'referral_card' &&
+      o.referralEventId != null &&
+      mySentRefIds.has(o.referralEventId) &&
+      o.fulfilmentStatus !== 'Refunded' &&
+      o.createdAt >= bounds.start &&
+      o.createdAt <= bounds.end
+  );
+  const attributedPurchasesCount = attributedPeriodOrders.length;
+  const conversionRatePct =
+    sentCount > 0 ? Math.round((attributedPurchasesCount / sentCount) * 1000) / 10 : 0;
+  const eligibleSalesKobo = attributedPeriodOrders.reduce(
+    (sum, o) => sum + Number(o.eligibleMerchandiseKobo),
+    0
+  );
+
+  const orderById = new Map(allOrders.map((o) => [o.id, o]));
+  const titleByProductId = new Map(allProducts.map((p) => [p.id, p.title]));
+
+  const recentCommissionItems = ledgerRows.slice(0, 5).map((entry) => {
+    const ord = orderById.get(entry.orderId);
+    const productTitle = ord
+      ? titleByProductId.get(ord.productListingId) || ord.productTitle
+      : entry.orderId;
+    return {
+      id: entry.id,
+      reference: entry.reference,
+      orderId: entry.orderId,
+      productTitle,
+      generation: entry.generation,
+      amountKobo: Number(entry.amountKobo),
+      status: entry.status as LedgerEntryStatus,
+      createdAt: entry.createdAt.toISOString(),
+      createdAtLagos: formatLagosDate(entry.createdAt),
+    };
+  });
+
+  const activityRes = await getScoutActivityFeed(actorUserId, { page: 1, pageSize: 5 });
+  const now = new Date();
+
+  return {
+    period,
+    startDate: bounds.startKey,
+    endDate: bounds.endKey,
+    computedAt: now.toISOString(),
+    computedAtLagos: formatLagosDateTime(now),
+    wallet: {
+      ...wallet,
+      pendingWithdrawalKobo,
+      withdrawableNowKobo,
+      thresholdProgressPct,
+    },
+    referrals: {
+      sentCount,
+      deliveredCount,
+      openedCount,
+      openRatePct,
+      attributedPurchasesCount,
+      conversionRatePct,
+      eligibleSalesKobo,
+    },
+    commissions: {
+      pendingKobo: wallet.pendingKobo,
+      availableKobo: wallet.availableKobo,
+      recentItems: recentCommissionItems,
+    },
+    recentActivity: activityRes.items,
+  };
+}
+
+// NS-SCT-065 - NS-SCT-075: Commission History with 20-record (createdAt, id) cursor pagination
+export async function getScoutCommissionHistory(
+  actorUserId: string,
+  input: {
+    status?: string | null;
+    productId?: string | null;
+    from?: string | null;
+    to?: string | null;
+    cursorCreatedAt?: string | null;
+    cursorId?: string | null;
+    limit?: number;
+  } = {}
+): Promise<{
+  items: CommissionHistoryRowDTO[];
+  nextCursor: { createdAt: string; id: string } | null;
+  hasMore: boolean;
+  productOptions: Array<{ id: string; title: string }>;
+}> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAccountOperational(ctx);
+
+  const pageSize = Math.min(20, Math.max(1, Math.floor(Number(input.limit || 20))));
+
+  const allUserEntries = await db
+    .select()
+    .from(commissionLedgerEntries)
+    .where(eq(commissionLedgerEntries.beneficiaryScoutId, actorUserId))
+    .orderBy(desc(commissionLedgerEntries.createdAt), desc(commissionLedgerEntries.id));
+
+  const orderIds = Array.from(new Set(allUserEntries.map((e) => e.orderId)));
+  const ordersList =
+    orderIds.length > 0
+      ? await db.select().from(marketplaceOrders).where(inArray(marketplaceOrders.id, orderIds))
+      : [];
+  const orderById = new Map(ordersList.map((o) => [o.id, o]));
+
+  // Track release timestamps & reversal reasons by root reference
+  const releaseTimeByRootRef = new Map<string, Date>();
+  for (const e of [...allUserEntries].reverse()) {
+    const rootRef = e.linkedToReference || e.reference;
+    if ((e.status === 'Available' || e.status === 'Paid') && !releaseTimeByRootRef.has(rootRef)) {
+      releaseTimeByRootRef.set(rootRef, e.createdAt);
+    }
+  }
+
+  const productOptionsMap = new Map<string, string>();
+  for (const ord of ordersList) {
+    productOptionsMap.set(ord.productListingId, ord.productTitle);
+  }
+
+  const fromUtc =
+    input.from && /^\d{4}-\d{2}-\d{2}$/.test(input.from) ? lagosDayStartUtc(input.from) : null;
+  const toUtc =
+    input.to && /^\d{4}-\d{2}-\d{2}$/.test(input.to) ? lagosDayEndUtc(input.to) : null;
+
+  const mapDisplayStatus = (
+    status: string
+  ): CommissionHistoryRowDTO['displayStatus'] => {
+    if (status === 'Paid') return 'Withdrawn';
+    if (status === 'Reversed') return 'Reversed / Adjusted';
+    if (status === 'Available') return 'Available';
+    if (status === 'On Hold') return 'On Hold';
+    return 'Pending';
+  };
+
+  const normalizedFilter = (input.status || 'All').trim();
+
+  const allMapped: CommissionHistoryRowDTO[] = allUserEntries
+    .map((e) => {
+      const ord = orderById.get(e.orderId);
+      const rootRef = e.linkedToReference || e.reference;
+      const releasedDate = releaseTimeByRootRef.get(rootRef) ?? null;
+      const displayStatus = mapDisplayStatus(e.status);
+      const isReversal = e.status === 'Reversed' || e.status === 'On Hold';
+
+      return {
+        id: e.id,
+        reference: e.reference,
+        orderId: e.orderId,
+        productId: ord?.productListingId || e.orderId,
+        productTitle: ord?.productTitle || `Order ${e.orderId}`,
+        referralEventId: e.referralEventId ?? null,
+        generation: e.generation,
+        fractionLabel: e.fractionLabel,
+        amountKobo: Number(e.amountKobo),
+        status: e.status as LedgerEntryStatus,
+        displayStatus,
+        description: e.description,
+        reversalReason: isReversal ? e.description : null,
+        linkedToReference: e.linkedToReference ?? null,
+        createdAt: e.createdAt.toISOString(),
+        createdAtLagos: formatLagosDate(e.createdAt),
+        releasedAt: releasedDate ? releasedDate.toISOString() : null,
+        releasedAtLagos: releasedDate ? formatLagosDate(releasedDate) : null,
+      };
+    })
+    .filter((row) => {
+      if (normalizedFilter !== 'All') {
+        if (normalizedFilter === 'Withdrawn' && row.displayStatus !== 'Withdrawn') return false;
+        if (
+          normalizedFilter === 'Reversed / Adjusted' &&
+          row.displayStatus !== 'Reversed / Adjusted'
+        ) {
+          return false;
+        }
+        if (
+          normalizedFilter !== 'Withdrawn' &&
+          normalizedFilter !== 'Reversed / Adjusted' &&
+          row.status !== normalizedFilter &&
+          row.displayStatus !== normalizedFilter
+        ) {
+          return false;
+        }
+      }
+      if (input.productId && input.productId !== 'All' && row.productId !== input.productId) {
+        return false;
+      }
+      const ts = new Date(row.createdAt).getTime();
+      if (fromUtc && ts < fromUtc.getTime()) return false;
+      if (toUtc && ts > toUtc.getTime()) return false;
+      return true;
+    });
+
+  // Apply (createdAt, id) descending cursor
+  let afterCursor = allMapped;
+  if (input.cursorCreatedAt && input.cursorId) {
+    const cursorMs = new Date(input.cursorCreatedAt).getTime();
+    const cursorId = input.cursorId;
+    if (!Number.isNaN(cursorMs)) {
+      afterCursor = allMapped.filter((row) => {
+        const rowMs = new Date(row.createdAt).getTime();
+        return rowMs < cursorMs || (rowMs === cursorMs && row.id < cursorId);
+      });
+    }
+  }
+
+  const pageRows = afterCursor.slice(0, pageSize);
+  const hasMore = afterCursor.length > pageSize;
+  const lastRow = pageRows[pageRows.length - 1];
+
+  return {
+    items: pageRows,
+    nextCursor:
+      hasMore && lastRow ? { createdAt: lastRow.createdAt, id: lastRow.id } : null,
+    hasMore,
+    productOptions: Array.from(productOptionsMap.entries()).map(([id, title]) => ({
+      id,
+      title,
+    })),
+  };
+}
+
+// NS-SCT-075: Authoritative server-side withdrawal request (never trusts cached client balances)
+export async function requestWithdrawalForActor(
+  actorUserId: string,
+  input: { amountKobo?: number }
+): Promise<WithdrawalRequestDTO> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertCapabilityNotRestricted(ctx, 'REQUEST_WITHDRAWAL');
+  assertWithdrawalNotInCooldown(ctx);
+
+  return db.transaction(async (tx) => {
+    const verifRows = await tx
+      .select()
+      .from(verificationRecords)
+      .where(eq(verificationRecords.userId, actorUserId));
+
+    const kycOk = verifRows.some(
+      (v) => v.category === 'IDENTITY' && normalizeVerificationStatus(v.status) === 'VERIFIED'
+    );
+    const bankRecord = verifRows.find(
+      (v) => v.category === 'PAYOUT_BANK' && normalizeVerificationStatus(v.status) === 'VERIFIED'
+    );
+    if (!kycOk) {
+      throw new AuthorizationError(
+        'Identity verification (KYC) must be verified before requesting a withdrawal.',
+        403,
+        'KYC_REQUIRED'
+      );
+    }
+    if (!bankRecord) {
+      throw new AuthorizationError(
+        'A verified Nigerian payout bank account in your own name is required before requesting a withdrawal.',
+        403,
+        'BANK_VERIFICATION_REQUIRED'
+      );
+    }
+
+    const ledgerRows = await tx
+      .select()
+      .from(commissionLedgerEntries)
+      .where(eq(commissionLedgerEntries.beneficiaryScoutId, actorUserId))
+      .orderBy(desc(commissionLedgerEntries.createdAt));
+
+    const rootStates = new Map<string, { status: LedgerEntryStatus; amountKobo: number }>();
+    for (const entry of [...ledgerRows].reverse()) {
+      const key = entry.linkedToReference || entry.reference;
+      rootStates.set(key, {
+        status: entry.status as LedgerEntryStatus,
+        amountKobo: Number(entry.amountKobo),
+      });
+    }
+
+    let authoritativeAvailableKobo = 0;
+    for (const st of rootStates.values()) {
+      if (st.status === 'Available') authoritativeAvailableKobo += st.amountKobo;
+    }
+
+    const activeWithdrawals = await tx
+      .select()
+      .from(withdrawalRequests)
+      .where(
+        and(
+          eq(withdrawalRequests.userId, actorUserId),
+          inArray(withdrawalRequests.status, ['PENDING', 'PROCESSING'])
+        )
+      );
+    const committedKobo = activeWithdrawals.reduce((s, r) => s + Number(r.amountKobo), 0);
+    const withdrawableNowKobo = Math.max(0, authoritativeAvailableKobo - committedKobo);
+
+    const requestedKobo =
+      typeof input.amountKobo === 'number' && Number.isFinite(input.amountKobo)
+        ? Math.round(input.amountKobo)
+        : withdrawableNowKobo;
+
+    const MIN_WITHDRAWAL_KOBO = 500000; // ₦5,000
+    if (requestedKobo < MIN_WITHDRAWAL_KOBO) {
+      throw new AuthorizationError(
+        'Minimum withdrawal threshold is ₦5,000.00 (500,000 kobo).',
+        400,
+        'BELOW_MINIMUM_THRESHOLD'
+      );
+    }
+    if (requestedKobo > withdrawableNowKobo) {
+      throw new AuthorizationError(
+        'Requested amount exceeds your authoritative available balance.',
+        400,
+        'INSUFFICIENT_AVAILABLE_BALANCE'
+      );
+    }
+
+    const scheduledPayoutDate = '2026-12-15';
+    const bankSummary = bankRecord.reviewerNotes || 'Verified Nigerian Bank Account';
+
+    const [created] = await tx
+      .insert(withdrawalRequests)
+      .values({
+        userId: actorUserId,
+        amountKobo: requestedKobo,
+        bankSummary,
+        scheduledPayoutDate,
+        status: 'PENDING',
+      })
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: actorUserId,
+      action: 'WITHDRAWAL_REQUESTED',
+      entityType: 'withdrawal_requests',
+      entityId: created.id,
+      newValue: {
+        amountKobo: created.amountKobo,
+        scheduledPayoutDate,
+        status: 'PENDING',
+      },
+      reason: 'Scout queued withdrawal request for scheduled 15th payout run',
+    });
+
+    await tx.insert(notifications).values({
+      userId: actorUserId,
+      category: 'WALLET_WITHDRAWALS',
+      title: 'Withdrawal Request Queued',
+      body: `Your withdrawal request for ₦${(created.amountKobo / 100).toLocaleString('en-NG', { minimumFractionDigits: 2 })} has been queued for the ${scheduledPayoutDate} payout schedule.`,
+      actionUrl: '/?tab=wallet',
+      isRead: false,
+    });
+
+    return {
+      id: created.id,
+      amountKobo: Number(created.amountKobo),
+      bankSummary: created.bankSummary,
+      scheduledPayoutDate: created.scheduledPayoutDate,
+      status: created.status,
+      failureReason: created.failureReason ?? null,
+      requestedAt: created.requestedAt.toISOString(),
+      requestedAtLagos: formatLagosDateTime(created.requestedAt),
+    };
+  });
+}
+
+export async function getWithdrawalRequestsForActor(
+  actorUserId: string
+): Promise<WithdrawalRequestDTO[]> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAccountOperational(ctx);
+
+  const rows = await db
+    .select()
+    .from(withdrawalRequests)
+    .where(eq(withdrawalRequests.userId, actorUserId))
+    .orderBy(desc(withdrawalRequests.requestedAt))
+    .limit(20);
+
+  return rows.map((r) => ({
+    id: r.id,
+    amountKobo: Number(r.amountKobo),
+    bankSummary: r.bankSummary,
+    scheduledPayoutDate: r.scheduledPayoutDate,
+    status: r.status,
+    failureReason: r.failureReason ?? null,
+    requestedAt: r.requestedAt.toISOString(),
+    requestedAtLagos: formatLagosDateTime(r.requestedAt),
+  }));
+}
+
 
 
 

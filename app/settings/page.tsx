@@ -6,7 +6,12 @@ import SettingsView from '@/components/SettingsView';
 
 export const dynamic = 'force-dynamic';
 
-export default async function SettingsPage() {
+interface SettingsPageProps {
+  searchParams: Promise<{ tab?: string }>;
+}
+
+export default async function SettingsPage({ searchParams }: SettingsPageProps) {
+  const params = await searchParams;
   const cookieStore = await cookies();
   const identity = await extractSessionIdentityFromRequest();
 
@@ -22,5 +27,5 @@ export default async function SettingsPage() {
   }
 
   const initialSnapshot = await getNairaScoutSnapshot(identity?.userId ?? null);
-  return <SettingsView initialSnapshot={initialSnapshot} />;
+  return <SettingsView initialSnapshot={initialSnapshot} initialTab={params.tab} />;
 }

@@ -15,6 +15,7 @@ import {
   getNairaScoutSnapshot,
   inviteToScoutsListForActor,
   manageRelationshipForActor,
+  markReferralEventOpenedForActor,
   OrderFulfilmentStatus,
   reportAbuseForActor,
   respondToInvitationForActor,
@@ -86,6 +87,16 @@ export async function POST(req: NextRequest) {
         isReferral
       );
       return NextResponse.json({ breakdown });
+    }
+
+    // NS-SCT-056: Record first open of referral event (deduplicated once per event)
+    if (action === 'mark_referral_opened') {
+      const identityMaybe = await extractSessionIdentityFromRequest(req);
+      const res = await markReferralEventOpenedForActor(
+        identityMaybe?.userId ?? null,
+        String(body.referralEventId || '')
+      );
+      return NextResponse.json(res);
     }
 
     const identity = await extractSessionIdentityFromRequest(req);

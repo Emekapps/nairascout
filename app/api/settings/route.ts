@@ -33,19 +33,32 @@ export async function PATCH(req: NextRequest) {
     const body = await req.json();
     const section = String(body?.section || '');
 
+    // NS-SCT-010 & NS-SCT-015: Profile, LGA, 250-char bio & Private-by-Default visibility
     if (section === 'profile' || section === 'privacy') {
+      const vis =
+        body.profileVisibility === 'PUBLIC' ||
+        body.profileVisibility === 'NETWORK_ONLY' ||
+        body.profileVisibility === 'PRIVATE'
+          ? body.profileVisibility
+          : undefined;
+
       await updateProfileAndPrivacy(identity.userId, {
         displayName: body.displayName,
         username: body.username,
         bio: body.bio,
         locationState: body.locationState,
+        locationLga:
+          body.locationLga !== undefined
+            ? body.locationLga
+              ? String(body.locationLga)
+              : null
+            : undefined,
         preferredCategories: Array.isArray(body.preferredCategories)
           ? body.preferredCategories.map(String)
           : undefined,
         invitationPolicy: body.invitationPolicy as InvitationPolicy | undefined,
         muteReferrals: typeof body.muteReferrals === 'boolean' ? body.muteReferrals : undefined,
-        profileVisibility:
-          body.profileVisibility === 'NETWORK_ONLY' ? 'NETWORK_ONLY' : 'PUBLIC',
+        profileVisibility: vis,
       });
     } else if (section === 'unblock') {
       await manageRelationshipForActor(identity.userId, {

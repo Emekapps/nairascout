@@ -11,6 +11,7 @@ import type {
 import { formatWholeNaira } from '@/lib/commission-engine';
 import ProductImage from './ProductImage';
 import { DismissibleNoticePanel } from './shared/DismissibleNoticePanel';
+import { RestrictionNoticeBanner } from './shared/RestrictionNoticeBanner';
 
 interface ReferralsViewProps {
   snapshot: NairaScoutSnapshot;
@@ -71,6 +72,9 @@ export default function ReferralsView({
           </Link>
         )}
       </div>
+
+      {/* Restriction Awareness Banner (NS-SCT-084) */}
+      <RestrictionNoticeBanner activeScout={snapshot.activeScout} />
 
       {/* Dismissible Notice Panel + Search Bar */}
       <div className="space-y-4">
@@ -223,7 +227,20 @@ export default function ReferralsView({
                         <button
                           type="button"
                           disabled={isExpired || product.stock <= 0}
-                          onClick={() => onStartReferralCheckout(product, refEvent)}
+                          onClick={() => {
+                            void fetch('/api/nairascout', {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                'X-Requested-With': 'NairaScout',
+                              },
+                              body: JSON.stringify({
+                                action: 'mark_referral_opened',
+                                referralEventId: refEvent.id,
+                              }),
+                            }).catch(() => undefined);
+                            onStartReferralCheckout(product, refEvent);
+                          }}
                           className="flex-1 inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-commerce-foreground bg-commerce rounded-lg hover:bg-commerce/90 disabled:opacity-45 transition-colors whitespace-nowrap cursor-pointer"
                         >
                           <ShoppingBag className="w-3.5 h-3.5" aria-hidden="true" />

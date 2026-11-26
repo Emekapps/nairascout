@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
   ArrowLeft,
+  Bell,
   Camera,
   CheckCircle2,
   Clock,
@@ -20,9 +21,11 @@ import {
   Trash2,
   User,
 } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   formatRemainingCooldown,
   REAUTH_WINDOW_MS,
+  type ProfileVisibility,
 } from '@/lib/auth/rbac';
 import { validatePasswordLocally } from '@/lib/auth/password-policy';
 import type {
@@ -36,6 +39,12 @@ import {
   DEFAULT_LISTING_CATEGORIES_SEED,
   NIGERIAN_STATES_SEED,
 } from '@/lib/constants/nigeria-and-categories';
+import {
+  SCOUT_BIO_MAX_LENGTH,
+  containsReservedImpersonationTerm,
+  type NotificationCategoryCode,
+} from '@/lib/constants/notification-preferences';
+import { formatLagosDate } from '@/lib/utils/africa-lagos';
 import { formatKoboToNaira } from '@/lib/commission-engine';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { UserAvatar } from './shared/UserAvatar';
@@ -47,14 +56,93 @@ import { ReauthModal } from './auth/ReauthModal';
 
 interface SettingsViewProps {
   initialSnapshot: NairaScoutSnapshot;
+  initialTab?: string;
 }
 
-type SettingsTab = 'profile' | 'privacy' | 'security' | 'verification' | 'lifecycle';
+type SettingsTab =
+  | 'profile'
+  | 'privacy'
+  | 'notifications'
+  | 'security'
+  | 'verification'
+  | 'lifecycle';
 
-export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
+function resolveInitialTab(raw?: string): SettingsTab {
+  if (
+    raw === 'profile' ||
+    raw === 'privacy' ||
+    raw === 'notifications' ||
+    raw === 'security' ||
+    raw === 'verification' ||
+    raw === 'lifecycle'
+  ) {
+    return raw;
+  }
+  return 'profile';
+}
+
+// NS-SCT-012: Strip EXIF/GPS metadata and square-crop static avatars >= 200x200 px before upload
+async function sanitizeAndSquareCropAvatar(file: File): Promise<File> {
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('Could not decode selected image.'));
+      el.src = objectUrl;
+    });
+
+    if (img.naturalWidth < 200 || img.naturalHeight < 200) {
+      throw new Error('Profile photo must be at least 200 × 200 pixels.');
+    }
+
+    const cropSide = Math.min(img.naturalWidth, img.naturalHeight);
+    const sx = Math.floor((img.naturalWidth - cropSide) / 2);
+    const sy = Math.floor((img.naturalHeight - cropSide) / 2);
+    const outputSide = Math.max(200, Math.min(cropSide, 1024));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = outputSide;
+    canvas.height = outputSide;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Image processor unavailable in this browser.');
+    }
+    ctx.drawImage(img, sx, sy, cropSide, cropSide, 0, 0, outputSide, outputSide);
+
+    const outputMime = file.type === 'image/png' ? 'image/png' : 'image/webp';
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(
+        (result) => {
+          if (result) {
+            resolve(result);
+            return;
+          }
+          canvas.toBlob(resolve, 'image/jpeg', 0.9);
+        },
+        outputMime,
+        0.9
+      );
+    });
+
+    if (!blob) {
+      throw new Error('Could not prepare square profile photo.');
+    }
+    if (blob.size > 5 * 1024 * 1024) {
+      throw new Error('Processed profile photo exceeds 5 MB limit.');
+    }
+
+    const ext = blob.type === 'image/png' ? 'png' : blob.type === 'image/webp' ? 'webp' : 'jpg';
+    return new File([blob], `avatar.${ext}`, { type: blob.type });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+export default function SettingsView({ initialSnapshot, initialTab }: SettingsViewProps) {
   const router = useRouter();
   const [snapshot, setSnapshot] = useState<NairaScoutSnapshot>(initialSnapshot);
-  const [tab, setTab] = useState<SettingsTab>('profile');
+  const [tab, setTab] = useState<SettingsTab>(() => resolveInitialTab(initialTab));
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
@@ -62,16 +150,17 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
 
   const scout = snapshot.activeScout;
 
-  // Profile fields
+  // Profile fields (NS-SCT-010 - NS-SCT-018)
   const [displayName, setDisplayName] = useState(scout?.displayName || '');
   const [username, setUsername] = useState(scout?.handle || '');
-  const [bio, setBio] = useState(scout?.bio || '');
+  const [bio, setBio] = useState((scout?.bio || '').slice(0, SCOUT_BIO_MAX_LENGTH));
   const [locationState, setLocationState] = useState(scout?.city || 'Lagos');
+  const [locationLga, setLocationLga] = useState(scout?.locationLga || '');
   const [preferredCategories, setPreferredCategories] = useState<string[]>(
     scout?.preferredCategories || []
   );
-  const [profileVisibility, setProfileVisibility] = useState<'PUBLIC' | 'NETWORK_ONLY'>(
-    scout?.profileVisibility || 'PUBLIC'
+  const [profileVisibility, setProfileVisibility] = useState<ProfileVisibility>(
+    scout?.profileVisibility || 'PRIVATE'
   );
 
   // Privacy fields
@@ -439,7 +528,10 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
 
     const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
     if (!allowedTypes.includes(file.type)) {
-      setFeedback({ type: 'err', message: 'Only JPG, PNG, and WebP images are supported.' });
+      setFeedback({
+        type: 'err',
+        message: 'Only static JPG, PNG, and WebP images are supported (GIF and animated images are blocked).',
+      });
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
@@ -450,13 +542,14 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
     setAvatarBusy(true);
     setFeedback(null);
     try {
+      const sanitizedFile = await sanitizeAndSquareCropAvatar(file);
       const supabase = createSupabaseBrowserClient();
       const { data: sessionData } = supabase
         ? await supabase.auth.getSession()
         : { data: { session: null } };
 
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', sanitizedFile);
 
       const headers: Record<string, string> = {
         'X-Requested-With': 'NairaScout',
@@ -476,10 +569,19 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
         return;
       }
       if (data.snapshot) setSnapshot(data.snapshot);
-      setFeedback({ type: 'ok', message: 'Profile photo updated.' });
+      setFeedback({
+        type: 'ok',
+        message: 'Profile photo updated (square-cropped and EXIF metadata stripped).',
+      });
       router.refresh();
-    } catch {
-      setFeedback({ type: 'err', message: 'Network error while uploading profile photo.' });
+    } catch (err) {
+      setFeedback({
+        type: 'err',
+        message:
+          err instanceof Error && err.message
+            ? err.message
+            : 'Network error while uploading profile photo.',
+      });
     } finally {
       setAvatarBusy(false);
     }
@@ -566,6 +668,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
               [
                 { id: 'profile', label: 'Profile' },
                 { id: 'privacy', label: 'Privacy & Referrals' },
+                { id: 'notifications', label: 'Notifications' },
                 { id: 'security', label: 'Security & 2FA' },
                 { id: 'verification', label: 'Verification & Banking' },
                 { id: 'lifecycle', label: 'Account Lifecycle' },
@@ -607,6 +710,29 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              const badDisplay = containsReservedImpersonationTerm(displayName);
+              if (badDisplay) {
+                setFeedback({
+                  type: 'err',
+                  message: `Display name cannot contain reserved platform term "${badDisplay}".`,
+                });
+                return;
+              }
+              const badHandle = containsReservedImpersonationTerm(username);
+              if (badHandle) {
+                setFeedback({
+                  type: 'err',
+                  message: `Username cannot contain reserved platform term "${badHandle}".`,
+                });
+                return;
+              }
+              if (bio.length > SCOUT_BIO_MAX_LENGTH) {
+                setFeedback({
+                  type: 'err',
+                  message: `Bio must be ${SCOUT_BIO_MAX_LENGTH} characters or fewer.`,
+                });
+                return;
+              }
               patchSettings(
                 {
                   section: 'profile',
@@ -614,6 +740,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                   username,
                   bio,
                   locationState,
+                  locationLga: locationLga.trim() || null,
                   preferredCategories,
                   profileVisibility,
                 },
@@ -622,20 +749,58 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
             }}
             className="bg-card border border-border rounded-2xl p-6 space-y-5 max-w-2xl"
           >
-            <div className="flex items-center gap-2">
-              <User className="w-4 h-4 text-foreground" aria-hidden="true" />
-              <h2 className="font-sans text-lg font-bold text-foreground">
-                Public Scout Profile
-              </h2>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <User className="w-4 h-4 text-foreground" aria-hidden="true" />
+                <h2 className="font-sans text-lg font-bold text-foreground">
+                  Scout Profile
+                </h2>
+              </div>
+              <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-secondary text-secondary-foreground border border-border">
+                Visibility: {profileVisibility === 'PRIVATE' ? 'Private (Default)' : profileVisibility === 'NETWORK_ONLY' ? 'Scouts List Only' : 'Public Directory'}
+              </span>
             </div>
 
-            {/* Supabase Profile Photo / Avatar Uploader */}
+            {/* NS-SCT-010: Read-only foundational identity block */}
+            <div className="p-4 rounded-xl border border-border bg-muted/40 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-sans text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Foundational Identity (Read-Only)
+                </p>
+                <span className="text-[11px] text-muted-foreground">
+                  No public /scouts/[username] page
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div>
+                  <span className="text-muted-foreground block">Account Name</span>
+                  <span className="font-semibold text-foreground">{scout.displayName}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block">Registered Email</span>
+                  <span className="font-semibold text-foreground">{scout.email}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block">Account Creation Date</span>
+                  <span className="font-semibold text-foreground">
+                    {scout.accountCreatedAt ? formatLagosDate(scout.accountCreatedAt) : 'Active Member'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block">Account Status</span>
+                  <span className="font-semibold text-foreground">{scout.accountStatus}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Supabase Profile Photo / Avatar Uploader (NS-SCT-012) */}
             <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-xl border border-border bg-muted/40">
               <UserAvatar
                 avatarUrl={scout.avatarUrl}
                 displayName={displayName || scout.displayName}
                 username={username || scout.handle}
                 size="xl"
+                shape="rounded-square"
               />
               <div className="flex-1 space-y-2">
                 <div>
@@ -643,7 +808,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                     Profile Photo
                   </p>
                   <p className="font-sans text-xs text-muted-foreground">
-                    JPG, PNG, or WebP up to 5 MB.
+                    Static JPG, PNG, or WebP (minimum 200 × 200 px, up to 5 MB). Square-cropped with EXIF/GPS metadata stripped automatically.
                   </p>
                 </div>
                 <input
@@ -669,7 +834,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                     {avatarBusy
                       ? 'Uploading...'
                       : scout.avatarUrl
-                        ? 'Change Photo'
+                        ? 'Replace Photo'
                         : 'Upload Avatar'}
                   </button>
                   {scout.avatarUrl && (
@@ -694,6 +859,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                 <input
                   type="text"
                   required
+                  maxLength={64}
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
@@ -706,6 +872,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                 <input
                   type="text"
                   required
+                  maxLength={32}
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full px-3 py-2 font-sans text-sm bg-background text-foreground border border-input rounded-xl"
@@ -719,13 +886,13 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                   htmlFor="settings-location-state"
                   className="block text-xs font-medium text-muted-foreground mb-1"
                 >
-                  Location State
+                  Location State (Optional)
                 </label>
                 <select
                   id="settings-location-state"
                   value={locationState}
                   onChange={(e) => setLocationState(e.target.value)}
-                  className="w-full pl-3.5 pr-10 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
+                  className="w-full px-3.5 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
                 >
                   {availableStates.map((st) => (
                     <option key={st.code + st.name} value={st.name}>
@@ -735,30 +902,64 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">
-                  Profile Visibility
-                </label>
-                <select
-                  value={profileVisibility}
-                  onChange={(e) =>
-                    setProfileVisibility(
-                      e.target.value === 'NETWORK_ONLY' ? 'NETWORK_ONLY' : 'PUBLIC'
-                    )
-                  }
-                  className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
+                <label
+                  htmlFor="settings-location-lga"
+                  className="block text-xs font-medium text-muted-foreground mb-1"
                 >
-                  <option value="PUBLIC">Public Sanitized Directory</option>
-                  <option value="NETWORK_ONLY">Scouts List &amp; Network Only</option>
-                </select>
+                  LGA (Optional)
+                </label>
+                <input
+                  id="settings-location-lga"
+                  type="text"
+                  maxLength={80}
+                  value={locationLga}
+                  onChange={(e) => setLocationLga(e.target.value)}
+                  placeholder="e.g. Ikeja, Eti-Osa, Wuse II"
+                  className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
+                />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Bio</label>
+              <label
+                htmlFor="settings-profile-visibility"
+                className="block text-xs font-medium text-muted-foreground mb-1"
+              >
+                Profile Visibility (Private by Default)
+              </label>
+              <select
+                id="settings-profile-visibility"
+                value={profileVisibility}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === 'PRIVATE' || val === 'NETWORK_ONLY' || val === 'PUBLIC') {
+                    setProfileVisibility(val);
+                  }
+                }}
+                className="w-full px-3.5 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
+              >
+                <option value="PRIVATE">Private (Default) — Optional bio &amp; location hidden</option>
+                <option value="NETWORK_ONLY">Scouts List Only — Visible to accepted contacts</option>
+                <option value="PUBLIC">Public Directory — Visible in Scouts search</option>
+              </select>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label htmlFor="settings-bio" className="block text-xs font-medium text-muted-foreground">
+                  Bio (Optional)
+                </label>
+                <span className="text-[11px] font-mono tabular-nums text-muted-foreground">
+                  {bio.length} / {SCOUT_BIO_MAX_LENGTH}
+                </span>
+              </div>
               <textarea
+                id="settings-bio"
                 rows={3}
+                maxLength={SCOUT_BIO_MAX_LENGTH}
                 value={bio}
-                onChange={(e) => setBio(e.target.value)}
+                onChange={(e) => setBio(e.target.value.slice(0, SCOUT_BIO_MAX_LENGTH))}
+                placeholder="Share a brief note about products or categories you follow..."
                 className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
               />
             </div>
@@ -814,8 +1015,35 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
               className="lg:col-span-7 bg-card border border-border rounded-2xl p-6 space-y-5"
             >
               <h2 className="font-sans text-lg font-bold text-foreground">
-                Scouts List &amp; Referral Controls
+                Scouts List, Profile Privacy &amp; Referral Controls
               </h2>
+
+              <div className="space-y-2">
+                <label
+                  htmlFor="privacy-profile-visibility"
+                  className="block text-xs font-medium text-muted-foreground"
+                >
+                  Scout Profile Visibility
+                </label>
+                <select
+                  id="privacy-profile-visibility"
+                  value={profileVisibility}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === 'PRIVATE' || val === 'NETWORK_ONLY' || val === 'PUBLIC') {
+                      setProfileVisibility(val);
+                    }
+                  }}
+                  className="w-full px-3.5 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
+                >
+                  <option value="PRIVATE">Private (Default) — Hide optional bio, State/LGA &amp; categories</option>
+                  <option value="NETWORK_ONLY">Scouts List Only — Share optional details with contacts</option>
+                  <option value="PUBLIC">Public Directory — Share optional details in Scouts search</option>
+                </select>
+                <p className="text-[11px] text-muted-foreground">
+                  Email address, phone number, Scouts List connections, referral ancestry, and wallet figures remain strictly private regardless of visibility mode.
+                </p>
+              </div>
 
               <div className="space-y-2">
                 <label className="block text-xs font-medium text-muted-foreground">
@@ -824,7 +1052,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                 <select
                   value={invitationPolicy}
                   onChange={(e) => setInvitationPolicy(e.target.value as InvitationPolicy)}
-                  className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
+                  className="w-full px-3.5 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                 >
                   <option value="EVERYONE">EVERYONE — Any active Scout can invite you</option>
                   <option value="CONTACTS_ONLY">
@@ -897,6 +1125,12 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
               )}
             </div>
           </div>
+        )}
+
+        {tab === 'notifications' && (
+          <NotificationPreferencesPanel
+            onFeedback={(msg) => setFeedback(msg)}
+          />
         )}
 
         {tab === 'security' && (
@@ -1776,3 +2010,175 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
     </div>
   );
 }
+
+interface NotificationPreferenceRowDTO {
+  categoryCode: NotificationCategoryCode;
+  label: string;
+  description: string;
+  isEssential: boolean;
+  inAppEnabled: boolean;
+  emailEnabled: boolean;
+}
+
+// NS-SCT-076 - NS-SCT-083: Eight-group notification preferences UI with essential lock protection
+function NotificationPreferencesPanel({
+  onFeedback,
+}: {
+  onFeedback: (msg: { type: 'ok' | 'err'; message: string } | null) => void;
+}) {
+  const queryClient = useQueryClient();
+
+  const prefsQuery = useQuery<{ preferences: NotificationPreferenceRowDTO[] }>({
+    queryKey: ['notification-preferences'],
+    queryFn: async () => {
+      const res = await fetch('/api/settings/notifications', { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Could not load notification preferences.');
+      }
+      return data;
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async (
+      updates: Array<{
+        categoryCode: NotificationCategoryCode;
+        inAppEnabled?: boolean;
+        emailEnabled?: boolean;
+      }>
+    ) => {
+      onFeedback(null);
+      const res = await fetch('/api/settings/notifications', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'NairaScout',
+        },
+        body: JSON.stringify({ preferences: updates }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Could not update notification preferences.');
+      }
+      return data as { preferences: NotificationPreferenceRowDTO[] };
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(['notification-preferences'], { preferences: data.preferences });
+      onFeedback({ type: 'ok', message: 'Notification preferences saved.' });
+    },
+    onError: (err) => {
+      onFeedback({
+        type: 'err',
+        message: err instanceof Error ? err.message : 'Failed to update preferences.',
+      });
+    },
+  });
+
+  const preferences = prefsQuery.data?.preferences ?? [];
+
+  return (
+    <div className="bg-card border border-border rounded-2xl p-6 space-y-5 max-w-3xl">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <Bell className="w-4 h-4 text-foreground" aria-hidden="true" />
+            <h2 className="font-sans text-lg font-bold text-foreground">
+              Notification Preferences
+            </h2>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            Control In-App and Email alerts across 8 Scout &amp; marketplace groups. Essential
+            security, order, withdrawal, and restriction alerts stay locked ON.
+          </p>
+        </div>
+      </div>
+
+      {prefsQuery.isLoading ? (
+        <div className="flex items-center gap-2 py-8 text-xs text-muted-foreground">
+          <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+          Loading notification preferences...
+        </div>
+      ) : prefsQuery.isError ? (
+        <div className="p-4 rounded-xl border border-destructive/30 bg-destructive/10 text-xs text-destructive">
+          {prefsQuery.error instanceof Error
+            ? prefsQuery.error.message
+            : 'Unable to load notification preferences.'}
+        </div>
+      ) : (
+        <div className="divide-y divide-border border border-border rounded-xl overflow-hidden">
+          {preferences.map((pref) => (
+            <div
+              key={pref.categoryCode}
+              className="p-4 bg-background/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+            >
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-sans text-sm font-semibold text-foreground">{pref.label}</p>
+                  {pref.isEssential && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-secondary text-secondary-foreground border border-border">
+                      <Lock className="w-2.5 h-2.5" aria-hidden="true" />
+                      Locked ON — Essential
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">{pref.description}</p>
+              </div>
+
+              <div className="flex items-center gap-3 shrink-0">
+                <label
+                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-medium ${
+                    pref.isEssential
+                      ? 'border-border bg-muted/60 text-muted-foreground cursor-not-allowed'
+                      : 'border-border bg-card text-foreground cursor-pointer'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={pref.isEssential ? true : pref.inAppEnabled}
+                    disabled={pref.isEssential || updateMutation.isPending}
+                    onChange={(e) => {
+                      updateMutation.mutate([
+                        {
+                          categoryCode: pref.categoryCode,
+                          inAppEnabled: e.target.checked,
+                        },
+                      ]);
+                    }}
+                    className="accent-foreground"
+                  />
+                  In-App
+                </label>
+
+                <label
+                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-medium ${
+                    pref.isEssential
+                      ? 'border-border bg-muted/60 text-muted-foreground cursor-not-allowed'
+                      : 'border-border bg-card text-foreground cursor-pointer'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={pref.isEssential ? true : pref.emailEnabled}
+                    disabled={pref.isEssential || updateMutation.isPending}
+                    onChange={(e) => {
+                      updateMutation.mutate([
+                        {
+                          categoryCode: pref.categoryCode,
+                          emailEnabled: e.target.checked,
+                        },
+                      ]);
+                    }}
+                    className="accent-foreground"
+                  />
+                  Email
+                </label>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+

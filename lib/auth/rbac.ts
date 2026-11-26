@@ -705,6 +705,8 @@ export function assertIndependentRecoveryOfficers(
   }
 }
 
+export type ProfileVisibility = 'PRIVATE' | 'NETWORK_ONLY' | 'PUBLIC';
+
 export interface PublicScoutProfileDTO {
   userId: string;
   username: string;
@@ -712,13 +714,16 @@ export interface PublicScoutProfileDTO {
   avatarUrl: string | null;
   bio: string | null;
   locationState: string | null;
+  locationLga: string | null;
+  preferredCategories: string[];
+  profileVisibility: ProfileVisibility;
   hasActiveSellerBadge: boolean;
   isSellerVerified: boolean;
   workingWithCount: number;
   totalSoldUnits: number;
 }
 
-// NS-PRI-001: Public Scout DTO sanitizer (strips private email, phone, bank, and ancestry fields)
+// NS-PRI-001 & NS-SCT-015: Public Scout DTO sanitizer (private-by-default; strips email, phone, bank, ancestry, and hidden optional fields)
 export function toPublicScoutProfileDTO(input: {
   userId: string;
   username: string;
@@ -726,18 +731,34 @@ export function toPublicScoutProfileDTO(input: {
   avatarUrl: string | null;
   bio: string | null;
   locationState: string | null;
+  locationLga?: string | null;
+  preferredCategories?: string[];
+  profileVisibility?: string | null;
+  isViewerContact?: boolean;
   sellerStatus?: SellerStatus | null;
   sellerVerificationStatus?: VerificationStatus | null;
   workingWithCount?: number;
   totalSoldUnits?: number;
 }): PublicScoutProfileDTO {
+  const vis: ProfileVisibility =
+    input.profileVisibility === 'PUBLIC'
+      ? 'PUBLIC'
+      : input.profileVisibility === 'NETWORK_ONLY'
+        ? 'NETWORK_ONLY'
+        : 'PRIVATE';
+  const showOptionalProfileFields =
+    vis === 'PUBLIC' || (vis === 'NETWORK_ONLY' && Boolean(input.isViewerContact));
+
   return {
     userId: input.userId,
     username: input.username,
     displayName: input.displayName,
     avatarUrl: input.avatarUrl,
-    bio: input.bio,
-    locationState: input.locationState,
+    bio: showOptionalProfileFields ? input.bio : null,
+    locationState: showOptionalProfileFields ? input.locationState : null,
+    locationLga: showOptionalProfileFields ? (input.locationLga ?? null) : null,
+    preferredCategories: showOptionalProfileFields ? (input.preferredCategories ?? []) : [],
+    profileVisibility: vis,
     hasActiveSellerBadge: input.sellerStatus === 'ACTIVE',
     isSellerVerified:
       normalizeVerificationStatus(input.sellerVerificationStatus) === 'VERIFIED',
