@@ -133,6 +133,7 @@ export async function GET(req: NextRequest) {
         {
           userId: verifiedUser.id,
           email: verifiedUser.email,
+          emailConfirmedAt: verifiedUser.email_confirmed_at ?? null,
           phone: verifiedUser.phone?.trim() ? verifiedUser.phone.trim() : null,
           userMetadata: (verifiedUser.user_metadata as Record<string, unknown>) || {},
         },

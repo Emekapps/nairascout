@@ -412,6 +412,51 @@ export async function ensureCommerceTables(
         CREATE INDEX IF NOT EXISTS idx_help_articles_category_published
           ON public.help_articles(is_published, category, sort_order);
       `);
+      // NS-AUT-008: Module 4 auth security columns & recovery/retention tables
+      await executeSql(sql`
+        ALTER TABLE public.users
+          ADD COLUMN IF NOT EXISTS terms_accepted_at timestamptz,
+          ADD COLUMN IF NOT EXISTS privacy_acknowledged_at timestamptz,
+          ADD COLUMN IF NOT EXISTS email_verified_at timestamptz,
+          ADD COLUMN IF NOT EXISTS last_reauthenticated_at timestamptz,
+          ADD COLUMN IF NOT EXISTS withdrawal_cooldown_until timestamptz,
+          ADD COLUMN IF NOT EXISTS mfa_enabled boolean NOT NULL DEFAULT false;
+      `);
+      await executeSql(sql`
+        CREATE TABLE IF NOT EXISTS public.account_recovery_requests (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          target_user_id uuid REFERENCES public.users(id) ON DELETE SET NULL,
+          claimed_email text NOT NULL,
+          claimed_username text,
+          contact_email_for_updates text NOT NULL,
+          reason text NOT NULL,
+          evidence_paths jsonb NOT NULL DEFAULT '[]'::jsonb,
+          status text NOT NULL DEFAULT 'SUBMITTED',
+          reviewed_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
+          reviewer_notes text,
+          reviewed_at timestamptz,
+          approved_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
+          approval_notes text,
+          approved_at timestamptz,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now(),
+          CONSTRAINT account_recovery_distinct_officers CHECK (
+            approved_by IS NULL OR reviewed_by IS NULL OR approved_by <> reviewed_by
+          )
+        );
+      `);
+      await executeSql(sql`
+        CREATE TABLE IF NOT EXISTS public.data_retention_schedule (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          table_name text NOT NULL UNIQUE,
+          retention_days integer NOT NULL,
+          legal_basis text NOT NULL,
+          purge_action text NOT NULL,
+          last_run_at timestamptz,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        );
+      `);
     })().catch((err) => {
       globalForDdl.__nsCommerceTablesReady = undefined;
       throw err;

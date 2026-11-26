@@ -9,12 +9,11 @@ import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
-  Eye,
-  EyeOff,
   Loader2,
   ShieldCheck,
   UserPlus,
 } from 'lucide-react';
+import { validatePasswordLocally } from '@/lib/auth/password-policy';
 import {
   NIGERIAN_STATES_SEED,
   type NigerianStateSeed,
@@ -24,6 +23,7 @@ import {
   isSupabaseBrowserConfigured,
 } from '@/lib/supabase/client';
 import { ThemeToggle } from '../layout/ThemeToggle';
+import { PasswordStrengthInput } from './PasswordStrengthInput';
 
 export async function provisionPostgreSqlProfile(
   payload?: {
@@ -32,6 +32,8 @@ export async function provisionPostgreSqlProfile(
     locationState?: string;
     referralEventId?: string | null;
     referralScoutUsername?: string | null;
+    termsAcceptedAt?: string | null;
+    privacyAcknowledgedAt?: string | null;
   },
   accessToken?: string | null
 ) {
@@ -52,7 +54,7 @@ export async function provisionPostgreSqlProfile(
   if (!res.ok) {
     throw new Error(data.error || 'Could not provision your PostgreSQL Scout record.');
   }
-  return data;
+  return data as { ok: boolean; accountStatus?: string };
 }
 
 interface RegisterWizardProps {
@@ -66,12 +68,13 @@ const STEP_META = [
   { step: 2, title: 'Username' },
   { step: 3, title: 'Email Address' },
   { step: 4, title: 'State' },
-  { step: 5, title: 'Password' },
-  { step: 6, title: 'Referral Attribution' },
+  { step: 5, title: 'Password (15+ Chars)' },
+  { step: 6, title: 'Consent & Attribution' },
 ] as const;
 
 const USERNAME_REGEX = /^[a-z0-9_]{3,24}$/;
 
+// NS-AUT-001 & NS-AUT-002: 15-char NIST password policy, explicit Terms/Privacy consent, OTP 60s resend & 5-attempt limit
 export function RegisterWizard({
   capturedRefEvent,
   capturedRefScout,
@@ -87,9 +90,9 @@ export function RegisterWizard({
   const [email, setEmail] = useState('');
   const [locationState, setLocationState] = useState('Lagos');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [refScout, setRefScout] = useState(capturedRefScout || '');
   const [refEvent, setRefEvent] = useState(capturedRefEvent || '');
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   const [states, setStates] = useState<NigerianStateSeed[]>(
     initialStates && initialStates.length > 0 ? initialStates : NIGERIAN_STATES_SEED
@@ -103,11 +106,22 @@ export function RegisterWizard({
 
   const [awaitingOtp, setAwaitingOtp] = useState(false);
   const [signupCode, setSignupCode] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [consentTimestamps, setConsentTimestamps] = useState<{
+    termsAcceptedAt: string;
+    privacyAcknowledgedAt: string;
+  } | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const supabaseConfigured = isSupabaseBrowserConfigured();
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setTimeout(() => setResendCooldown((prev) => Math.max(0, prev - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [resendCooldown]);
 
   useEffect(() => {
     if (initialStates && initialStates.length > 0) return;
@@ -193,8 +207,13 @@ export function RegisterWizard({
       return null;
     }
     if (step === 5) {
-      if (password.length < 8) {
-        return 'Password must be at least 8 characters.';
+      const localCheck = validatePasswordLocally(password, {
+        email: email.trim(),
+        username: username.trim().toLowerCase(),
+        displayName: displayName.trim(),
+      });
+      if (!localCheck.valid) {
+        return localCheck.errors[0] || 'Please choose a stronger 15+ character password.';
       }
       return null;
     }
@@ -225,6 +244,13 @@ export function RegisterWizard({
       return;
     }
 
+    if (!termsAccepted) {
+      setError(
+        'You must agree to the NairaScout Terms of Service and acknowledge the Privacy Notice to create an account.'
+      );
+      return;
+    }
+
     setError(null);
     setInfo(null);
 
@@ -237,10 +263,43 @@ export function RegisterWizard({
     }
 
     const normalizedUsername = username.trim().toLowerCase();
+    const normalizedEmail = email.trim().toLowerCase();
+    const nowIso = new Date().toISOString();
+
     setBusy(true);
     try {
+      // NS-AUT-001: Server-side NIST 15-char + HaveIBeenPwned check before calling Supabase Auth
+      const pwRes = await fetch('/api/auth/password-check', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'NairaScout',
+        },
+        body: JSON.stringify({
+          password,
+          email: normalizedEmail,
+          username: normalizedUsername,
+          displayName: displayName.trim(),
+        }),
+      });
+      const pwData = await pwRes.json();
+      if (!pwRes.ok || !pwData.valid) {
+        setError(
+          pwData?.errors?.[0] ||
+            pwData?.error ||
+            'Password does not meet NairaScout security requirements.'
+        );
+        return;
+      }
+
+      const timestamps = {
+        termsAcceptedAt: nowIso,
+        privacyAcknowledgedAt: nowIso,
+      };
+      setConsentTimestamps(timestamps);
+
       const { data, error: signUpError } = await supabase.auth.signUp({
-        email: email.trim(),
+        email: normalizedEmail,
         password,
         options: {
           emailRedirectTo: `${window.location.origin}/auth/callback`,
@@ -248,6 +307,8 @@ export function RegisterWizard({
             display_name: displayName.trim(),
             username: normalizedUsername || undefined,
             location_state: locationState,
+            terms_accepted_at: nowIso,
+            privacy_acknowledged_at: nowIso,
           },
         },
       });
@@ -258,27 +319,83 @@ export function RegisterWizard({
       }
 
       if (data.session) {
-        await provisionPostgreSqlProfile(
+        const provisioned = await provisionPostgreSqlProfile(
           {
             displayName: displayName.trim(),
             username: normalizedUsername || undefined,
             locationState,
             referralEventId: refEvent.trim() || null,
             referralScoutUsername: refScout.trim() || null,
+            termsAcceptedAt: nowIso,
+            privacyAcknowledgedAt: nowIso,
           },
           data.session.access_token
         );
+        if (provisioned.accountStatus === 'PENDING_ACTIVATION') {
+          router.push(`/auth/verify-email?email=${encodeURIComponent(normalizedEmail)}`);
+          router.refresh();
+          return;
+        }
         router.push('/');
         router.refresh();
         return;
       }
 
+      await fetch('/api/auth/otp-guard', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'NairaScout',
+        },
+        body: JSON.stringify({ action: 'request', email: normalizedEmail }),
+      }).catch(() => undefined);
+
+      setResendCooldown(60);
       setInfo(
-        `Confirmation email sent to ${email.trim()}. Enter the verification code from your email or click the confirmation link to complete PostgreSQL provisioning.`
+        `Confirmation instructions sent to ${normalizedEmail}. Codes expire in 10 minutes. Enter the 6-digit code or click the confirmation link to activate your account.`
       );
       setAwaitingOtp(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleResendSignupOtp = async () => {
+    setError(null);
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return;
+    const normalizedEmail = email.trim().toLowerCase();
+
+    setBusy(true);
+    try {
+      const guardRes = await fetch('/api/auth/otp-guard', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'NairaScout',
+        },
+        body: JSON.stringify({ action: 'request', email: normalizedEmail }),
+      });
+      const guardData = await guardRes.json();
+      if (!guardRes.ok) {
+        if (guardData.retryAfterSeconds) {
+          setResendCooldown(Number(guardData.retryAfterSeconds));
+        }
+        setError(guardData.error || 'Please wait before requesting a new code.');
+        return;
+      }
+
+      await supabase.auth.resend({
+        type: 'signup',
+        email: normalizedEmail,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
+      setResendCooldown(60);
+      setInfo('If an account matches this email address, instructions have been sent.');
     } finally {
       setBusy(false);
     }
@@ -295,17 +412,54 @@ export function RegisterWizard({
     }
 
     const normalizedUsername = username.trim().toLowerCase();
+    const normalizedEmail = email.trim().toLowerCase();
     setBusy(true);
     try {
+      const checkRes = await fetch('/api/auth/otp-guard', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'NairaScout',
+        },
+        body: JSON.stringify({ action: 'attempt_check', email: normalizedEmail }),
+      });
+      const checkData = await checkRes.json();
+      if (!checkRes.ok) {
+        setError(checkData.error || 'Maximum 5 attempts reached. Request a new code.');
+        return;
+      }
+
       const { data, error: verifyError } = await supabase.auth.verifyOtp({
-        email: email.trim(),
+        email: normalizedEmail,
         token: signupCode.trim(),
         type: 'signup',
       });
       if (verifyError) {
-        setError(verifyError.message);
+        const failRes = await fetch('/api/auth/otp-guard', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'NairaScout',
+          },
+          body: JSON.stringify({ action: 'attempt_failed', email: normalizedEmail }),
+        });
+        const failData = await failRes.json().catch(() => ({}));
+        setError(
+          failData?.locked
+            ? failData.error
+            : `Invalid or expired confirmation code (${failData?.attemptsRemaining ?? 0} attempts remaining).`
+        );
         return;
       }
+
+      await fetch('/api/auth/otp-guard', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'NairaScout',
+        },
+        body: JSON.stringify({ action: 'attempt_succeeded', email: normalizedEmail }),
+      }).catch(() => undefined);
 
       await provisionPostgreSqlProfile(
         {
@@ -314,6 +468,9 @@ export function RegisterWizard({
           locationState,
           referralEventId: refEvent.trim() || null,
           referralScoutUsername: refScout.trim() || null,
+          termsAcceptedAt: consentTimestamps?.termsAcceptedAt ?? new Date().toISOString(),
+          privacyAcknowledgedAt:
+            consentTimestamps?.privacyAcknowledgedAt ?? new Date().toISOString(),
         },
         data.session?.access_token
       );
@@ -401,12 +558,22 @@ export function RegisterWizard({
           {awaitingOtp ? (
             <form onSubmit={handleVerifySignupCode} className="space-y-4">
               <div>
-                <label
-                  htmlFor="signup-code"
-                  className="block text-xs font-medium text-muted-foreground mb-1"
-                >
-                  Email Confirmation Code
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label
+                    htmlFor="signup-code"
+                    className="block text-xs font-medium text-muted-foreground"
+                  >
+                    Email Confirmation Code (valid 10 min · max 5 attempts)
+                  </label>
+                  <button
+                    type="button"
+                    disabled={busy || resendCooldown > 0}
+                    onClick={handleResendSignupOtp}
+                    className="text-xs font-semibold text-success hover:underline disabled:opacity-50 cursor-pointer"
+                  >
+                    {resendCooldown > 0 ? `Resend Code (${resendCooldown}s)` : 'Resend Code'}
+                  </button>
+                </div>
                 <input
                   id="signup-code"
                   type="text"
@@ -414,8 +581,8 @@ export function RegisterWizard({
                   maxLength={8}
                   value={signupCode}
                   onChange={(e) => setSignupCode(e.target.value)}
-                  placeholder="Enter code from email"
-                  className="w-full px-3.5 py-2.5 font-sans text-sm bg-background text-foreground border border-input rounded-xl"
+                  placeholder="Enter 6-digit code from email"
+                  className="w-full px-3.5 py-2.5 font-numeric text-sm bg-background text-foreground border border-input rounded-xl"
                 />
               </div>
               <div className="flex gap-2">
@@ -424,7 +591,7 @@ export function RegisterWizard({
                   disabled={busy}
                   className="flex-1 py-2.5 px-4 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
                 >
-                  {busy ? 'Provisioning...' : 'Verify & Provision Scout Account'}
+                  {busy ? 'Activating...' : 'Verify & Activate Account'}
                 </button>
                 <button
                   type="button"
@@ -460,7 +627,7 @@ export function RegisterWizard({
               </div>
 
               {/* Sliding Wizard Viewport */}
-              <div className="overflow-hidden min-h-[120px]">
+              <div className="overflow-hidden min-h-[140px]">
                 <AnimatePresence mode="wait" custom={direction}>
                   <motion.div
                     key={step}
@@ -576,7 +743,7 @@ export function RegisterWizard({
                           className="w-full px-3.5 py-2.5 text-sm bg-background text-foreground border border-input rounded-xl focus:outline-none focus:border-ring"
                         />
                         <p className="mt-1.5 text-[11px] text-muted-foreground">
-                          Used for Email OTP login, verification notices, and account recovery.
+                          Used for Email OTP verification, security notices, and account recovery.
                         </p>
                       </div>
                     )}
@@ -593,7 +760,7 @@ export function RegisterWizard({
                           id="reg-state"
                           value={locationState}
                           onChange={(e) => setLocationState(e.target.value)}
-                          className="w-full pl-3.5 pr-10 py-2.5 text-sm border border-input rounded-xl bg-background text-foreground focus:outline-none focus:border-ring"
+                          className="appearance-none w-full px-3.5 py-2.5 text-sm border border-input rounded-xl bg-background text-foreground focus:outline-none focus:border-ring"
                         >
                           {states.map((st) => (
                             <option key={st.code} value={st.name}>
@@ -608,45 +775,20 @@ export function RegisterWizard({
                     )}
 
                     {step === 5 && (
-                      <div>
-                        <label
-                          htmlFor="reg-pass"
-                          className="block text-xs font-medium text-muted-foreground mb-1.5"
-                        >
-                          Password (min 8 characters)
-                        </label>
-                        <div className="relative">
-                          <input
-                            id="reg-pass"
-                            type={showPassword ? 'text' : 'password'}
-                            autoFocus
-                            minLength={8}
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            placeholder="Create a strong password"
-                            className="w-full pl-3.5 pr-10 py-2.5 text-sm bg-background text-foreground border border-input rounded-xl focus:outline-none focus:border-ring"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowPassword((prev) => !prev)}
-                            aria-label={showPassword ? 'Hide password' : 'Show password'}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-                          >
-                            {showPassword ? (
-                              <EyeOff className="w-4 h-4" aria-hidden="true" />
-                            ) : (
-                              <Eye className="w-4 h-4" aria-hidden="true" />
-                            )}
-                          </button>
-                        </div>
-                        <p className="mt-1.5 text-[11px] text-muted-foreground">
-                          Use at least 8 characters. You can also sign in via Email OTP anytime.
-                        </p>
-                      </div>
+                      <PasswordStrengthInput
+                        id="reg-pass"
+                        label="Password (minimum 15 characters)"
+                        value={password}
+                        onChange={setPassword}
+                        autoFocus
+                        email={email.trim()}
+                        username={username.trim().toLowerCase()}
+                        displayName={displayName.trim()}
+                      />
                     )}
 
                     {step === 6 && (
-                      <div className="space-y-3">
+                      <div className="space-y-4">
                         <p className="text-xs text-muted-foreground">
                           Optional: enter who referred you if it was not captured automatically.
                         </p>
@@ -684,6 +826,34 @@ export function RegisterWizard({
                             />
                           </div>
                         </div>
+
+                        <label className="flex items-start gap-2.5 p-3.5 bg-muted/50 border border-border rounded-xl cursor-pointer text-xs">
+                          <input
+                            type="checkbox"
+                            checked={termsAccepted}
+                            onChange={(e) => setTermsAccepted(e.target.checked)}
+                            className="mt-0.5 accent-foreground"
+                          />
+                          <span className="text-foreground leading-relaxed">
+                            I agree to the NairaScout{' '}
+                            <Link
+                              href="/programme-rules?policy=terms-of-service"
+                              target="_blank"
+                              className="font-semibold text-success hover:underline"
+                            >
+                              Terms of Service
+                            </Link>{' '}
+                            and acknowledge the{' '}
+                            <Link
+                              href="/programme-rules?policy=privacy-notice"
+                              target="_blank"
+                              className="font-semibold text-success hover:underline"
+                            >
+                              Privacy Notice
+                            </Link>
+                            .
+                          </span>
+                        </label>
                       </div>
                     )}
                   </motion.div>
@@ -715,7 +885,7 @@ export function RegisterWizard({
                 ) : (
                   <button
                     type="submit"
-                    disabled={busy || !supabaseConfigured}
+                    disabled={busy || !supabaseConfigured || !termsAccepted}
                     className="flex-1 py-2.5 px-4 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
                   >
                     {busy ? 'Creating Account...' : 'Create Free Scout Account'}

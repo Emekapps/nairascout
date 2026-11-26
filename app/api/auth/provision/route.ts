@@ -40,12 +40,16 @@ export async function POST(req: NextRequest) {
         ? body.referralScoutUsername.trim()
         : refScoutCookie;
 
-    const { createdNew, userId } = await ensureUserProvisionedInDb(identity, {
+    const { createdNew, userId, accountStatus } = await ensureUserProvisionedInDb(identity, {
       displayName: typeof body?.displayName === 'string' ? body.displayName : undefined,
       username: typeof body?.username === 'string' ? body.username : undefined,
       locationState: typeof body?.locationState === 'string' ? body.locationState : undefined,
       referralEventId,
       referralScoutUsername,
+      termsAccepted: body?.termsAccepted === true,
+      termsAcceptedAt: typeof body?.termsAcceptedAt === 'string' ? body.termsAcceptedAt : undefined,
+      privacyAcknowledgedAt:
+        typeof body?.privacyAcknowledgedAt === 'string' ? body.privacyAcknowledgedAt : undefined,
     });
 
     const snapshot = await getNairaScoutSnapshot(userId, referralEventId);
@@ -53,6 +57,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       createdNew,
       userId,
+      accountStatus,
       snapshot,
     });
   } catch (err) {

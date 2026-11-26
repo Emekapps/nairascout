@@ -128,10 +128,17 @@ export interface ActiveRestrictionDTO {
   createdAt: string;
 }
 
+// NS-AUT-005 & NS-AUT-007: Reauthentication window (10 min) & post-recovery cooling-off (24h)
+export const REAUTH_WINDOW_MS = 10 * 60 * 1000;
+export const WITHDRAWAL_COOLDOWN_HOURS = 24;
+
 export interface UserAuthContext {
   userId: string;
   email: string;
   accountStatus: AccountStatus;
+  lastReauthenticatedAt?: Date | null;
+  withdrawalCooldownUntil?: Date | null;
+  mfaEnabled?: boolean;
   activeRestrictions: ActiveRestrictionDTO[];
   seller?: {
     sellerProfileId: string;
@@ -636,6 +643,64 @@ export function assertAdminRole(
       `Role ${ctx.adminRole} is not authorized for this action.`,
       403,
       'INSUFFICIENT_ADMIN_ROLE'
+    );
+  }
+}
+
+// NS-AUT-005: Sensitive-action fresh reauthentication guard (last_reauthenticated_at within 10 min)
+export function assertRecentReauthentication(ctx: UserAuthContext | null): void {
+  assertAccountOperational(ctx);
+  const reauthAt = ctx.lastReauthenticatedAt;
+  if (!reauthAt || Date.now() - reauthAt.getTime() > REAUTH_WINDOW_MS) {
+    throw new AuthorizationError(
+      'Confirm your identity (reauthenticate within the last 10 minutes) before making this sensitive change.',
+      403,
+      'REAUTH_REQUIRED'
+    );
+  }
+}
+
+export function formatRemainingCooldown(cooldownUntil: Date | string | null | undefined): string | null {
+  if (!cooldownUntil) return null;
+  const target = cooldownUntil instanceof Date ? cooldownUntil : new Date(cooldownUntil);
+  const diffMs = target.getTime() - Date.now();
+  if (Number.isNaN(diffMs) || diffMs <= 0) return null;
+  const totalMinutes = Math.ceil(diffMs / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+// NS-AUT-007: Enforce 24-hour cooling-off lock on bank payout edits & withdrawals after recovery
+export function assertWithdrawalNotInCooldown(ctx: UserAuthContext | null): void {
+  assertAccountOperational(ctx);
+  const remaining = formatRemainingCooldown(ctx.withdrawalCooldownUntil);
+  if (remaining) {
+    throw new AuthorizationError(
+      `24-hour post-recovery financial cooling-off lock is active. Payout bank edits and withdrawals resume in ${remaining}.`,
+      403,
+      'WITHDRAWAL_COOLDOWN_ACTIVE'
+    );
+  }
+}
+
+// NS-AUT-007: Distinct officer enforcement for support-assisted account recovery approval
+export function assertIndependentRecoveryOfficers(
+  reviewedBy: string | null | undefined,
+  approvedBy: string
+): void {
+  if (!reviewedBy) {
+    throw new AuthorizationError(
+      'A reviewing officer must recommend approval before final recovery authorization.',
+      409,
+      'RECOVERY_REVIEW_REQUIRED'
+    );
+  }
+  if (reviewedBy === approvedBy) {
+    throw new AuthorizationError(
+      'Dual-officer control required: the reviewing officer cannot approve the same recovery request.',
+      403,
+      'RECOVERY_SAME_OFFICER'
     );
   }
 }

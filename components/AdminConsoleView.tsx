@@ -11,6 +11,7 @@ import {
   FileCheck,
   FileText,
   Gavel,
+  LifeBuoy,
   Lock,
   Pencil,
   Plus,
@@ -34,6 +35,7 @@ import {
 } from '@/lib/auth/rbac';
 import type {
   AbuseReportRecord,
+  AccountRecoveryRequestDTO,
   AuditLogRecord,
   GovernanceAppealDTO,
   GovernanceReasonCategory,
@@ -45,6 +47,7 @@ import type {
   VerificationRecord,
 } from '@/lib/nairascout-store';
 import { AdminContentManager } from './admin/AdminContentManager';
+import { AdminMfaGate } from './admin/AdminMfaGate';
 import { UserIdentityRow } from './shared/UserIdentityRow';
 import { ThemeToggle } from './layout/ThemeToggle';
 
@@ -98,6 +101,7 @@ export interface AdminConsoleData {
   categories: ListingCategoryDTO[];
   policies: PlatformPolicyDTO[];
   helpArticles: HelpArticleDTO[];
+  recoveryRequests?: AccountRecoveryRequestDTO[];
 }
 
 export type AdminSection =
@@ -106,6 +110,7 @@ export type AdminSection =
   | 'users'
   | 'approvals'
   | 'appeals'
+  | 'recoveries'
   | 'categories'
   | 'content'
   | 'audit_logs';
@@ -114,12 +119,16 @@ interface AdminConsoleViewProps {
   initialSection: AdminSection;
   authenticated: boolean;
   initialAdminData: AdminConsoleData | null;
+  mfaRequired?: boolean;
+  mfaHasFactor?: boolean;
 }
 
 export default function AdminConsoleView({
   initialSection,
   authenticated,
   initialAdminData,
+  mfaRequired = false,
+  mfaHasFactor = false,
 }: AdminConsoleViewProps) {
   const [adminData, setAdminData] = useState<AdminConsoleData | null>(initialAdminData);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; message: string } | null>(null);
@@ -159,6 +168,9 @@ export default function AdminConsoleView({
 
   // Appeals state
   const [appealNotesById, setAppealNotesById] = useState<Record<string, string>>({});
+
+  // Account Recovery notes state (NS-AUT-007)
+  const [recoveryNotesById, setRecoveryNotesById] = useState<Record<string, string>>({});
 
   // Audit Log filter
   const [auditQuery, setAuditQuery] = useState('');
@@ -510,6 +522,84 @@ export default function AdminConsoleView({
     }
   };
 
+  // NS-AUT-007: Stage 1 & Stage 2 Dual-Officer Account Recovery Handlers
+  const handleReviewRecovery = async (
+    requestId: string,
+    decision: 'UNDER_REVIEW' | 'RECOMMENDED_APPROVAL' | 'REJECTED'
+  ) => {
+    const reviewerNotes = (recoveryNotesById[requestId] || '').trim();
+    if (reviewerNotes.length < 5 && decision !== 'UNDER_REVIEW') {
+      setFeedback({
+        type: 'err',
+        message: 'Documented reviewer notes (min 5 chars) are required before recommending approval or rejecting.',
+      });
+      return;
+    }
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: buildHeaders(),
+        body: JSON.stringify({
+          action: 'review_recovery',
+          requestId,
+          decision,
+          reviewerNotes,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFeedback({ type: 'err', message: data.error || 'Recovery review update failed.' });
+        return;
+      }
+      if (data.admin) setAdminData(data.admin);
+      setFeedback({
+        type: 'ok',
+        message: `Recovery request ${requestId.slice(0, 8)} marked ${decision}.`,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleApproveRecovery = async (requestId: string) => {
+    const approvalNotes = (recoveryNotesById[requestId] || '').trim();
+    if (approvalNotes.length < 5) {
+      setFeedback({
+        type: 'err',
+        message: 'Approval justification (min 5 chars) is required before executing account recovery.',
+      });
+      return;
+    }
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: buildHeaders(),
+        body: JSON.stringify({
+          action: 'approve_recovery',
+          requestId,
+          approvalNotes,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFeedback({ type: 'err', message: data.error || 'Recovery approval failed.' });
+        return;
+      }
+      if (data.admin) setAdminData(data.admin);
+      setFeedback({
+        type: 'ok',
+        message:
+          'Account recovery approved: email reassigned, prior sessions revoked, and 24-hour withdrawal cooling-off lock applied.',
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCatName.trim()) {
@@ -612,6 +702,10 @@ export default function AdminConsoleView({
     );
   }, [adminData, auditQuery]);
 
+  if (mfaRequired) {
+    return <AdminMfaGate hasVerifiedFactor={Boolean(mfaHasFactor)} />;
+  }
+
   if (!adminData) {
     return (
       <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-6">
@@ -659,9 +753,19 @@ export default function AdminConsoleView({
   const openAppealsCount = adminData.governanceAppeals.filter(
     (a) => a.status === 'OPEN' || a.status === 'UNDER_REVIEW'
   ).length;
+  const pendingRecoveriesCount = (adminData.recoveryRequests ?? []).filter(
+    (r) =>
+      r.status === 'SUBMITTED' ||
+      r.status === 'UNDER_REVIEW' ||
+      r.status === 'RECOMMENDED_APPROVAL'
+  ).length;
   const activeCategoriesCount = adminData.categories.filter((c) => c.isActive).length;
   const isSuperAdmin = adminData.adminRole === 'SUPER_ADMIN';
   const isAnalystViewer = adminData.adminRole === 'ANALYST_VIEWER';
+  const canAdjudicateRecovery =
+    adminData.adminRole === 'SUPER_ADMIN' ||
+    adminData.adminRole === 'SUPPORT_OFFICER' ||
+    adminData.adminRole === 'TRUST_AND_SAFETY';
   const selectedUser = adminData.users.find((u) => u.userId === selectedUserId) ?? null;
 
   return (
@@ -700,6 +804,11 @@ export default function AdminConsoleView({
                   href: '/admin/appeals',
                   id: 'appeals',
                   label: `Appeals (${openAppealsCount})`,
+                },
+                {
+                  href: '/admin/recoveries',
+                  id: 'recoveries',
+                  label: `Recoveries (${pendingRecoveriesCount})`,
                 },
                 {
                   href: '/admin/categories',
@@ -823,6 +932,18 @@ export default function AdminConsoleView({
                   className="mt-3 inline-block text-xs font-semibold text-foreground hover:underline"
                 >
                   Trust &amp; Safety →
+                </Link>
+              </div>
+              <div className="bg-card border border-border rounded-2xl p-5">
+                <p className="text-xs text-muted-foreground">Account Recoveries</p>
+                <p className="mt-1 font-numeric text-3xl font-bold text-amber-600 dark:text-amber-400 tabular-nums">
+                  {pendingRecoveriesCount}
+                </p>
+                <Link
+                  href="/admin/recoveries"
+                  className="mt-3 inline-block text-xs font-semibold text-foreground hover:underline"
+                >
+                  Open Recoveries →
                 </Link>
               </div>
               <div className="bg-card border border-border rounded-2xl p-5">
@@ -1820,6 +1941,199 @@ export default function AdminConsoleView({
                           )}
                         </div>
                       )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </section>
+        )}
+
+        {(initialSection === 'overview' || initialSection === 'recoveries') && (
+          <section className="space-y-4">
+            <div className="flex items-center gap-2">
+              <LifeBuoy className="w-5 h-5 text-foreground" aria-hidden="true" />
+              <div>
+                <h2 className="font-sans text-xl md:text-2xl font-bold text-foreground">
+                  Support-Assisted Account Recoveries
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Dual-officer lost-email recovery queue (SUPPORT_OFFICER, TRUST_AND_SAFETY,
+                  SUPER_ADMIN). Reviewing and approving officers must be distinct. Approval revokes
+                  all sessions and triggers a 24-hour cooling-off lock.
+                </p>
+              </div>
+            </div>
+
+            {signedPreview && initialSection === 'recoveries' && (
+              <div className="p-4 bg-card border border-border rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div>
+                  <p className="font-semibold text-foreground">
+                    60-Second Signed Recovery Evidence Preview
+                  </p>
+                  <p className="font-sans text-muted-foreground">{signedPreview.path}</p>
+                </div>
+                {signedPreview.signedUrl && (
+                  <a
+                    href={signedPreview.signedUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl"
+                  >
+                    Open Signed Evidence
+                    <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                  </a>
+                )}
+              </div>
+            )}
+
+            <div className="bg-card border border-border rounded-2xl divide-y divide-border">
+              {(adminData.recoveryRequests ?? []).length === 0 ? (
+                <div className="p-8 text-center text-sm text-muted-foreground">
+                  No account recovery requests submitted yet.
+                </div>
+              ) : (
+                (adminData.recoveryRequests ?? []).map((r) => {
+                  const isSameReviewer = r.reviewedBy === adminData.adminUserId;
+                  return (
+                    <div key={r.id} className="p-5 space-y-3 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="space-y-0.5">
+                          <span className="font-sans font-semibold text-foreground">
+                            Claimed: {r.claimedEmail}
+                            {r.claimedUsername ? ` (@${r.claimedUsername})` : ''} → Contact:{' '}
+                            {r.contactEmailForUpdates}
+                          </span>
+                          <p className="text-[11px] text-muted-foreground">
+                            Matched Account:{' '}
+                            {r.targetHandle ? `@${r.targetHandle}` : 'Lookup on approval'} ·
+                            Submitted {r.createdAt.slice(0, 10)}
+                          </p>
+                        </div>
+                        <span
+                          className={`px-2 py-0.5 rounded-md font-sans font-semibold ${
+                            r.status === 'APPROVED'
+                              ? 'bg-accent text-accent-foreground'
+                              : r.status === 'REJECTED'
+                                ? 'bg-destructive/15 text-destructive'
+                                : r.status === 'RECOMMENDED_APPROVAL'
+                                  ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                                  : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                          }`}
+                        >
+                          {r.status}
+                        </span>
+                      </div>
+
+                      <p className="text-foreground/90">{r.reason}</p>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {r.evidencePaths.map((path) => (
+                          <button
+                            key={path}
+                            type="button"
+                            onClick={() => handleSignDocument(path)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium border border-border rounded-lg bg-background text-foreground hover:bg-muted cursor-pointer"
+                          >
+                            <FileText className="w-3 h-3" aria-hidden="true" />
+                            Inspect Evidence ({path.split('/').pop()})
+                          </button>
+                        ))}
+                      </div>
+
+                      {(r.reviewedByHandle || r.approvedByHandle) && (
+                        <p className="text-[11px] text-muted-foreground">
+                          {r.reviewedByHandle && (
+                            <span>
+                              Reviewed by @{r.reviewedByHandle}
+                              {r.reviewerNotes ? ` ("${r.reviewerNotes}")` : ''}
+                            </span>
+                          )}
+                          {r.approvedByHandle && (
+                            <span>
+                              {' '}
+                              · Approved by @{r.approvedByHandle}
+                              {r.approvalNotes ? ` ("${r.approvalNotes}")` : ''}
+                            </span>
+                          )}
+                        </p>
+                      )}
+
+                      {canAdjudicateRecovery &&
+                        !isAnalystViewer &&
+                        r.status !== 'APPROVED' &&
+                        r.status !== 'REJECTED' && (
+                          <div className="pt-2 border-t border-border space-y-2">
+                            {r.status === 'RECOMMENDED_APPROVAL' && isSameReviewer ? (
+                              <p className="text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
+                                Dual-officer enforcement (approved_by !== reviewed_by): you
+                                recommended approval for this recovery. A second distinct Support,
+                                Trust &amp; Safety, or Super Admin officer must execute final
+                                approval.
+                              </p>
+                            ) : (
+                              <div className="flex flex-col sm:flex-row gap-2">
+                                <input
+                                  type="text"
+                                  value={recoveryNotesById[r.id] || ''}
+                                  onChange={(e) =>
+                                    setRecoveryNotesById((p) => ({ ...p, [r.id]: e.target.value }))
+                                  }
+                                  placeholder={
+                                    r.status === 'RECOMMENDED_APPROVAL'
+                                      ? 'Distinct approver justification...'
+                                      : 'Reviewer verification notes...'
+                                  }
+                                  className="flex-1 px-3 py-1.5 text-xs bg-background text-foreground border border-input rounded-xl"
+                                />
+
+                                {r.status === 'SUBMITTED' && (
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => handleReviewRecovery(r.id, 'UNDER_REVIEW')}
+                                    className="px-3 py-1.5 text-xs font-medium border border-border rounded-xl cursor-pointer"
+                                  >
+                                    Start Review
+                                  </button>
+                                )}
+
+                                {(r.status === 'SUBMITTED' || r.status === 'UNDER_REVIEW') && (
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() =>
+                                      handleReviewRecovery(r.id, 'RECOMMENDED_APPROVAL')
+                                    }
+                                    className="px-3 py-1.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
+                                  >
+                                    Recommend Approval
+                                  </button>
+                                )}
+
+                                {r.status === 'RECOMMENDED_APPROVAL' && (
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => handleApproveRecovery(r.id)}
+                                    className="px-3 py-1.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
+                                  >
+                                    Approve &amp; Reassign Email (24h Lock)
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => handleReviewRecovery(r.id, 'REJECTED')}
+                                  className="px-3 py-1.5 text-xs font-semibold text-destructive border border-destructive/30 rounded-xl cursor-pointer"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
                     </div>
                   );
                 })

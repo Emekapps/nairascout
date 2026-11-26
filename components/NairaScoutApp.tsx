@@ -309,6 +309,19 @@ export default function NairaScoutApp({
         </div>
       )}
 
+      {snapshot.activeScout?.accountStatus === 'PENDING_ACTIVATION' && (
+        <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-2.5 text-xs text-amber-800 dark:text-amber-200 text-center">
+          Email confirmation required (<strong>PENDING_ACTIVATION</strong>) before creating
+          referrals, publishing listings, or making purchases.{' '}
+          <Link
+            href={`/auth/verify-email?email=${encodeURIComponent(snapshot.activeScout.email)}`}
+            className="underline font-semibold"
+          >
+            Verify Email Address Now
+          </Link>
+        </div>
+      )}
+
       {snapshot.activeScout?.activeRestrictions &&
         snapshot.activeScout.activeRestrictions.some((r) => r.status === 'ACTIVE') && (
           <div className="bg-destructive/10 border-b border-destructive/30 px-4 py-2.5 text-xs text-destructive text-center">

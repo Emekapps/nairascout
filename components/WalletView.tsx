@@ -11,6 +11,7 @@ import {
   Search,
   ShieldCheck,
 } from 'lucide-react';
+import { formatRemainingCooldown } from '@/lib/auth/rbac';
 import type { LedgerEntryStatus, NairaScoutSnapshot } from '@/lib/nairascout-store';
 import { formatKoboToNaira } from '@/lib/commission-engine';
 import {
@@ -103,6 +104,7 @@ export default function WalletView({ snapshot }: WalletViewProps) {
   }
 
   const { wallet, activeScout } = snapshot;
+  const remainingCooldown = formatRemainingCooldown(activeScout.withdrawalCooldownUntil);
 
   return (
     <div className="space-y-8">
@@ -111,6 +113,28 @@ export default function WalletView({ snapshot }: WalletViewProps) {
           Wallet
         </h1>
       </div>
+
+      {remainingCooldown && (
+        <div
+          role="status"
+          className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3 text-xs text-amber-900 dark:text-amber-200"
+        >
+          <Clock className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+          <div className="space-y-1">
+            <p className="font-semibold">
+              24-Hour Post-Recovery Financial Cooling-Off Lock Active ({remainingCooldown} remaining)
+            </p>
+            <p className="opacity-90">
+              Following support-assisted account recovery, withdrawal requests and payout bank
+              destination edits are locked until{' '}
+              <span className="font-numeric font-medium">
+                {new Date(activeScout.withdrawalCooldownUntil!).toLocaleString()}
+              </span>
+              .
+            </p>
+          </div>
+        </div>
+      )}
 
       <DismissibleNoticePanel
         storageKey="nairascout_wallet_ledger_notice_v1"

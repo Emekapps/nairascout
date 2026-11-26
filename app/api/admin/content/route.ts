@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthorizationError } from '@/lib/auth/rbac';
-import { extractSessionIdentityFromRequest, verifyMutationOrigin } from '@/lib/auth/session';
+import {
+  assertAdminAal2Session,
+  extractSessionIdentityFromRequest,
+  verifyMutationOrigin,
+} from '@/lib/auth/session';
 import {
   adminUpsertHelpArticle,
   adminUpsertPlatformPolicy,
@@ -16,6 +20,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    await assertAdminAal2Session(req);
     const content = await getAdminContentSnapshot(identity.userId);
     return NextResponse.json(content);
   } catch (err) {
@@ -37,6 +42,7 @@ async function handleUpsert(req: NextRequest) {
   }
 
   try {
+    await assertAdminAal2Session(req);
     const body = await req.json();
     const kind = body?.kind;
 

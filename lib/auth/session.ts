@@ -12,6 +12,7 @@ import {
 } from '@/lib/db/schema';
 import {
   ActiveRestrictionDTO,
+  AuthorizationError,
   CapabilityCode,
   normalizeAdminRole,
   normalizeTeamRole,
@@ -30,8 +31,10 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 export interface SupabaseSessionIdentity {
   userId: string;
   email: string;
+  emailConfirmedAt: string | null;
   phone: string | null;
   userMetadata: Record<string, unknown>;
+  bearerJwt?: string;
 }
 
 // NS-ACC-002: Same-origin verification for state-changing authenticated requests
@@ -51,8 +54,9 @@ export function verifyMutationOrigin(req: NextRequest): boolean {
   }
 }
 
-// NS-ACC-002, NS-GOV-002 & NS-ACC-017: Live PostgreSQL re-evaluation of account_status, seller_status,
-// active seller_team_members.status, platform_admin_roles, and capability_restrictions on every request.
+// NS-ACC-002, NS-GOV-002, NS-ACC-017 & NS-AUT-005/007: Live PostgreSQL re-evaluation of account_status,
+// seller_status, active seller_team_members.status, platform_admin_roles, capability_restrictions,
+// last_reauthenticated_at, withdrawal_cooldown_until, and mfa_enabled on every request.
 export async function loadDbAuthContext(userId: string): Promise<UserAuthContext | null> {
   const db = getDb();
   if (!db) return null;
@@ -93,7 +97,6 @@ export async function loadDbAuthContext(userId: string): Promise<UserAuthContext
         createdAt: r.createdAt.toISOString(),
       }));
   } catch {
-    // Graceful safety if capability_restrictions table check hasn't been reached yet
     activeRestrictions = [];
   }
 
@@ -157,13 +160,16 @@ export async function loadDbAuthContext(userId: string): Promise<UserAuthContext
     userId: user.id,
     email: user.email,
     accountStatus: normalizeAccountStatus(user.accountStatus),
+    lastReauthenticatedAt: user.lastReauthenticatedAt ?? null,
+    withdrawalCooldownUntil: user.withdrawalCooldownUntil ?? null,
+    mfaEnabled: Boolean(user.mfaEnabled),
     activeRestrictions,
     seller: sellerCtx,
     adminRole: normalizeAdminRole(adminRows[0]?.adminRole),
   };
 }
 
-// NS-ACC-001: Server-side Supabase Auth session verification
+// NS-ACC-001 & NS-AUT-002: Server-side Supabase Auth session verification
 export async function extractSessionIdentityFromRequest(
   req?: NextRequest
 ): Promise<SupabaseSessionIdentity | null> {
@@ -191,7 +197,54 @@ export async function extractSessionIdentityFromRequest(
   return {
     userId: data.user.id,
     email: data.user.email,
+    emailConfirmedAt: data.user.email_confirmed_at ?? null,
     phone: data.user.phone?.trim() ? data.user.phone.trim() : null,
     userMetadata: (data.user.user_metadata as Record<string, unknown>) || {},
+    bearerJwt,
   };
+}
+
+// NS-AUT-006: Mandatory Admin TOTP MFA (aal2) assurance check
+export async function getAdminMfaAssurance(req?: NextRequest): Promise<{
+  currentLevel: 'aal1' | 'aal2' | null;
+  nextLevel: 'aal1' | 'aal2' | null;
+  hasVerifiedTotp: boolean;
+}> {
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) {
+    return { currentLevel: null, nextLevel: null, hasVerifiedTotp: false };
+  }
+
+  let bearerJwt: string | undefined;
+  if (req) {
+    const auth = req.headers.get('authorization');
+    if (auth?.startsWith('Bearer ')) {
+      bearerJwt = auth.slice(7).trim();
+    }
+  }
+
+  const [{ data: aalData }, { data: factorsData }] = await Promise.all([
+    supabase.auth.mfa.getAuthenticatorAssuranceLevel(bearerJwt),
+    supabase.auth.mfa.listFactors(),
+  ]);
+
+  const totpFactors = factorsData?.totp ?? [];
+  const hasVerifiedTotp = totpFactors.some((f) => f.status === 'verified');
+
+  return {
+    currentLevel: (aalData?.currentLevel as 'aal1' | 'aal2' | null) ?? null,
+    nextLevel: (aalData?.nextLevel as 'aal1' | 'aal2' | null) ?? null,
+    hasVerifiedTotp,
+  };
+}
+
+export async function assertAdminAal2Session(req?: NextRequest): Promise<void> {
+  const mfa = await getAdminMfaAssurance(req);
+  if (mfa.currentLevel !== 'aal2') {
+    throw new AuthorizationError(
+      'Administrator TOTP Two-Factor Authentication (aal2) is required before accessing Admin Console endpoints.',
+      403,
+      'ADMIN_MFA_REQUIRED'
+    );
+  }
 }

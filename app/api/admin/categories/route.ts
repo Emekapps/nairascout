@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ALL_PLATFORM_ADMIN_ROLES, AuthorizationError, assertAdminRole } from '@/lib/auth/rbac';
 import {
+  assertAdminAal2Session,
   extractSessionIdentityFromRequest,
   loadDbAuthContext,
   verifyMutationOrigin,
@@ -20,6 +21,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    await assertAdminAal2Session(req);
     const ctx = await loadDbAuthContext(identity.userId);
     assertAdminRole(ctx, ALL_PLATFORM_ADMIN_ROLES);
     const categories = await getListingCategories({ includeInactive: true });
@@ -43,6 +45,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    await assertAdminAal2Session(req);
     const body = await req.json();
     const category = await adminCreateListingCategory(identity.userId, {
       name: String(body?.name || ''),
@@ -76,6 +79,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   try {
+    await assertAdminAal2Session(req);
     const body = await req.json();
     const category = await adminUpdateListingCategory(identity.userId, {
       id: String(body?.id || ''),

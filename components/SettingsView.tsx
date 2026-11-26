@@ -8,12 +8,23 @@ import {
   ArrowLeft,
   Camera,
   CheckCircle2,
+  Clock,
+  KeyRound,
   Loader2,
   Lock,
+  LogOut,
+  Mail,
+  QrCode,
   ShieldCheck,
+  Smartphone,
   Trash2,
   User,
 } from 'lucide-react';
+import {
+  formatRemainingCooldown,
+  REAUTH_WINDOW_MS,
+} from '@/lib/auth/rbac';
+import { validatePasswordLocally } from '@/lib/auth/password-policy';
 import type {
   InvitationPolicy,
   ListingCategoryDTO,
@@ -31,12 +42,14 @@ import { UserAvatar } from './shared/UserAvatar';
 import { UserIdentityRow } from './shared/UserIdentityRow';
 import { ThemeToggle } from './layout/ThemeToggle';
 import { VerifiedSellerFab } from './seller/VerifiedSellerFab';
+import { PasswordStrengthInput } from './auth/PasswordStrengthInput';
+import { ReauthModal } from './auth/ReauthModal';
 
 interface SettingsViewProps {
   initialSnapshot: NairaScoutSnapshot;
 }
 
-type SettingsTab = 'profile' | 'privacy' | 'verification' | 'lifecycle';
+type SettingsTab = 'profile' | 'privacy' | 'security' | 'verification' | 'lifecycle';
 
 export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
   const router = useRouter();
@@ -83,6 +96,30 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
   } | null>(null);
   const [appealReason, setAppealReason] = useState('');
 
+  // Security & 2FA state (NS-AUT-004, NS-AUT-005, NS-AUT-006)
+  const [lastReauthOverride, setLastReauthOverride] = useState<string | null>(
+    scout?.lastReauthenticatedAt ?? null
+  );
+  const [reauthModal, setReauthModal] = useState<{
+    open: boolean;
+    actionLabel: string;
+    onConfirmed: () => Promise<void> | void;
+  }>({ open: false, actionLabel: '', onConfirmed: () => undefined });
+  const [newEmailInput, setNewEmailInput] = useState('');
+  const [pendingNewEmail, setPendingNewEmail] = useState<string | null>(null);
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [confirmNewPasswordInput, setConfirmNewPasswordInput] = useState('');
+  const [totpFactors, setTotpFactors] = useState<
+    Array<{ id: string; friendlyName?: string; status: string }>
+  >([]);
+  const [enrollingTotp, setEnrollingTotp] = useState<{
+    factorId: string;
+    qrCode: string;
+    secret: string;
+  } | null>(null);
+  const [totpVerifyCode, setTotpVerifyCode] = useState('');
+  const [mfaLoading, setMfaLoading] = useState(false);
+
   const [liveCategories, setLiveCategories] = useState<ListingCategoryDTO[]>(
     initialSnapshot.categories ?? []
   );
@@ -116,6 +153,55 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
       active = false;
     };
   }, []);
+
+  const refreshMfaFactors = async () => {
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return;
+    setMfaLoading(true);
+    try {
+      const [{ data: factorsData }, { data: userData }] = await Promise.all([
+        supabase.auth.mfa.listFactors(),
+        supabase.auth.getUser(),
+      ]);
+      const totps = (factorsData?.totp ?? []).map((f) => ({
+        id: f.id,
+        friendlyName: f.friendly_name,
+        status: f.status,
+      }));
+      setTotpFactors(totps);
+      const pending = (userData.user as { new_email?: string | null } | null)?.new_email;
+      if (pending) {
+        setPendingNewEmail(pending);
+      }
+    } finally {
+      setMfaLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab !== 'security') return;
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return;
+    let active = true;
+    Promise.all([supabase.auth.mfa.listFactors(), supabase.auth.getUser()])
+      .then(([{ data: factorsData }, { data: userData }]) => {
+        if (!active) return;
+        const totps = (factorsData?.totp ?? []).map((f) => ({
+          id: f.id,
+          friendlyName: f.friendly_name,
+          status: f.status,
+        }));
+        setTotpFactors(totps);
+        const pending = (userData.user as { new_email?: string | null } | null)?.new_email;
+        if (pending) {
+          setPendingNewEmail(pending);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [tab]);
 
   const availableCategoryNames = useMemo(() => {
     const activeNames =
@@ -165,6 +251,55 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
     );
   }
 
+  const hasFreshReauth = () => {
+    const stamp = lastReauthOverride || scout.lastReauthenticatedAt;
+    if (!stamp) return false;
+    const ms = new Date(stamp).getTime();
+    return !Number.isNaN(ms) && Date.now() - ms <= REAUTH_WINDOW_MS;
+  };
+
+  const requireFreshReauth = (actionLabel: string, fn: () => Promise<void> | void) => {
+    if (hasFreshReauth()) {
+      void fn();
+      return;
+    }
+    setReauthModal({
+      open: true,
+      actionLabel,
+      onConfirmed: fn,
+    });
+  };
+
+  const postSecurityEvent = async (
+    action:
+      | 'PASSWORD_CHANGED'
+      | 'OTHER_SESSIONS_REVOKED'
+      | 'EMAIL_CHANGE_REQUESTED'
+      | 'MFA_ENABLED'
+      | 'MFA_DISABLED',
+    details?: Record<string, unknown>
+  ) => {
+    const supabase = createSupabaseBrowserClient();
+    const { data: sessionData } = supabase
+      ? await supabase.auth.getSession()
+      : { data: { session: null } };
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-Requested-With': 'NairaScout',
+    };
+    if (sessionData.session?.access_token) {
+      headers.Authorization = `Bearer ${sessionData.session.access_token}`;
+    }
+    const res = await fetch('/api/auth/security-event', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ action, details }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data?.snapshot) setSnapshot(data.snapshot);
+    return { ok: res.ok, data };
+  };
+
   const patchSettings = async (body: Record<string, unknown>, okMessage: string) => {
     setBusy(true);
     setFeedback(null);
@@ -179,6 +314,15 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
       });
       const data = await res.json();
       if (!res.ok) {
+        if (data?.code === 'REAUTH_REQUIRED') {
+          setLastReauthOverride(null);
+          setReauthModal({
+            open: true,
+            actionLabel: 'updating your payout bank destination',
+            onConfirmed: () => patchSettings(body, okMessage),
+          });
+          return;
+        }
         setFeedback({ type: 'err', message: data.error || 'Could not save settings.' });
         return;
       }
@@ -422,6 +566,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
               [
                 { id: 'profile', label: 'Profile' },
                 { id: 'privacy', label: 'Privacy & Referrals' },
+                { id: 'security', label: 'Security & 2FA' },
                 { id: 'verification', label: 'Verification & Banking' },
                 { id: 'lifecycle', label: 'Account Lifecycle' },
               ] as { id: SettingsTab; label: string }[]
@@ -754,6 +899,452 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
           </div>
         )}
 
+        {tab === 'security' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <div className="lg:col-span-7 space-y-6">
+              {/* Email Address Change (NS-AUT-005) */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const targetEmail = newEmailInput.trim().toLowerCase();
+                  if (!targetEmail || !targetEmail.includes('@')) {
+                    setFeedback({ type: 'err', message: 'Enter a valid new email address.' });
+                    return;
+                  }
+                  requireFreshReauth('changing your registered email address', async () => {
+                    const supabase = createSupabaseBrowserClient();
+                    if (!supabase) {
+                      setFeedback({ type: 'err', message: 'Supabase Auth is not configured.' });
+                      return;
+                    }
+                    setBusy(true);
+                    setFeedback(null);
+                    try {
+                      const { error: updateErr } = await supabase.auth.updateUser({
+                        email: targetEmail,
+                      });
+                      if (updateErr) {
+                        setFeedback({ type: 'err', message: updateErr.message });
+                        return;
+                      }
+                      await postSecurityEvent('EMAIL_CHANGE_REQUESTED', {
+                        requestedEmail: targetEmail,
+                      });
+                      setPendingNewEmail(targetEmail);
+                      setNewEmailInput('');
+                      setFeedback({
+                        type: 'ok',
+                        message: `Verification link sent to ${targetEmail}. Pending verification of new email — your current email stays active until confirmed.`,
+                      });
+                    } finally {
+                      setBusy(false);
+                    }
+                  });
+                }}
+                className="bg-card border border-border rounded-2xl p-6 space-y-4"
+              >
+                <div className="flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-foreground" aria-hidden="true" />
+                  <h2 className="font-sans text-lg font-bold text-foreground">
+                    Email Address &amp; Verification
+                  </h2>
+                </div>
+
+                <div className="text-xs text-muted-foreground">
+                  Current verified email:{' '}
+                  <strong className="text-foreground">{scout.email}</strong>
+                </div>
+
+                {pendingNewEmail && (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-800 dark:text-amber-200">
+                    Pending verification of new email:{' '}
+                    <strong className="font-semibold">{pendingNewEmail}</strong>. Confirm the
+                    verification link sent to both addresses before signing in with the new email.
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="email"
+                    required
+                    value={newEmailInput}
+                    onChange={(e) => setNewEmailInput(e.target.value)}
+                    placeholder="new-email@example.com"
+                    className="flex-1 px-3.5 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
+                  />
+                  <button
+                    type="submit"
+                    disabled={busy}
+                    className="px-4 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-50 cursor-pointer shrink-0"
+                  >
+                    Request Email Change
+                  </button>
+                </div>
+              </form>
+
+              {/* Change Password (NS-AUT-001 & NS-AUT-005) */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (newPasswordInput !== confirmNewPasswordInput) {
+                    setFeedback({ type: 'err', message: 'New passwords do not match.' });
+                    return;
+                  }
+                  const local = validatePasswordLocally(newPasswordInput, {
+                    email: scout.email,
+                    username: scout.handle,
+                    displayName: scout.displayName,
+                  });
+                  if (!local.valid) {
+                    setFeedback({
+                      type: 'err',
+                      message:
+                        local.errors[0] || 'Password does not meet security requirements.',
+                    });
+                    return;
+                  }
+
+                  requireFreshReauth('changing your password', async () => {
+                    const supabase = createSupabaseBrowserClient();
+                    if (!supabase) return;
+                    setBusy(true);
+                    setFeedback(null);
+                    try {
+                      const pwRes = await fetch('/api/auth/password-check', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'X-Requested-With': 'NairaScout',
+                        },
+                        body: JSON.stringify({
+                          password: newPasswordInput,
+                          email: scout.email,
+                          username: scout.handle,
+                          displayName: scout.displayName,
+                        }),
+                      });
+                      const pwData = await pwRes.json();
+                      if (!pwRes.ok || !pwData.valid) {
+                        setFeedback({
+                          type: 'err',
+                          message:
+                            pwData?.errors?.[0] ||
+                            pwData?.error ||
+                            'Choose a stronger unique password.',
+                        });
+                        return;
+                      }
+
+                      const { error: updateErr } = await supabase.auth.updateUser({
+                        password: newPasswordInput,
+                      });
+                      if (updateErr) {
+                        setFeedback({ type: 'err', message: updateErr.message });
+                        return;
+                      }
+
+                      await supabase.auth.signOut({ scope: 'others' }).catch(() => undefined);
+                      await postSecurityEvent('PASSWORD_CHANGED', {
+                        scope: 'others_revoked',
+                      });
+                      setNewPasswordInput('');
+                      setConfirmNewPasswordInput('');
+                      setFeedback({
+                        type: 'ok',
+                        message:
+                          'Password updated and all other active sessions were signed out.',
+                      });
+                    } finally {
+                      setBusy(false);
+                    }
+                  });
+                }}
+                className="bg-card border border-border rounded-2xl p-6 space-y-4"
+              >
+                <div className="flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-foreground" aria-hidden="true" />
+                  <h2 className="font-sans text-lg font-bold text-foreground">Change Password</h2>
+                </div>
+
+                <PasswordStrengthInput
+                  id="settings-new-password"
+                  label="New Password (minimum 15 characters)"
+                  value={newPasswordInput}
+                  onChange={setNewPasswordInput}
+                  email={scout.email}
+                  username={scout.handle}
+                  displayName={scout.displayName}
+                />
+
+                <div>
+                  <label
+                    htmlFor="settings-confirm-password"
+                    className="block text-xs font-medium text-muted-foreground mb-1"
+                  >
+                    Confirm New Password
+                  </label>
+                  <input
+                    id="settings-confirm-password"
+                    type="password"
+                    required
+                    value={confirmNewPasswordInput}
+                    onChange={(e) => setConfirmNewPasswordInput(e.target.value)}
+                    placeholder="Re-enter your new password"
+                    className="w-full px-3.5 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="px-5 py-2.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
+                >
+                  {busy ? 'Updating...' : 'Update Password & Revoke Other Devices'}
+                </button>
+              </form>
+            </div>
+
+            <div className="lg:col-span-5 space-y-6">
+              {/* Two-Factor Authentication (TOTP) (NS-AUT-006) */}
+              <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Smartphone className="w-4 h-4 text-success" aria-hidden="true" />
+                    <h3 className="font-sans text-lg font-bold text-foreground">
+                      Two-Factor Authentication (TOTP)
+                    </h3>
+                  </div>
+                  <span
+                    className={`text-xs font-semibold ${
+                      totpFactors.some((f) => f.status === 'verified') || scout.mfaEnabled
+                        ? 'text-success'
+                        : 'text-muted-foreground'
+                    }`}
+                  >
+                    {totpFactors.some((f) => f.status === 'verified') || scout.mfaEnabled
+                      ? 'Enabled'
+                      : 'Not Enabled'}
+                  </span>
+                </div>
+
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Protect your NairaScout account with an Authenticator App (Google Authenticator,
+                  1Password, Authy). Mandatory for all Platform Administrators.
+                </p>
+
+                {mfaLoading ? (
+                  <p className="text-xs text-muted-foreground">Loading MFA factors...</p>
+                ) : enrollingTotp ? (
+                  <div className="space-y-3 p-4 rounded-xl bg-muted/40 border border-border">
+                    <p className="text-xs font-semibold text-foreground">
+                      Scan QR Code in Your Authenticator App
+                    </p>
+                    {(enrollingTotp.qrCode.startsWith('data:image/svg+xml') ||
+                      enrollingTotp.qrCode.startsWith('data:image/png')) && (
+                      <div className="bg-white p-3 rounded-xl inline-block border border-border">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={enrollingTotp.qrCode}
+                          alt="Authenticator TOTP QR Code"
+                          className="w-40 h-40"
+                        />
+                      </div>
+                    )}
+                    <div className="text-[11px] text-muted-foreground">
+                      Manual secret key:{' '}
+                      <code className="font-mono text-foreground select-all">
+                        {enrollingTotp.secret}
+                      </code>
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        maxLength={6}
+                        value={totpVerifyCode}
+                        onChange={(e) => setTotpVerifyCode(e.target.value)}
+                        placeholder="6-digit code"
+                        className="flex-1 px-3 py-2 font-numeric text-sm bg-background text-foreground border border-input rounded-xl"
+                      />
+                      <button
+                        type="button"
+                        disabled={busy || totpVerifyCode.trim().length < 6}
+                        onClick={async () => {
+                          const supabase = createSupabaseBrowserClient();
+                          if (!supabase || !enrollingTotp) return;
+                          setBusy(true);
+                          setFeedback(null);
+                          try {
+                            const { error: verifyErr } =
+                              await supabase.auth.mfa.challengeAndVerify({
+                                factorId: enrollingTotp.factorId,
+                                code: totpVerifyCode.trim(),
+                              });
+                            if (verifyErr) {
+                              setFeedback({ type: 'err', message: verifyErr.message });
+                              return;
+                            }
+                            await postSecurityEvent('MFA_ENABLED', {
+                              factorId: enrollingTotp.factorId,
+                            });
+                            setEnrollingTotp(null);
+                            setTotpVerifyCode('');
+                            await refreshMfaFactors();
+                            setFeedback({
+                              type: 'ok',
+                              message: 'TOTP Two-Factor Authentication enabled.',
+                            });
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                        className="px-4 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl disabled:opacity-50 cursor-pointer"
+                      >
+                        Verify
+                      </button>
+                    </div>
+                  </div>
+                ) : totpFactors.some((f) => f.status === 'verified') ? (
+                  <div className="space-y-3">
+                    {totpFactors
+                      .filter((f) => f.status === 'verified')
+                      .map((factor) => (
+                        <div
+                          key={factor.id}
+                          className="p-3 rounded-xl bg-muted/50 border border-border flex items-center justify-between gap-2 text-xs"
+                        >
+                          <div>
+                            <p className="font-semibold text-foreground">
+                              {factor.friendlyName || 'Authenticator App'}
+                            </p>
+                            <p className="text-[11px] text-success">Verified TOTP Factor</p>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() =>
+                              requireFreshReauth(
+                                'disabling Two-Factor Authentication',
+                                async () => {
+                                  const supabase = createSupabaseBrowserClient();
+                                  if (!supabase) return;
+                                  setBusy(true);
+                                  setFeedback(null);
+                                  try {
+                                    const { error: unenrollErr } =
+                                      await supabase.auth.mfa.unenroll({ factorId: factor.id });
+                                    if (unenrollErr) {
+                                      setFeedback({ type: 'err', message: unenrollErr.message });
+                                      return;
+                                    }
+                                    await postSecurityEvent('MFA_DISABLED', {
+                                      factorId: factor.id,
+                                    });
+                                    await refreshMfaFactors();
+                                    setFeedback({
+                                      type: 'ok',
+                                      message: 'Two-Factor Authentication disabled.',
+                                    });
+                                  } finally {
+                                    setBusy(false);
+                                  }
+                                }
+                              )
+                            }
+                            className="px-3 py-1.5 text-xs font-semibold text-destructive border border-destructive/30 rounded-lg hover:bg-destructive/10 cursor-pointer"
+                          >
+                            Disable 2FA
+                          </button>
+                        </div>
+                      ))}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={async () => {
+                      const supabase = createSupabaseBrowserClient();
+                      if (!supabase) {
+                        setFeedback({ type: 'err', message: 'Supabase Auth is not configured.' });
+                        return;
+                      }
+                      setBusy(true);
+                      setFeedback(null);
+                      try {
+                        const { data, error: enrollErr } = await supabase.auth.mfa.enroll({
+                          factorType: 'totp',
+                          friendlyName: 'NairaScout Authenticator',
+                        });
+                        if (enrollErr || !data) {
+                          setFeedback({
+                            type: 'err',
+                            message: enrollErr?.message || 'Could not start TOTP setup.',
+                          });
+                          return;
+                        }
+                        setEnrollingTotp({
+                          factorId: data.id,
+                          qrCode: data.totp.qr_code,
+                          secret: data.totp.secret,
+                        });
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
+                  >
+                    <QrCode className="w-3.5 h-3.5" aria-hidden="true" />
+                    Enable Authenticator App (TOTP)
+                  </button>
+                )}
+              </div>
+
+              {/* Active Sessions & Devices (NS-AUT-004) */}
+              <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
+                <div className="flex items-center gap-2">
+                  <LogOut className="w-4 h-4 text-foreground" aria-hidden="true" />
+                  <h3 className="font-sans text-lg font-bold text-foreground">
+                    Sessions &amp; Active Devices
+                  </h3>
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Sessions automatically expire after 30 minutes of inactivity or 7 days maximum
+                  lifetime. Sign out all other browsers or phones anytime.
+                </p>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={async () => {
+                    const supabase = createSupabaseBrowserClient();
+                    if (!supabase) return;
+                    setBusy(true);
+                    setFeedback(null);
+                    try {
+                      const { error: signOutErr } = await supabase.auth.signOut({
+                        scope: 'others',
+                      });
+                      if (signOutErr) {
+                        setFeedback({ type: 'err', message: signOutErr.message });
+                        return;
+                      }
+                      await postSecurityEvent('OTHER_SESSIONS_REVOKED');
+                      setFeedback({
+                        type: 'ok',
+                        message: 'Signed out of all other active devices.',
+                      });
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold border border-border rounded-xl bg-background text-foreground hover:bg-muted cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
+                  Sign out of all other devices
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {tab === 'verification' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             <div className="lg:col-span-7 bg-card border border-border rounded-2xl p-6 space-y-4">
@@ -919,34 +1510,64 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
-                let targetPath = `verification-docs/${scout.id}/${docName}`;
-                const supabase = createSupabaseBrowserClient();
-                if (docFile && supabase) {
-                  const objectKey = `${scout.id}/${Date.now()}-${docFile.name}`;
-                  const { error: uploadErr } = await supabase.storage
-                    .from('verification-docs')
-                    .upload(objectKey, docFile, { upsert: true });
-                  if (uploadErr) {
-                    setFeedback({ type: 'err', message: uploadErr.message });
+                const submitVerification = async () => {
+                  let targetPath = `verification-docs/${scout.id}/${docName}`;
+                  const supabase = createSupabaseBrowserClient();
+                  if (docFile && supabase) {
+                    const objectKey = `${scout.id}/${Date.now()}-${docFile.name}`;
+                    const { error: uploadErr } = await supabase.storage
+                      .from('verification-docs')
+                      .upload(objectKey, docFile, { upsert: true });
+                    if (uploadErr) {
+                      setFeedback({ type: 'err', message: uploadErr.message });
+                      return;
+                    }
+                    targetPath = `verification-docs/${objectKey}`;
+                  }
+                  await patchSettings(
+                    {
+                      section: 'verification',
+                      category: verifCat,
+                      evidencePaths: [targetPath],
+                      bankSummary: verifCat === 'PAYOUT_BANK' ? bankSummary : undefined,
+                    },
+                    `${verifCat} verification submitted for review.`
+                  );
+                };
+
+                if (verifCat === 'PAYOUT_BANK') {
+                  const cooldownRemaining = formatRemainingCooldown(
+                    scout.withdrawalCooldownUntil
+                  );
+                  if (cooldownRemaining) {
+                    setFeedback({
+                      type: 'err',
+                      message: `24-hour post-recovery financial cooling-off lock is active. Payout bank edits resume in ${cooldownRemaining}.`,
+                    });
                     return;
                   }
-                  targetPath = `verification-docs/${objectKey}`;
+                  requireFreshReauth('adding or updating your payout bank destination', submitVerification);
+                  return;
                 }
-                await patchSettings(
-                  {
-                    section: 'verification',
-                    category: verifCat,
-                    evidencePaths: [targetPath],
-                    bankSummary: verifCat === 'PAYOUT_BANK' ? bankSummary : undefined,
-                  },
-                  `${verifCat} verification submitted for review.`
-                );
+
+                await submitVerification();
               }}
               className="lg:col-span-5 bg-card border border-border rounded-2xl p-6 space-y-4 self-start"
             >
               <h3 className="font-sans text-lg font-bold text-foreground">
                 Submit Verification / Bank Details
               </h3>
+
+              {verifCat === 'PAYOUT_BANK' &&
+                formatRemainingCooldown(scout.withdrawalCooldownUntil) && (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2">
+                    <Clock className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+                    <span>
+                      24-hour cooling-off lock active after account recovery. Payout bank edits
+                      resume in {formatRemainingCooldown(scout.withdrawalCooldownUntil)}.
+                    </span>
+                  </div>
+                )}
 
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">
@@ -955,7 +1576,7 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
                 <select
                   value={verifCat}
                   onChange={(e) => setVerifCat(e.target.value as VerificationCategory)}
-                  className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
+                  className="appearance-none w-full px-3.5 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
                 >
                   <option value="IDENTITY">IDENTITY (NIN / Passport / Driver&apos;s License)</option>
                   <option value="PAYOUT_BANK">PAYOUT_BANK (Nigerian Naira Settlement Account)</option>
@@ -1004,8 +1625,12 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
 
               <button
                 type="submit"
-                disabled={busy}
-                className="w-full py-2.5 px-4 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
+                disabled={
+                  busy ||
+                  (verifCat === 'PAYOUT_BANK' &&
+                    Boolean(formatRemainingCooldown(scout.withdrawalCooldownUntil)))
+                }
+                className="w-full py-2.5 px-4 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
               >
                 {busy ? 'Submitting...' : 'Submit for Officer Review'}
               </button>
@@ -1129,6 +1754,20 @@ export default function SettingsView({ initialSnapshot }: SettingsViewProps) {
           </div>
         )}
       </main>
+
+      <ReauthModal
+        open={reauthModal.open}
+        email={scout.email}
+        actionLabel={reauthModal.actionLabel}
+        onClose={() => setReauthModal((prev) => ({ ...prev, open: false }))}
+        onSuccess={({ lastReauthenticatedAt, snapshot: updatedSnapshot }) => {
+          if (lastReauthenticatedAt) setLastReauthOverride(lastReauthenticatedAt);
+          if (updatedSnapshot) setSnapshot(updatedSnapshot);
+          const callback = reauthModal.onConfirmed;
+          setReauthModal({ open: false, actionLabel: '', onConfirmed: () => undefined });
+          void callback();
+        }}
+      />
 
       <VerifiedSellerFab
         authenticated={snapshot.authenticated}

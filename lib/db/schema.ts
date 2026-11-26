@@ -144,6 +144,12 @@ export const users = pgTable('users', {
   accountStatus: accountStatusEnum('account_status').default('ACTIVE').notNull(),
   restrictionReason: text('restriction_reason'),
   closedAt: timestamp('closed_at', { withTimezone: true }),
+  termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
+  privacyAcknowledgedAt: timestamp('privacy_acknowledged_at', { withTimezone: true }),
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+  lastReauthenticatedAt: timestamp('last_reauthenticated_at', { withTimezone: true }),
+  withdrawalCooldownUntil: timestamp('withdrawal_cooldown_until', { withTimezone: true }),
+  mfaEnabled: boolean('mfa_enabled').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -507,4 +513,50 @@ export const helpArticles = pgTable('help_articles', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+// ============================================================================
+// 8. ACCOUNT RECOVERY & NDPA DATA RETENTION SCHEDULE (NS-AUT-007, NS-AUT-008)
+// ============================================================================
+
+// NS-AUT-007: Support-assisted email-loss recovery requests with dual-officer approval
+export const accountRecoveryRequests = pgTable(
+  'account_recovery_requests',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    targetUserId: uuid('target_user_id').references(() => users.id, { onDelete: 'set null' }),
+    claimedEmail: text('claimed_email').notNull(),
+    claimedUsername: text('claimed_username'),
+    contactEmailForUpdates: text('contact_email_for_updates').notNull(),
+    reason: text('reason').notNull(),
+    evidencePaths: jsonb('evidence_paths').$type<string[]>().default([]).notNull(),
+    status: text('status').default('SUBMITTED').notNull(), // 'SUBMITTED' | 'UNDER_REVIEW' | 'RECOMMENDED_APPROVAL' | 'APPROVED' | 'REJECTED'
+    reviewedBy: uuid('reviewed_by').references(() => users.id, { onDelete: 'set null' }),
+    reviewerNotes: text('reviewer_notes'),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    approvedBy: uuid('approved_by').references(() => users.id, { onDelete: 'set null' }),
+    approvalNotes: text('approval_notes'),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    check(
+      'account_recovery_distinct_officers',
+      sql`${table.approvedBy} IS NULL OR ${table.reviewedBy} IS NULL OR ${table.approvedBy} <> ${table.reviewedBy}`
+    ),
+  ]
+);
+
+// NS-AUT-008: NDPA Data Retention Schedule
+export const dataRetentionSchedule = pgTable('data_retention_schedule', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tableName: text('table_name').notNull().unique(),
+  retentionDays: integer('retention_days').notNull(),
+  legalBasis: text('legal_basis').notNull(),
+  purgeAction: text('purge_action').notNull(), // 'ARCHIVE' | 'ANONYMIZE' | 'DELETE' | 'RETAIN_PERMANENT'
+  lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 

@@ -1,5 +1,8 @@
 import { cookies } from 'next/headers';
-import { extractSessionIdentityFromRequest } from '@/lib/auth/session';
+import {
+  extractSessionIdentityFromRequest,
+  getAdminMfaAssurance,
+} from '@/lib/auth/session';
 import { formatPostgresError, isPostgresConfigured } from '@/lib/db';
 import {
   ensureUserProvisionedInDb,
@@ -8,6 +11,7 @@ import {
 } from '@/lib/nairascout-store';
 import AdminConsoleView, { AdminSection } from '@/components/AdminConsoleView';
 
+// NS-AUT-006: Mandatory Admin TOTP MFA (aal2) gate on all /admin/* routes
 export async function renderAdminPage(section: AdminSection) {
   const cookieStore = await cookies();
   const identity = await extractSessionIdentityFromRequest();
@@ -26,11 +30,20 @@ export async function renderAdminPage(section: AdminSection) {
   const snapshot = await getNairaScoutSnapshot(identity?.userId ?? null);
 
   let initialAdminData = null;
+  let mfaRequired = false;
+  let mfaHasFactor = false;
+
   if (identity && snapshot.activeScout?.adminRole) {
-    try {
-      initialAdminData = await getAdminConsoleSnapshot(identity.userId);
-    } catch {
-      initialAdminData = null;
+    const mfa = await getAdminMfaAssurance();
+    if (mfa.currentLevel !== 'aal2') {
+      mfaRequired = true;
+      mfaHasFactor = mfa.hasVerifiedTotp;
+    } else {
+      try {
+        initialAdminData = await getAdminConsoleSnapshot(identity.userId);
+      } catch {
+        initialAdminData = null;
+      }
     }
   }
 
@@ -39,6 +52,8 @@ export async function renderAdminPage(section: AdminSection) {
       initialSection={section}
       authenticated={snapshot.authenticated}
       initialAdminData={initialAdminData}
+      mfaRequired={mfaRequired}
+      mfaHasFactor={mfaHasFactor}
     />
   );
 }

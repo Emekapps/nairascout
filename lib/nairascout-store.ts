@@ -26,6 +26,7 @@ import {
   SubscriptionStatus,
   UserAuthContext,
   VerificationStatus,
+  WITHDRAWAL_COOLDOWN_HOURS,
   assertAccountOperational,
   assertActiveAccount,
   assertAdminRole,
@@ -36,8 +37,11 @@ import {
   assertCanReviewVerification,
   assertCapabilityNotRestricted,
   assertIndependentAppealsOfficer,
+  assertIndependentRecoveryOfficers,
   assertMakerCheckerDistinct,
+  assertRecentReauthentication,
   assertReferralBatchValid,
+  assertWithdrawalNotInCooldown,
   normalizeAdminRole,
   normalizeTeamRole,
   toPublicScoutProfileDTO,
@@ -54,8 +58,10 @@ import { loadDbAuthContext, SupabaseSessionIdentity } from './auth/session';
 import { formatPostgresError, getDb, isPostgresConfigured, NairaScoutDb, requireDb } from './db';
 import {
   abuseReports,
+  accountRecoveryRequests,
   auditLogs,
   capabilityRestrictions,
+  dataRetentionSchedule,
   governanceAppeals,
   helpArticles,
   listingCategories,
@@ -110,7 +116,7 @@ import {
   planEnumToId,
   planIdToEnum,
 } from './seller-plans';
-import { isSupabaseConfigured } from './supabase/server';
+import { createSupabaseAdminClient, isSupabaseConfigured } from './supabase/server';
 
 export { SELLER_PLANS, planEnumToId, planIdToEnum };
 export type { SellerPlanId, SellerPlanSpec };
@@ -446,6 +452,12 @@ export interface ActiveScoutDTO {
   preferredCategories: string[];
   accountStatus: AccountStatus;
   restrictionReason: string | null;
+  termsAcceptedAt?: string | null;
+  privacyAcknowledgedAt?: string | null;
+  emailVerifiedAt?: string | null;
+  lastReauthenticatedAt?: string | null;
+  withdrawalCooldownUntil?: string | null;
+  mfaEnabled: boolean;
   invitePolicy: InvitationPolicy;
   muteReferrals: boolean;
   profileVisibility: 'PUBLIC' | 'NETWORK_ONLY';
@@ -468,6 +480,27 @@ export interface ActiveScoutDTO {
   activeRestrictions: ActiveRestrictionDTO[];
   governanceAppeals: GovernanceAppealDTO[];
   closureAssessment: ClosureAssessmentDTO;
+}
+
+export interface AccountRecoveryRequestDTO {
+  id: string;
+  targetUserId: string | null;
+  targetHandle: string | null;
+  claimedEmail: string;
+  claimedUsername: string | null;
+  contactEmailForUpdates: string;
+  reason: string;
+  evidencePaths: string[];
+  status: 'SUBMITTED' | 'UNDER_REVIEW' | 'RECOMMENDED_APPROVAL' | 'APPROVED' | 'REJECTED';
+  reviewedBy: string | null;
+  reviewedByHandle: string | null;
+  reviewerNotes: string | null;
+  reviewedAt: string | null;
+  approvedBy: string | null;
+  approvedByHandle: string | null;
+  approvalNotes: string | null;
+  approvedAt: string | null;
+  createdAt: string;
 }
 
 export interface NigerianStateDTO {
@@ -781,7 +814,7 @@ async function computeDownstreamFromDb(
 // ATOMIC SIGNUP / FIRST-LOGIN PROVISIONING (DRIZZLE POSTGRES TRANSACTION)
 // ============================================================================
 
-// NS-ACC-001, NS-ACC-017 & NS-REF-001: Idempotent unified PostgreSQL user provisioning + CLOSED non-reactivation guard
+// NS-ACC-001, NS-ACC-017, NS-AUT-002 & NS-REF-001: Idempotent unified PostgreSQL user provisioning + PENDING_ACTIVATION & CLOSED guards
 export async function ensureUserProvisionedInDb(
   identity: SupabaseSessionIdentity,
   input?: {
@@ -790,16 +823,26 @@ export async function ensureUserProvisionedInDb(
     locationState?: string;
     referralEventId?: string | null;
     referralScoutUsername?: string | null;
+    termsAccepted?: boolean;
+    termsAcceptedAt?: string;
+    privacyAcknowledgedAt?: string;
   }
-): Promise<{ createdNew: boolean; userId: string }> {
+): Promise<{ createdNew: boolean; userId: string; accountStatus: AccountStatus }> {
   const db = requireDb();
   await ensureTablesReady(db);
 
   const normalizedEmail = identity.email.trim().toLowerCase();
+  const isEmailConfirmed = Boolean(identity.emailConfirmedAt);
+  const confirmedAtDate = identity.emailConfirmedAt ? new Date(identity.emailConfirmedAt) : null;
 
   const [existingUser, existingByEmail, existingProfile, existingAncestry] = await Promise.all([
     db
-      .select({ id: users.id, accountStatus: users.accountStatus })
+      .select({
+        id: users.id,
+        accountStatus: users.accountStatus,
+        emailVerifiedAt: users.emailVerifiedAt,
+        termsAcceptedAt: users.termsAcceptedAt,
+      })
       .from(users)
       .where(eq(users.id, identity.userId))
       .limit(1),
@@ -833,12 +876,56 @@ export async function ensureUserProvisionedInDb(
     }
   }
 
+  // NS-AUT-002: Promote PENDING_ACTIVATION -> ACTIVE once email is confirmed in Supabase Auth
   if (existingUser.length > 0 && existingProfile.length > 0 && existingAncestry.length > 0) {
-    return { createdNew: false, userId: identity.userId };
+    const existingStatus = normalizeAccountStatus(existingUser[0].accountStatus);
+    if (existingStatus === 'PENDING_ACTIVATION' && isEmailConfirmed) {
+      const now = new Date();
+      await db.transaction(async (tx) => {
+        await tx
+          .update(users)
+          .set({
+            accountStatus: 'ACTIVE',
+            emailVerifiedAt: confirmedAtDate ?? now,
+            updatedAt: now,
+          })
+          .where(eq(users.id, identity.userId));
+        await tx.insert(auditLogs).values({
+          actorId: identity.userId,
+          affectedUserId: identity.userId,
+          action: 'ACCOUNT_ACTIVATED',
+          entityType: 'users',
+          entityId: identity.userId,
+          previousValue: { accountStatus: 'PENDING_ACTIVATION' },
+          newValue: { accountStatus: 'ACTIVE', emailVerifiedAt: (confirmedAtDate ?? now).toISOString() },
+          reason: 'Email address verified via Supabase Auth OTP/link',
+        });
+      });
+      return { createdNew: false, userId: identity.userId, accountStatus: 'ACTIVE' };
+    }
+    return { createdNew: false, userId: identity.userId, accountStatus: existingStatus };
   }
 
   const normalizedPhone = identity.phone?.trim() ? identity.phone.trim() : null;
   const meta = identity.userMetadata || {};
+  const parseConsentDate = (raw: unknown): Date | null => {
+    if (typeof raw === 'string' && raw.trim()) {
+      const parsed = new Date(raw);
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    return null;
+  };
+  const nowConsent = new Date();
+  const termsAcceptedAt =
+    parseConsentDate(input?.termsAcceptedAt) ??
+    parseConsentDate(meta.terms_accepted_at) ??
+    (input?.termsAccepted ? nowConsent : null);
+  const privacyAcknowledgedAt =
+    parseConsentDate(input?.privacyAcknowledgedAt) ??
+    parseConsentDate(meta.privacy_acknowledged_at) ??
+    (input?.termsAccepted ? nowConsent : null);
+  const initialStatus: AccountStatus = isEmailConfirmed ? 'ACTIVE' : 'PENDING_ACTIVATION';
+
   const rawDisplayName =
     input?.displayName?.trim() ||
     (typeof meta.display_name === 'string' && meta.display_name.trim()) ||
@@ -878,7 +965,10 @@ export async function ensureUserProvisionedInDb(
             id: identity.userId,
             email: normalizedEmail,
             phone: normalizedPhone,
-            accountStatus: 'ACTIVE',
+            accountStatus: initialStatus,
+            termsAcceptedAt,
+            privacyAcknowledgedAt,
+            emailVerifiedAt: isEmailConfirmed ? confirmedAtDate ?? nowConsent : null,
           })
           .onConflictDoNothing();
 
@@ -895,7 +985,10 @@ export async function ensureUserProvisionedInDb(
               id: identity.userId,
               email: normalizedEmail,
               phone: null,
-              accountStatus: 'ACTIVE',
+              accountStatus: initialStatus,
+              termsAcceptedAt,
+              privacyAcknowledgedAt,
+              emailVerifiedAt: isEmailConfirmed ? confirmedAtDate ?? nowConsent : null,
             })
             .onConflictDoNothing();
 
@@ -1113,7 +1206,7 @@ export async function ensureUserProvisionedInDb(
       return anyCreated;
     });
 
-    return { createdNew: created, userId: identity.userId };
+    return { createdNew: created, userId: identity.userId, accountStatus: initialStatus };
   } catch (err) {
     const formatted = formatPostgresError(err);
     console.error('[ensureUserProvisionedInDb] Transaction failed:', formatted, err);
@@ -1621,6 +1714,12 @@ export async function getNairaScoutSnapshot(
     preferredCategories: viewerScout.preferredCategories,
     accountStatus: normalizeAccountStatus(viewerUser.accountStatus),
     restrictionReason: viewerUser.restrictionReason,
+    termsAcceptedAt: viewerUser.termsAcceptedAt?.toISOString() ?? null,
+    privacyAcknowledgedAt: viewerUser.privacyAcknowledgedAt?.toISOString() ?? null,
+    emailVerifiedAt: viewerUser.emailVerifiedAt?.toISOString() ?? null,
+    lastReauthenticatedAt: viewerUser.lastReauthenticatedAt?.toISOString() ?? null,
+    withdrawalCooldownUntil: viewerUser.withdrawalCooldownUntil?.toISOString() ?? null,
+    mfaEnabled: Boolean(viewerUser.mfaEnabled),
     invitePolicy: viewerScout.invitationPolicy as InvitationPolicy,
     muteReferrals: viewerScout.muteReferrals,
     profileVisibility: (viewerScout.profileVisibility === 'NETWORK_ONLY'
@@ -3533,6 +3632,13 @@ export async function submitVerificationEvidence(
   const ctx = await loadDbAuthContext(actorUserId);
   assertAccountOperational(ctx);
 
+  if (input.category === 'PAYOUT_BANK') {
+    // NS-AUT-007: Block payout bank destination updates during 24-hour post-recovery cooling-off lock
+    assertWithdrawalNotInCooldown(ctx);
+    // NS-AUT-005: Require fresh reauthentication within 10 minutes before adding/editing payout bank destination
+    assertRecentReauthentication(ctx);
+  }
+
   const sellerId =
     input.category === 'SELLER' || input.category === 'BUSINESS'
       ? ctx.seller?.sellerProfileId ?? null
@@ -3983,6 +4089,7 @@ export async function getAdminConsoleSnapshot(actorUserId: string) {
   let allRestrictions: Array<typeof capabilityRestrictions.$inferSelect> = [];
   let allMakerChecker: Array<typeof makerCheckerRequests.$inferSelect> = [];
   let allAppeals: Array<typeof governanceAppeals.$inferSelect> = [];
+  let allRecoveries: Array<typeof accountRecoveryRequests.$inferSelect> = [];
 
   try {
     allRestrictions = await db
@@ -3997,8 +4104,12 @@ export async function getAdminConsoleSnapshot(actorUserId: string) {
       .select()
       .from(governanceAppeals)
       .orderBy(desc(governanceAppeals.createdAt));
+    allRecoveries = await db
+      .select()
+      .from(accountRecoveryRequests)
+      .orderBy(desc(accountRecoveryRequests.createdAt));
   } catch {
-    // Graceful if Section 9 tables unavailable in test env
+    // Graceful if Section 9 or Module 4 tables unavailable in test env
   }
 
   const userMap = new Map(allUsers.map((u) => [u.id, u]));
@@ -4151,6 +4262,32 @@ export async function getAdminConsoleSnapshot(actorUserId: string) {
     helpArticles:
       ctx!.adminRole === 'SUPER_ADMIN' || ctx!.adminRole === 'PLATFORM_ADMIN'
         ? await getAllHelpArticlesForAdmin(db)
+        : [],
+    recoveryRequests:
+      ctx!.adminRole === 'SUPER_ADMIN' ||
+      ctx!.adminRole === 'SUPPORT_OFFICER' ||
+      ctx!.adminRole === 'TRUST_AND_SAFETY' ||
+      ctx!.adminRole === 'ANALYST_VIEWER'
+        ? allRecoveries.map((r) => ({
+            id: r.id,
+            targetUserId: r.targetUserId ?? null,
+            targetHandle: r.targetUserId ? scoutMap.get(r.targetUserId)?.username || null : null,
+            claimedEmail: r.claimedEmail,
+            claimedUsername: r.claimedUsername ?? null,
+            contactEmailForUpdates: r.contactEmailForUpdates,
+            reason: r.reason,
+            evidencePaths: r.evidencePaths,
+            status: r.status as AccountRecoveryRequestDTO['status'],
+            reviewedBy: r.reviewedBy ?? null,
+            reviewedByHandle: r.reviewedBy ? scoutMap.get(r.reviewedBy)?.username || 'officer' : null,
+            reviewerNotes: r.reviewerNotes ?? null,
+            reviewedAt: r.reviewedAt?.toISOString() ?? null,
+            approvedBy: r.approvedBy ?? null,
+            approvedByHandle: r.approvedBy ? scoutMap.get(r.approvedBy)?.username || 'officer' : null,
+            approvalNotes: r.approvalNotes ?? null,
+            approvedAt: r.approvedAt?.toISOString() ?? null,
+            createdAt: r.createdAt.toISOString(),
+          }))
         : [],
   };
 }
@@ -6153,6 +6290,477 @@ export async function adminUpsertHelpArticle(
 
     return mapHelpArticleRow(created);
   });
+}
+
+// ============================================================================
+// MODULE 4 SECURITY EVENTS, REAUTHENTICATION & ACCOUNT RECOVERY (NS-AUT-003..007)
+// ============================================================================
+
+// NS-AUT-005: Record fresh reauthentication timestamp (last_reauthenticated_at)
+export async function recordUserReauthentication(
+  actorUserId: string,
+  method: 'PASSWORD' | 'EMAIL_OTP'
+): Promise<{ lastReauthenticatedAt: string }> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAccountOperational(ctx);
+
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    await tx
+      .update(users)
+      .set({
+        lastReauthenticatedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(users.id, actorUserId));
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: actorUserId,
+      action: 'SENSITIVE_ACTION_REAUTHENTICATED',
+      entityType: 'users',
+      entityId: actorUserId,
+      newValue: { method, lastReauthenticatedAt: now.toISOString() },
+      reason: `Fresh identity confirmation completed via ${method}`,
+    });
+  });
+
+  return { lastReauthenticatedAt: now.toISOString() };
+}
+
+export type SecurityEventAction =
+  | 'PASSWORD_RESET_COMPLETED'
+  | 'PASSWORD_CHANGED'
+  | 'OTHER_SESSIONS_REVOKED'
+  | 'EMAIL_CHANGE_REQUESTED'
+  | 'MFA_ENABLED'
+  | 'MFA_DISABLED';
+
+// NS-AUT-003, NS-AUT-004, NS-AUT-005 & NS-AUT-006: Audited security lifecycle events
+export async function recordSecurityEventForActor(
+  actorUserId: string,
+  action: SecurityEventAction,
+  details?: Record<string, unknown>
+): Promise<{ ok: true }> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAccountOperational(ctx);
+
+  if (
+    action === 'PASSWORD_CHANGED' ||
+    action === 'EMAIL_CHANGE_REQUESTED' ||
+    action === 'MFA_DISABLED'
+  ) {
+    assertRecentReauthentication(ctx);
+  }
+
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    if (action === 'MFA_ENABLED') {
+      await tx
+        .update(users)
+        .set({ mfaEnabled: true, updatedAt: now })
+        .where(eq(users.id, actorUserId));
+    } else if (action === 'MFA_DISABLED') {
+      await tx
+        .update(users)
+        .set({ mfaEnabled: false, updatedAt: now })
+        .where(eq(users.id, actorUserId));
+    } else if (action === 'PASSWORD_RESET_COMPLETED' || action === 'PASSWORD_CHANGED') {
+      await tx
+        .update(users)
+        .set({ lastReauthenticatedAt: now, updatedAt: now })
+        .where(eq(users.id, actorUserId));
+    }
+
+    const notificationCopy: Record<SecurityEventAction, { title: string; body: string }> = {
+      PASSWORD_RESET_COMPLETED: {
+        title: 'Password Reset Completed',
+        body: 'Your account password was reset and all other active sessions were signed out.',
+      },
+      PASSWORD_CHANGED: {
+        title: 'Password Changed',
+        body: 'Your account password was updated and all other active devices were signed out.',
+      },
+      OTHER_SESSIONS_REVOKED: {
+        title: 'Other Devices Signed Out',
+        body: 'All other active sessions on your NairaScout account were signed out.',
+      },
+      EMAIL_CHANGE_REQUESTED: {
+        title: 'Email Change Requested',
+        body: 'A new email verification request was initiated. Your primary email stays unchanged until confirmed.',
+      },
+      MFA_ENABLED: {
+        title: 'Two-Factor Authentication Enabled',
+        body: 'TOTP Authenticator 2FA is now active on your NairaScout account.',
+      },
+      MFA_DISABLED: {
+        title: 'Two-Factor Authentication Disabled',
+        body: 'TOTP Authenticator 2FA was disabled on your NairaScout account.',
+      },
+    };
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: actorUserId,
+      action,
+      entityType: 'users',
+      entityId: actorUserId,
+      newValue: details ?? {},
+      reason: notificationCopy[action].body,
+    });
+
+    await tx.insert(notifications).values({
+      userId: actorUserId,
+      category: 'SECURITY',
+      title: notificationCopy[action].title,
+      body: notificationCopy[action].body,
+      actionUrl: '/settings',
+      isRead: false,
+    });
+  });
+
+  return { ok: true };
+}
+
+// NS-AUT-007: Public submission of lost-email account recovery request (anti-enumeration safe)
+export async function submitAccountRecoveryRequest(input: {
+  claimedEmail: string;
+  claimedUsername?: string | null;
+  contactEmailForUpdates: string;
+  reason: string;
+  evidencePaths: string[];
+}): Promise<{ id: string; status: 'SUBMITTED' }> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const claimedEmail = input.claimedEmail.trim().toLowerCase();
+  const claimedUsername = input.claimedUsername?.trim().toLowerCase() || null;
+  const contactEmail = input.contactEmailForUpdates.trim().toLowerCase();
+  const reason = input.reason.trim();
+
+  if (!claimedEmail || !contactEmail || reason.length < 15) {
+    throw new AuthorizationError(
+      'Claimed email, reachable contact email, and a detailed reason (minimum 15 chars) are required.',
+      400,
+      'INVALID_RECOVERY_PAYLOAD'
+    );
+  }
+  if (input.evidencePaths.length === 0) {
+    throw new AuthorizationError(
+      'Upload government ID or ownership evidence before submitting an account recovery request.',
+      400,
+      'EVIDENCE_REQUIRED'
+    );
+  }
+
+  let matchedUserId: string | null = null;
+  const byEmail = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.email, claimedEmail))
+    .limit(1);
+  if (byEmail[0]) {
+    matchedUserId = byEmail[0].id;
+  } else if (claimedUsername) {
+    const byHandle = await db
+      .select({ userId: scoutProfiles.userId })
+      .from(scoutProfiles)
+      .where(eq(scoutProfiles.username, claimedUsername))
+      .limit(1);
+    if (byHandle[0]) {
+      matchedUserId = byHandle[0].userId;
+    }
+  }
+
+  const [created] = await db
+    .insert(accountRecoveryRequests)
+    .values({
+      targetUserId: matchedUserId,
+      claimedEmail,
+      claimedUsername,
+      contactEmailForUpdates: contactEmail,
+      reason,
+      evidencePaths: input.evidencePaths,
+      status: 'SUBMITTED',
+    })
+    .returning();
+
+  return { id: created.id, status: 'SUBMITTED' };
+}
+
+// NS-AUT-007: Stage 1 Support/Trust Officer review & recommendation
+export async function adminReviewRecoveryRequest(
+  actorUserId: string,
+  input: {
+    requestId: string;
+    decision: 'UNDER_REVIEW' | 'RECOMMENDED_APPROVAL' | 'REJECTED';
+    reviewerNotes: string;
+  }
+) {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAdminRole(ctx, ['SUPPORT_OFFICER', 'TRUST_AND_SAFETY']);
+
+  if (!isUuid(input.requestId)) {
+    throw new AuthorizationError('Invalid recovery request ID.', 400, 'INVALID_RECOVERY_ID');
+  }
+  const notes = input.reviewerNotes.trim();
+  if (notes.length < 5 && input.decision !== 'UNDER_REVIEW') {
+    throw new AuthorizationError(
+      'Documented reviewer notes are required before recommending approval or rejecting.',
+      400,
+      'REVIEWER_NOTES_REQUIRED'
+    );
+  }
+
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .select()
+      .from(accountRecoveryRequests)
+      .where(eq(accountRecoveryRequests.id, input.requestId))
+      .limit(1);
+    const current = rows[0];
+    if (!current) {
+      throw new AuthorizationError('Recovery request not found.', 404, 'RECOVERY_NOT_FOUND');
+    }
+    if (current.status === 'APPROVED' || current.status === 'REJECTED') {
+      throw new AuthorizationError(
+        `Recovery request is already ${current.status}.`,
+        409,
+        'RECOVERY_ALREADY_DECIDED'
+      );
+    }
+
+    const now = new Date();
+    const [updated] = await tx
+      .update(accountRecoveryRequests)
+      .set({
+        status: input.decision,
+        reviewedBy: actorUserId,
+        reviewerNotes: notes || 'Review claimed by support officer',
+        reviewedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(accountRecoveryRequests.id, current.id))
+      .returning();
+
+    if (current.targetUserId) {
+      await tx.insert(auditLogs).values({
+        actorId: actorUserId,
+        affectedUserId: current.targetUserId,
+        action: `ACCOUNT_RECOVERY_${input.decision}`,
+        entityType: 'account_recovery_requests',
+        entityId: current.id,
+        previousValue: { status: current.status },
+        newValue: { status: input.decision, claimedEmail: current.claimedEmail },
+        reason: notes || 'Recovery request review updated',
+      });
+    }
+
+    return updated;
+  });
+}
+
+// NS-AUT-007: Stage 2 Distinct Officer Approval -> Email Update, Session Revocation & 24-Hour Cooling-Off Lock
+export async function adminApproveRecoveryRequest(
+  actorUserId: string,
+  input: {
+    requestId: string;
+    approvalNotes: string;
+  }
+) {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAdminRole(ctx, ['SUPPORT_OFFICER', 'TRUST_AND_SAFETY']);
+
+  if (!isUuid(input.requestId)) {
+    throw new AuthorizationError('Invalid recovery request ID.', 400, 'INVALID_RECOVERY_ID');
+  }
+  const approvalNotes = input.approvalNotes.trim();
+  if (approvalNotes.length < 5) {
+    throw new AuthorizationError(
+      'Documented approval justification (minimum 5 chars) is required.',
+      400,
+      'APPROVAL_NOTES_REQUIRED'
+    );
+  }
+
+  const reqRows = await db
+    .select()
+    .from(accountRecoveryRequests)
+    .where(eq(accountRecoveryRequests.id, input.requestId))
+    .limit(1);
+  const current = reqRows[0];
+  if (!current) {
+    throw new AuthorizationError('Recovery request not found.', 404, 'RECOVERY_NOT_FOUND');
+  }
+  if (current.status === 'APPROVED' || current.status === 'REJECTED') {
+    throw new AuthorizationError(
+      `Recovery request is already ${current.status}.`,
+      409,
+      'RECOVERY_ALREADY_DECIDED'
+    );
+  }
+  if (current.status !== 'RECOMMENDED_APPROVAL') {
+    throw new AuthorizationError(
+      'Recovery request must first be recommended for approval by a reviewing officer.',
+      409,
+      'RECOVERY_REVIEW_REQUIRED'
+    );
+  }
+
+  assertIndependentRecoveryOfficers(current.reviewedBy, actorUserId);
+
+  let targetUserId = current.targetUserId;
+  if (!targetUserId) {
+    const byEmail = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, current.claimedEmail.toLowerCase()))
+      .limit(1);
+    targetUserId = byEmail[0]?.id ?? null;
+  }
+  if (!targetUserId && current.claimedUsername) {
+    const byHandle = await db
+      .select({ userId: scoutProfiles.userId })
+      .from(scoutProfiles)
+      .where(eq(scoutProfiles.username, current.claimedUsername.toLowerCase()))
+      .limit(1);
+    targetUserId = byHandle[0]?.userId ?? null;
+  }
+  if (!targetUserId) {
+    throw new AuthorizationError(
+      'Could not resolve a matching user account for this recovery request.',
+      404,
+      'TARGET_USER_NOT_FOUND'
+    );
+  }
+
+  const targetRows = await db.select().from(users).where(eq(users.id, targetUserId)).limit(1);
+  const targetUser = targetRows[0];
+  if (!targetUser) {
+    throw new AuthorizationError('Target user record does not exist.', 404, 'TARGET_USER_NOT_FOUND');
+  }
+
+  const newEmail = current.contactEmailForUpdates.trim().toLowerCase();
+  const oldEmail = targetUser.email.trim().toLowerCase();
+
+  const emailTaken = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.email, newEmail))
+    .limit(1);
+  if (emailTaken[0] && emailTaken[0].id !== targetUserId) {
+    throw new AuthorizationError(
+      `The update email ${newEmail} is already registered to another NairaScout account.`,
+      409,
+      'EMAIL_ALREADY_IN_USE'
+    );
+  }
+
+  const supabaseAdmin = createSupabaseAdminClient();
+  if (supabaseAdmin) {
+    const { error: authUpdateErr } = await supabaseAdmin.auth.admin.updateUserById(targetUserId, {
+      email: newEmail,
+      email_confirm: true,
+    });
+    if (authUpdateErr) {
+      throw new AuthorizationError(
+        `Supabase Auth email update failed: ${authUpdateErr.message}`,
+        502,
+        'SUPABASE_ADMIN_UPDATE_FAILED'
+      );
+    }
+  }
+
+  // Revoke all existing Supabase Auth sessions for target user
+  await db
+    .execute(sql`DELETE FROM auth.sessions WHERE user_id = ${targetUserId}::uuid`)
+    .catch(() => undefined);
+  await db
+    .execute(sql`DELETE FROM auth.refresh_tokens WHERE user_id = ${targetUserId}::text`)
+    .catch(() => undefined);
+
+  const now = new Date();
+  const cooldownUntil = new Date(now.getTime() + WITHDRAWAL_COOLDOWN_HOURS * 60 * 60 * 1000);
+
+  return db.transaction(async (tx) => {
+    await tx
+      .update(users)
+      .set({
+        email: newEmail,
+        emailVerifiedAt: now,
+        withdrawalCooldownUntil: cooldownUntil,
+        lastReauthenticatedAt: null,
+        updatedAt: now,
+      })
+      .where(eq(users.id, targetUserId!));
+
+    const [updated] = await tx
+      .update(accountRecoveryRequests)
+      .set({
+        targetUserId,
+        status: 'APPROVED',
+        approvedBy: actorUserId,
+        approvalNotes,
+        approvedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(accountRecoveryRequests.id, current.id))
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: targetUserId!,
+      action: 'ACCOUNT_RECOVERY_APPROVED',
+      entityType: 'account_recovery_requests',
+      entityId: current.id,
+      previousValue: { email: oldEmail, status: current.status },
+      newValue: {
+        email: newEmail,
+        status: 'APPROVED',
+        sessionsRevoked: true,
+        withdrawalCooldownUntil: cooldownUntil.toISOString(),
+        notifiedEmails: [oldEmail, newEmail],
+      },
+      reason: approvalNotes,
+    });
+
+    await tx.insert(notifications).values({
+      userId: targetUserId!,
+      category: 'SECURITY',
+      title: 'Account Recovery Approved (24h Financial Cooling-Off Active)',
+      body: `Your account email was updated from ${oldEmail} to ${newEmail}, all prior sessions were signed out, and a 24-hour cooling-off lock applies to withdrawals and payout bank edits until ${cooldownUntil.toUTCString()}. Both addresses were notified.`,
+      actionUrl: '/settings',
+      isRead: false,
+    });
+
+    return {
+      request: updated,
+      oldEmail,
+      newEmail,
+      withdrawalCooldownUntil: cooldownUntil.toISOString(),
+    };
+  });
+}
+
+// Keep reference to dataRetentionSchedule exported for schema completeness checks
+export async function getDataRetentionScheduleForAdmin(actorUserId: string) {
+  const db = requireDb();
+  await ensureTablesReady(db);
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAdminRole(ctx, ALL_PLATFORM_ADMIN_ROLES);
+  return db.select().from(dataRetentionSchedule).orderBy(asc(dataRetentionSchedule.tableName));
 }
 
 

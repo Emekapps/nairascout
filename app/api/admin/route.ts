@@ -9,17 +9,20 @@ import {
   SubscriptionStatus,
 } from '@/lib/auth/rbac';
 import {
+  assertAdminAal2Session,
   extractSessionIdentityFromRequest,
   loadDbAuthContext,
   verifyMutationOrigin,
 } from '@/lib/auth/session';
 import {
   adminApplyUserAction,
+  adminApproveRecoveryRequest,
   adminCreateMakerCheckerRequest,
   adminDecideAppeal,
   adminDecideMakerCheckerRequest,
   adminManageRestriction,
   adminReinstateClosedAccount,
+  adminReviewRecoveryRequest,
   adminReviewVerification,
   getAdminConsoleSnapshot,
   GovernanceReasonCategory,
@@ -49,17 +52,20 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    // NS-AUT-006: Mandatory Admin TOTP MFA (aal2) gate on all admin endpoints
+    await assertAdminAal2Session(req);
     const signPath = req.nextUrl.searchParams.get('signPath');
     const adminData = await getAdminConsoleSnapshot(identity.userId);
 
     if (signPath) {
-      // NS-ACC-015: ANALYST_VIEWER is strictly read-only and cannot mint private document signed URLs
+      // NS-ACC-015 & NS-AUT-007: ANALYST_VIEWER is strictly read-only and cannot mint private document signed URLs
       const ctx = await loadDbAuthContext(identity.userId);
       assertAdminRole(ctx, [
         'VERIFICATION_OFFICER',
         'PLATFORM_ADMIN',
         'APPEALS_OFFICER',
         'TRUST_AND_SAFETY',
+        'SUPPORT_OFFICER',
       ]);
 
       const supabaseAdmin = createSupabaseAdminClient();
@@ -101,6 +107,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // NS-AUT-006: Mandatory Admin TOTP MFA (aal2) gate on all admin mutations
+    await assertAdminAal2Session(req);
     const body = await req.json();
     const action = String(body?.action || '');
 
@@ -215,6 +223,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         ok: true,
         appeal,
+        admin: await getAdminConsoleSnapshot(identity.userId),
+      });
+    }
+
+    // NS-AUT-007: Stage 1 review & recommendation for lost-email account recovery
+    if (action === 'review_recovery') {
+      const recovery = await adminReviewRecoveryRequest(identity.userId, {
+        requestId: String(body.requestId || ''),
+        decision: body.decision as 'UNDER_REVIEW' | 'RECOMMENDED_APPROVAL' | 'REJECTED',
+        reviewerNotes: String(body.reviewerNotes || ''),
+      });
+      return NextResponse.json({
+        ok: true,
+        recovery,
+        admin: await getAdminConsoleSnapshot(identity.userId),
+      });
+    }
+
+    // NS-AUT-007: Stage 2 distinct officer approval for account recovery
+    if (action === 'approve_recovery') {
+      const result = await adminApproveRecoveryRequest(identity.userId, {
+        requestId: String(body.requestId || ''),
+        approvalNotes: String(body.approvalNotes || ''),
+      });
+      return NextResponse.json({
+        ok: true,
+        recovery: result.request,
+        withdrawalCooldownUntil: result.withdrawalCooldownUntil,
         admin: await getAdminConsoleSnapshot(identity.userId),
       });
     }
