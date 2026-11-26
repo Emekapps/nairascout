@@ -142,6 +142,12 @@ export async function GET(req: NextRequest) {
         }
       );
     } catch (err) {
+      if (err instanceof Error && 'code' in err && (err as { code?: string }).code === 'ACCOUNT_CLOSED') {
+        await supabase.auth.signOut().catch(() => undefined);
+        return NextResponse.redirect(
+          `${redirectOrigin}/auth/login?error=${encodeURIComponent(err.message)}`
+        );
+      }
       const formatted = formatPostgresError(err);
       console.error('[auth/callback] PostgreSQL provisioning failed:', formatted, err);
     }

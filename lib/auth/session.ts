@@ -51,7 +51,8 @@ export function verifyMutationOrigin(req: NextRequest): boolean {
   }
 }
 
-// NS-ACC-002 & NS-GOV-002: Load unified PostgreSQL auth context, roles, and active capability restrictions
+// NS-ACC-002, NS-GOV-002 & NS-ACC-017: Live PostgreSQL re-evaluation of account_status, seller_status,
+// active seller_team_members.status, platform_admin_roles, and capability_restrictions on every request.
 export async function loadDbAuthContext(userId: string): Promise<UserAuthContext | null> {
   const db = getDb();
   if (!db) return null;

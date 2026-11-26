@@ -1,9 +1,4 @@
 {
-  "/api/policies/route": "app/api/policies/route.js",
-  "/api/help/route": "app/api/help/route.js",
-  "/api/admin/content/route": "app/api/admin/content/route.js",
-  "/page": "app/page.js",
-  "/help/page": "app/help/page.js",
-  "/programme-rules/page": "app/programme-rules/page.js",
-  "/admin/content/page": "app/admin/content/page.js"
+  "/api/admin/route": "app/api/admin/route.js",
+  "/api/seller/team/route": "app/api/seller/team/route.js"
 }

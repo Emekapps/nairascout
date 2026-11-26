@@ -19,6 +19,7 @@ import {
   RestrictionScope,
   SELLER_PLAN_ENTITLEMENTS,
   SELLER_TEAM_ROLE_PERMISSIONS,
+  SPRAWL_MAX_TEAM_SEATS,
   SellerStatus,
   SellerTeamRole,
   SubscriptionPlan,
@@ -193,6 +194,11 @@ export interface MakerCheckerRequestDTO {
 }
 
 export type AppealTargetType = 'VERIFICATION' | 'RESTRICTION' | 'SUSPENSION' | 'DISPUTE';
+export type GovernanceReasonCategory =
+  | 'GENERAL'
+  | 'FRAUD_INVESTIGATION'
+  | 'SPAM_ABUSE'
+  | 'DISPUTE';
 
 export interface GovernanceAppealDTO {
   id: string;
@@ -775,7 +781,7 @@ async function computeDownstreamFromDb(
 // ATOMIC SIGNUP / FIRST-LOGIN PROVISIONING (DRIZZLE POSTGRES TRANSACTION)
 // ============================================================================
 
-// NS-ACC-001 & NS-REF-001: Idempotent unified PostgreSQL user provisioning + permanent ancestry lock
+// NS-ACC-001, NS-ACC-017 & NS-REF-001: Idempotent unified PostgreSQL user provisioning + CLOSED non-reactivation guard
 export async function ensureUserProvisionedInDb(
   identity: SupabaseSessionIdentity,
   input?: {
@@ -789,8 +795,19 @@ export async function ensureUserProvisionedInDb(
   const db = requireDb();
   await ensureTablesReady(db);
 
-  const [existingUser, existingProfile, existingAncestry] = await Promise.all([
-    db.select({ id: users.id }).from(users).where(eq(users.id, identity.userId)).limit(1),
+  const normalizedEmail = identity.email.trim().toLowerCase();
+
+  const [existingUser, existingByEmail, existingProfile, existingAncestry] = await Promise.all([
+    db
+      .select({ id: users.id, accountStatus: users.accountStatus })
+      .from(users)
+      .where(eq(users.id, identity.userId))
+      .limit(1),
+    db
+      .select({ id: users.id, accountStatus: users.accountStatus })
+      .from(users)
+      .where(eq(users.email, normalizedEmail))
+      .limit(1),
     db
       .select({ userId: scoutProfiles.userId })
       .from(scoutProfiles)
@@ -803,11 +820,23 @@ export async function ensureUserProvisionedInDb(
       .limit(1),
   ]);
 
+  // NS-ACC-017: CLOSED accounts can never be silently reactivated via normal login or registration
+  const matchedExisting = existingUser[0] ?? existingByEmail[0];
+  if (matchedExisting) {
+    const currentAccountStatus = normalizeAccountStatus(matchedExisting.accountStatus);
+    if (currentAccountStatus === 'CLOSED' || currentAccountStatus === 'CLOSURE_PENDING') {
+      throw new AuthorizationError(
+        'This account is closed and cannot be reactivated via normal login or registration. Contact a Super Admin for an explicit audited reinstatement.',
+        403,
+        'ACCOUNT_CLOSED'
+      );
+    }
+  }
+
   if (existingUser.length > 0 && existingProfile.length > 0 && existingAncestry.length > 0) {
     return { createdNew: false, userId: identity.userId };
   }
 
-  const normalizedEmail = identity.email.trim().toLowerCase();
   const normalizedPhone = identity.phone?.trim() ? identity.phone.trim() : null;
   const meta = identity.userMetadata || {};
   const rawDisplayName =
@@ -1394,7 +1423,13 @@ export async function getNairaScoutSnapshot(
   const viewerScout = scoutByUserId.get(viewerUserId);
   const authCtx = await loadDbAuthContext(viewerUserId);
 
-  if (!viewerUser || !viewerScout || !authCtx) {
+  if (
+    !viewerUser ||
+    !viewerScout ||
+    !authCtx ||
+    authCtx.accountStatus === 'CLOSED' ||
+    authCtx.accountStatus === 'CLOSURE_PENDING'
+  ) {
     return getNairaScoutSnapshot(null, referralEventQuery);
   }
 
@@ -3156,7 +3191,7 @@ export async function upgradeSellerPlanForActor(actorUserId: string, planId: Sel
   });
 }
 
-// NS-SEL-004: Seller team seat management (Business Seller + Sprawl plan, max 5 seats)
+// NS-ACC-014 & NS-SEL-004: Seller team seat management (Business Seller + Sprawl plan, strict max 5 active/invited seats)
 export async function manageSellerTeamForActor(
   actorUserId: string,
   input:
@@ -3171,7 +3206,7 @@ export async function manageSellerTeamForActor(
   const db = requireDb();
 
   const ctx = await loadDbAuthContext(actorUserId);
-  assertCanManageSellerTeam(ctx);
+  assertCanManageSellerTeam(ctx, { operation: input.operation });
 
   const sellerId = ctx!.seller!.sellerProfileId;
 
@@ -3209,6 +3244,7 @@ export async function manageSellerTeamForActor(
       entityId: target.id,
       previousValue: { status: target.status, role: target.role },
       newValue: { status: 'REVOKED' },
+      reason: 'Seller team seat revoked; Seller privileges cleared on next server request',
     });
     return;
   }
@@ -3222,21 +3258,18 @@ export async function manageSellerTeamForActor(
     );
   }
 
-  // Enforce Sprawl Plan Max 5 Team Seats (active non-revoked members excluding the primary owner)
+  // NS-ACC-014: Enforce Sprawl Plan Max 5 Team Seats (ACTIVE or INVITED members excluding primary owner)
   const currentMembers = await db
     .select()
     .from(sellerTeamMembers)
     .where(eq(sellerTeamMembers.sellerProfileId, sellerId));
-  const delegatedSeatsUsed = currentMembers.filter(
-    (m) => m.status !== 'REVOKED' && m.role !== 'BUSINESS_OWNER'
+  const activeOrInvitedSeats = currentMembers.filter(
+    (m) => (m.status === 'ACTIVE' || m.status === 'INVITED') && m.role !== 'BUSINESS_OWNER'
   ).length;
-  if (delegatedSeatsUsed >= MAX_SELLER_TEAM_SEATS) {
-    throw new AuthorizationError(
-      `Sprawl plan seat cap (${MAX_SELLER_TEAM_SEATS} team seats) reached. Revoke an inactive seat before inviting another member.`,
-      403,
-      'TEAM_SEAT_LIMIT_REACHED'
-    );
-  }
+  assertCanManageSellerTeam(ctx, {
+    operation: 'invite',
+    activeOrInvitedSeats,
+  });
 
   const userRows = await db
     .select()
@@ -3252,11 +3285,24 @@ export async function manageSellerTeamForActor(
     );
   }
 
+  const targetStatus = normalizeAccountStatus(memberUser.accountStatus);
+  if (targetStatus === 'CLOSED' || targetStatus === 'CLOSURE_PENDING' || targetStatus === 'SUSPENDED') {
+    throw new AuthorizationError(
+      `Invited user account is ${targetStatus} and cannot hold a Seller team seat.`,
+      403,
+      'TARGET_ACCOUNT_NOT_ELIGIBLE'
+    );
+  }
+
   const existing = currentMembers.find(
-    (m) => m.userId === memberUser.id && m.status === 'ACTIVE'
+    (m) => m.userId === memberUser.id && (m.status === 'ACTIVE' || m.status === 'INVITED')
   );
   if (existing) {
-    throw new AuthorizationError('User is already an active team member.', 409, 'ALREADY_MEMBER');
+    throw new AuthorizationError(
+      'User already occupies an active or invited team seat.',
+      409,
+      'ALREADY_MEMBER'
+    );
   }
 
   const defaultPerms = SELLER_TEAM_ROLE_PERMISSIONS[normalizedRole];
@@ -3265,7 +3311,11 @@ export async function manageSellerTeamForActor(
     canManageOrders: input.permissions?.canManageOrders ?? defaultPerms.canManageOrders,
     canViewAnalytics: input.permissions?.canViewAnalytics ?? defaultPerms.canViewAnalytics,
     canManageBilling:
-      normalizedRole === 'BUSINESS_ADMIN'
+      normalizedRole === 'BUSINESS_ADMIN' ||
+      normalizedRole === 'FINANCE_MANAGER' ||
+      normalizedRole === 'PRODUCT_MANAGER' ||
+      normalizedRole === 'ORDER_MANAGER' ||
+      normalizedRole === 'ANALYST_VIEWER'
         ? false
         : (input.permissions?.canManageBilling ?? defaultPerms.canManageBilling),
     canManageTeam: input.permissions?.canManageTeam ?? defaultPerms.canManageTeam,
@@ -3289,7 +3339,12 @@ export async function manageSellerTeamForActor(
     action: 'SELLER_TEAM_MEMBER_ADDED',
     entityType: 'seller_team_members',
     entityId: created.id,
-    newValue: { role: normalizedRole, permissions: mergedPerms },
+    newValue: {
+      role: normalizedRole,
+      permissions: mergedPerms,
+      seatsUsed: activeOrInvitedSeats + 1,
+      seatCap: SPRAWL_MAX_TEAM_SEATS,
+    },
   });
 }
 
@@ -4227,7 +4282,74 @@ export async function adminReviewVerification(
   });
 }
 
-// NS-GOV-002: Granular capability restriction impose/lift
+// NS-ACC-016: Transactional helper to place all currently PENDING commissions for a user ON_HOLD
+// Preserves all existing ledger rows and permanent referral_ancestry intact (append-only).
+type DbTransactionClient = Parameters<Parameters<NairaScoutDb['transaction']>[0]>[0];
+
+async function placeUserPendingCommissionsOnHoldTx(
+  tx: DbTransactionClient,
+  targetUserId: string,
+  descriptionPrefix: string
+): Promise<{
+  heldEntriesCount: number;
+  heldTotalKobo: number;
+  heldReferences: string[];
+}> {
+  const allEntries = await tx
+    .select()
+    .from(commissionLedgerEntries)
+    .where(eq(commissionLedgerEntries.beneficiaryScoutId, targetUserId))
+    .orderBy(asc(commissionLedgerEntries.createdAt));
+
+  const latestByChain = new Map<
+    string,
+    { root: typeof commissionLedgerEntries.$inferSelect; latestStatus: string }
+  >();
+
+  for (const entry of allEntries) {
+    const chainKey = entry.linkedToReference || entry.reference;
+    const existing = latestByChain.get(chainKey);
+    if (!existing) {
+      latestByChain.set(chainKey, { root: entry, latestStatus: entry.status });
+    } else {
+      existing.latestStatus = entry.status;
+    }
+  }
+
+  const pendingRoots = Array.from(latestByChain.values())
+    .filter((item) => item.latestStatus === 'Pending')
+    .map((item) => item.root);
+
+  let heldTotalKobo = 0;
+  const heldReferences: string[] = [];
+
+  for (const root of pendingRoots) {
+    const amountKobo = Number(root.amountKobo);
+    heldTotalKobo += amountKobo;
+    heldReferences.push(root.reference);
+    await tx.insert(commissionLedgerEntries).values({
+      reference: `${root.reference}-HOLD`,
+      orderId: root.orderId,
+      referralEventId: root.referralEventId,
+      beneficiaryScoutId: root.beneficiaryScoutId,
+      generation: root.generation,
+      fractionLabel: root.fractionLabel,
+      amountKobo,
+      status: 'On Hold',
+      ruleVersion: COMMISSION_RULE_VERSION,
+      description: `${descriptionPrefix} (${root.reference})`,
+      linkedToReference: root.reference,
+    });
+  }
+
+  return {
+    heldEntriesCount: pendingRoots.length,
+    heldTotalKobo,
+    heldReferences,
+  };
+}
+
+// NS-GOV-002 & NS-ACC-016: Granular capability restriction impose/lift with automatic ON_HOLD on FRAUD_INVESTIGATION
 export async function adminManageRestriction(
   actorUserId: string,
   input:
@@ -4236,6 +4358,7 @@ export async function adminManageRestriction(
         targetUserId: string;
         scope: RestrictionScope;
         capabilityCode: CapabilityCode;
+        reasonCategory?: GovernanceReasonCategory;
         reason: string;
         expiresInDays?: number | null;
       }
@@ -4291,6 +4414,8 @@ export async function adminManageRestriction(
     throw new AuthorizationError('Target user not found.', 404, 'USER_NOT_FOUND');
   }
 
+  const reasonCategory: GovernanceReasonCategory = input.reasonCategory ?? 'GENERAL';
+
   await db.transaction(async (tx) => {
     const expiresAt =
       input.expiresInDays && input.expiresInDays > 0
@@ -4310,15 +4435,33 @@ export async function adminManageRestriction(
       })
       .returning();
 
+    let holdResult = {
+      heldEntriesCount: 0,
+      heldTotalKobo: 0,
+      heldReferences: [] as string[],
+    };
+
+    if (reasonCategory === 'FRAUD_INVESTIGATION') {
+      holdResult = await placeUserPendingCommissionsOnHoldTx(
+        tx,
+        input.targetUserId,
+        `Fraud investigation hold: ${reason}`
+      );
+    }
+
     await tx.insert(auditLogs).values({
       actorId: actorUserId,
       affectedUserId: input.targetUserId,
       action: 'CAPABILITY_RESTRICTION_IMPOSED',
       entityType: 'capability_restrictions',
       entityId: created.id,
+      previousValue: { restrictionActive: false },
       newValue: {
         scope: input.scope,
         capabilityCode: input.capabilityCode,
+        reasonCategory,
+        heldCommissionsCount: holdResult.heldEntriesCount,
+        heldCommissionsKobo: holdResult.heldTotalKobo,
         expiresAt: expiresAt?.toISOString() ?? null,
       },
       reason,
@@ -4328,14 +4471,17 @@ export async function adminManageRestriction(
       userId: input.targetUserId,
       category: 'TRUST',
       title: `Capability Restricted: ${input.capabilityCode}`,
-      body: `${reason}. You may submit an independent appeal from Account Settings if you believe this is in error.`,
+      body:
+        holdResult.heldEntriesCount > 0
+          ? `${reason}. ${holdResult.heldEntriesCount} pending commission entry(s) have been placed On Hold pending review. You may submit an independent appeal from Account Settings.`
+          : `${reason}. You may submit an independent appeal from Account Settings if you believe this is in error.`,
       actionUrl: '/settings',
       isRead: false,
     });
   });
 }
 
-// NS-GOV-002: Account/Seller/Subscription governance status enforcement
+// NS-GOV-002 & NS-ACC-016: Account/Seller/Subscription governance status enforcement & fraud ON_HOLD placement
 export async function adminApplyUserAction(
   actorUserId: string,
   input: {
@@ -4349,6 +4495,7 @@ export async function adminApplyUserAction(
     accountStatus?: AccountStatus;
     sellerStatus?: SellerStatus;
     subscriptionStatus?: SubscriptionStatus;
+    reasonCategory?: GovernanceReasonCategory;
     abuseReportId?: string;
     abuseResolution?: 'RESOLVED' | 'DISMISSED';
     reason: string;
@@ -4377,6 +4524,7 @@ export async function adminApplyUserAction(
   }
 
   const reason = input.reason.trim();
+  const reasonCategory: GovernanceReasonCategory = input.reasonCategory ?? 'GENERAL';
 
   await db.transaction(async (tx) => {
     const userRows = await tx
@@ -4390,6 +4538,10 @@ export async function adminApplyUserAction(
     }
 
     if (input.actionType === 'SET_ACCOUNT_STATUS' && input.accountStatus) {
+      if (input.accountStatus === 'SUSPENDED' || reasonCategory === 'FRAUD_INVESTIGATION') {
+        assertAdminRole(ctx, ['TRUST_AND_SAFETY', 'PLATFORM_ADMIN']);
+      }
+
       const prev = normalizeAccountStatus(targetUser.accountStatus);
       try {
         transitions.account(prev, input.accountStatus);
@@ -4409,6 +4561,20 @@ export async function adminApplyUserAction(
         })
         .where(eq(users.id, targetUser.id));
 
+      // NS-ACC-016: Automatically place PENDING commissions ON_HOLD on account suspension or fraud investigation
+      let holdResult = {
+        heldEntriesCount: 0,
+        heldTotalKobo: 0,
+        heldReferences: [] as string[],
+      };
+      if (input.accountStatus === 'SUSPENDED' || reasonCategory === 'FRAUD_INVESTIGATION') {
+        holdResult = await placeUserPendingCommissionsOnHoldTx(
+          tx,
+          targetUser.id,
+          `Fraud/suspension hold: ${reason}`
+        );
+      }
+
       await tx.insert(auditLogs).values({
         actorId: actorUserId,
         affectedUserId: targetUser.id,
@@ -4416,9 +4582,25 @@ export async function adminApplyUserAction(
         entityType: 'users',
         entityId: targetUser.id,
         previousValue: { accountStatus: prev },
-        newValue: { accountStatus: input.accountStatus },
+        newValue: {
+          accountStatus: input.accountStatus,
+          reasonCategory,
+          heldCommissionsCount: holdResult.heldEntriesCount,
+          heldCommissionsKobo: holdResult.heldTotalKobo,
+        },
         reason,
       });
+
+      if (holdResult.heldEntriesCount > 0) {
+        await tx.insert(notifications).values({
+          userId: targetUser.id,
+          category: 'TRUST',
+          title: 'Account Suspended · Pending Commissions Placed On Hold',
+          body: `${reason}. ${holdResult.heldEntriesCount} pending commission entry(s) were placed On Hold while your account is under review.`,
+          actionUrl: '/?tab=wallet',
+          isRead: false,
+        });
+      }
     }
 
     if (input.actionType === 'SET_SELLER_STATUS' && input.sellerStatus) {
@@ -4534,31 +4716,11 @@ export async function adminApplyUserAction(
 
     if (input.actionType === 'HOLD_PENDING_COMMISSIONS') {
       assertAdminRole(ctx, ['TRUST_AND_SAFETY', 'FINANCE_OFFICER']);
-      const userEntries = await tx
-        .select()
-        .from(commissionLedgerEntries)
-        .where(
-          and(
-            eq(commissionLedgerEntries.beneficiaryScoutId, targetUser.id),
-            eq(commissionLedgerEntries.status, 'Pending')
-          )
-        );
-      const roots = userEntries.filter((l) => !l.linkedToReference);
-      for (const root of roots) {
-        await tx.insert(commissionLedgerEntries).values({
-          reference: `${root.reference}-HOLD`,
-          orderId: root.orderId,
-          referralEventId: root.referralEventId,
-          beneficiaryScoutId: root.beneficiaryScoutId,
-          generation: root.generation,
-          fractionLabel: root.fractionLabel,
-          amountKobo: Number(root.amountKobo),
-          status: 'On Hold',
-          ruleVersion: COMMISSION_RULE_VERSION,
-          description: `Trust & Safety hold: ${reason} (${root.reference})`,
-          linkedToReference: root.reference,
-        });
-      }
+      const holdResult = await placeUserPendingCommissionsOnHoldTx(
+        tx,
+        targetUser.id,
+        `Trust & Safety hold: ${reason}`
+      );
 
       await tx.insert(auditLogs).values({
         actorId: actorUserId,
@@ -4566,7 +4728,12 @@ export async function adminApplyUserAction(
         action: 'ADMIN_COMMISSIONS_PLACED_ON_HOLD',
         entityType: 'commission_ledger_entries',
         entityId: null,
-        newValue: { heldEntriesCount: roots.length },
+        previousValue: { status: 'Pending' },
+        newValue: {
+          status: 'On Hold',
+          heldEntriesCount: holdResult.heldEntriesCount,
+          heldTotalKobo: holdResult.heldTotalKobo,
+        },
         reason,
       });
     }
@@ -4592,6 +4759,95 @@ export async function adminApplyUserAction(
         reason,
       });
     }
+  });
+}
+
+// NS-ACC-017: Explicit, audited SUPER_ADMIN-only reinstatement of a CLOSED account (preserving permanent ancestry)
+export async function adminReinstateClosedAccount(
+  actorUserId: string,
+  input: {
+    targetUserId: string;
+    reason: string;
+  }
+) {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAdminRole(ctx, ['SUPER_ADMIN']);
+
+  if (!isUuid(input.targetUserId)) {
+    throw new AuthorizationError('Target user not found.', 404, 'USER_NOT_FOUND');
+  }
+  const reason = input.reason.trim();
+  if (reason.length < 5) {
+    throw new AuthorizationError(
+      'Documented Super Admin reinstatement justification (minimum 5 characters) is required.',
+      400,
+      'REASON_REQUIRED'
+    );
+  }
+
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .select()
+      .from(users)
+      .where(eq(users.id, input.targetUserId))
+      .limit(1);
+    const targetUser = rows[0];
+    if (!targetUser) {
+      throw new AuthorizationError('Target user not found.', 404, 'USER_NOT_FOUND');
+    }
+
+    const prevStatus = normalizeAccountStatus(targetUser.accountStatus);
+    if (prevStatus !== 'CLOSED') {
+      throw new AuthorizationError(
+        `Account reinstatement is only valid for CLOSED accounts (current status: ${prevStatus}).`,
+        409,
+        'INVALID_STATUS_TRANSITION'
+      );
+    }
+
+    const now = new Date();
+    const [reinstated] = await tx
+      .update(users)
+      .set({
+        accountStatus: 'ACTIVE',
+        closedAt: null,
+        restrictionReason: null,
+        updatedAt: now,
+      })
+      .where(eq(users.id, targetUser.id))
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: targetUser.id,
+      action: 'ADMIN_ACCOUNT_REINSTATED',
+      entityType: 'users',
+      entityId: targetUser.id,
+      previousValue: {
+        accountStatus: prevStatus,
+        closedAt: targetUser.closedAt?.toISOString() ?? null,
+      },
+      newValue: {
+        accountStatus: 'ACTIVE',
+        reinstatedBySuperAdmin: actorUserId,
+        referralAncestryPreserved: true,
+      },
+      reason,
+    });
+
+    await tx.insert(notifications).values({
+      userId: targetUser.id,
+      category: 'TRUST',
+      title: 'NairaScout Account Reinstated',
+      body: `Your closed account has been explicitly reinstated to ACTIVE status by Super Admin review: ${reason}`,
+      actionUrl: '/settings',
+      isRead: false,
+    });
+
+    return reinstated;
   });
 }
 
@@ -4842,7 +5098,7 @@ export async function adminDecideMakerCheckerRequest(
   });
 }
 
-// NS-GOV-004: Independent Appeals Officer adjudication
+// NS-ACC-015 & NS-GOV-004: Independent Appeals Officer adjudication (appeals_officer_id !== original_reviewer_id)
 export async function adminDecideAppeal(
   actorUserId: string,
   input: {
@@ -4871,6 +5127,13 @@ export async function adminDecideAppeal(
     const appeal = rows[0];
     if (!appeal) {
       throw new AuthorizationError('Appeal record not found.', 404, 'NOT_FOUND');
+    }
+    if (appeal.status === 'UPHELD' || appeal.status === 'OVERTURNED') {
+      throw new AuthorizationError(
+        `Appeal is already resolved (${appeal.status}).`,
+        409,
+        'APPEAL_ALREADY_RESOLVED'
+      );
     }
 
     // Independent reviewer enforcement: cannot adjudicate own prior decision or own appeal
@@ -5378,13 +5641,16 @@ export async function searchGlobalDirectory(
   };
 }
 
-// NS-NOT-001: Fetch notifications and unread count for the authenticated user
+// NS-NOT-001 & NS-ACC-017: Fetch notifications and unread count with live accountStatus verification
 export async function getNotificationsForActor(actorUserId: string): Promise<{
   notifications: PlatformNotification[];
   unreadCount: number;
 }> {
   const db = requireDb();
   await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAccountOperational(ctx);
 
   const rows = await db
     .select()
@@ -5411,7 +5677,7 @@ export async function getNotificationsForActor(actorUserId: string): Promise<{
   };
 }
 
-// NS-NOT-001: Mark single or all notifications as read for the authenticated user
+// NS-NOT-001 & NS-ACC-017: Mark single or all notifications as read with live accountStatus verification
 export async function markNotificationReadForActor(
   actorUserId: string,
   options: { notificationId?: string; markAll?: boolean }
@@ -5421,6 +5687,9 @@ export async function markNotificationReadForActor(
 }> {
   const db = requireDb();
   await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAccountOperational(ctx);
 
   const now = new Date();
   if (options.markAll) {

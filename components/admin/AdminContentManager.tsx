@@ -274,7 +274,7 @@ export function AdminContentManager({
 
       {!canManageContent && (
         <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-xs text-amber-800 dark:text-amber-200">
-          Access restricted ({adminRole || 'UNKNOWN'}): Viewing and editing platform policies and
+          Read-only / restricted view ({adminRole || 'UNKNOWN'}): Editing platform policies and
           Help Centre articles requires <strong>SUPER_ADMIN</strong> or{' '}
           <strong>PLATFORM_ADMIN</strong>.
         </div>

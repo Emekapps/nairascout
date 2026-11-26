@@ -11,6 +11,7 @@ import {
 } from '@/lib/nairascout-store';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
+// NS-ACC-017: Live PostgreSQL session check (blocks CLOSED accounts from silent reactivation)
 export async function GET(req: NextRequest) {
   const identity = await extractSessionIdentityFromRequest(req);
   const refEvent = req.nextUrl.searchParams.get('refEvent') || req.cookies.get('ns_ref_event')?.value || null;
@@ -23,6 +24,23 @@ export async function GET(req: NextRequest) {
         referralScoutUsername: refScout,
       });
     } catch (err) {
+      if (err instanceof AuthorizationError && err.code === 'ACCOUNT_CLOSED') {
+        const supabase = await createSupabaseServerClient();
+        if (supabase) {
+          await supabase.auth.signOut().catch(() => undefined);
+        }
+        const guestSnapshot = await getNairaScoutSnapshot(null, refEvent);
+        return NextResponse.json(
+          {
+            authenticated: false,
+            activeScout: null,
+            code: err.code,
+            error: err.message,
+            snapshot: guestSnapshot,
+          },
+          { status: 403 }
+        );
+      }
       console.error('[GET /api/auth/session] PostgreSQL provisioning failed:', formatPostgresError(err), err);
     }
   }

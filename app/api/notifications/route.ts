@@ -10,7 +10,7 @@ import {
   markNotificationReadForActor,
 } from '@/lib/nairascout-store';
 
-// NS-NOT-001: Retrieve authenticated user's notifications with read/unread counts
+// NS-NOT-001 & NS-ACC-017: Retrieve authenticated user's notifications with live status re-evaluation
 export async function GET(req: NextRequest) {
   const identity = await extractSessionIdentityFromRequest(req);
   if (!identity) {
@@ -21,6 +21,12 @@ export async function GET(req: NextRequest) {
     const result = await getNotificationsForActor(identity.userId);
     return NextResponse.json(result);
   } catch (err) {
+    if (err instanceof AuthorizationError) {
+      return NextResponse.json(
+        { error: err.message, code: err.code },
+        { status: err.statusCode }
+      );
+    }
     console.error('[GET /api/notifications] Failed:', formatPostgresError(err), err);
     return NextResponse.json(
       { error: 'Could not load notifications.' },

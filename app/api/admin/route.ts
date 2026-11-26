@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   AccountStatus,
+  assertAdminRole,
   AuthorizationError,
   CapabilityCode,
   RestrictionScope,
@@ -9,6 +10,7 @@ import {
 } from '@/lib/auth/rbac';
 import {
   extractSessionIdentityFromRequest,
+  loadDbAuthContext,
   verifyMutationOrigin,
 } from '@/lib/auth/session';
 import {
@@ -17,13 +19,29 @@ import {
   adminDecideAppeal,
   adminDecideMakerCheckerRequest,
   adminManageRestriction,
+  adminReinstateClosedAccount,
   adminReviewVerification,
   getAdminConsoleSnapshot,
+  GovernanceReasonCategory,
   MakerCheckerActionType,
 } from '@/lib/nairascout-store';
 import { createSupabaseAdminClient } from '@/lib/supabase/server';
 
-// NS-GOV-001 & NS-PRI-002: Admin governance console read & private verification-docs signed URL access
+const ALLOWED_REASON_CATEGORIES = new Set<GovernanceReasonCategory>([
+  'GENERAL',
+  'FRAUD_INVESTIGATION',
+  'SPAM_ABUSE',
+  'DISPUTE',
+]);
+
+function normalizeReasonCategory(raw: unknown): GovernanceReasonCategory {
+  if (typeof raw === 'string' && ALLOWED_REASON_CATEGORIES.has(raw as GovernanceReasonCategory)) {
+    return raw as GovernanceReasonCategory;
+  }
+  return 'GENERAL';
+}
+
+// NS-GOV-001, NS-ACC-015 & NS-PRI-002: Admin governance console read & role-gated verification-docs signed URL access
 export async function GET(req: NextRequest) {
   const identity = await extractSessionIdentityFromRequest(req);
   if (!identity) {
@@ -35,6 +53,15 @@ export async function GET(req: NextRequest) {
     const adminData = await getAdminConsoleSnapshot(identity.userId);
 
     if (signPath) {
+      // NS-ACC-015: ANALYST_VIEWER is strictly read-only and cannot mint private document signed URLs
+      const ctx = await loadDbAuthContext(identity.userId);
+      assertAdminRole(ctx, [
+        'VERIFICATION_OFFICER',
+        'PLATFORM_ADMIN',
+        'APPEALS_OFFICER',
+        'TRUST_AND_SAFETY',
+      ]);
+
       const supabaseAdmin = createSupabaseAdminClient();
       if (!supabaseAdmin) {
         return NextResponse.json(
@@ -62,7 +89,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// NS-GOV-001, NS-VER-003, NS-GOV-002, NS-GOV-003 & NS-GOV-004: Admin governance mutations
+// NS-GOV-001, NS-VER-003, NS-GOV-002, NS-GOV-003, NS-GOV-004, NS-ACC-015, NS-ACC-016 & NS-ACC-017: Admin mutations
 export async function POST(req: NextRequest) {
   if (!verifyMutationOrigin(req)) {
     return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });
@@ -102,8 +129,20 @@ export async function POST(req: NextRequest) {
         accountStatus: body.accountStatus as AccountStatus | undefined,
         sellerStatus: body.sellerStatus as SellerStatus | undefined,
         subscriptionStatus: body.subscriptionStatus as SubscriptionStatus | undefined,
+        reasonCategory: normalizeReasonCategory(body.reasonCategory),
         abuseReportId: body.abuseReportId ? String(body.abuseReportId) : undefined,
         abuseResolution: body.abuseResolution as 'RESOLVED' | 'DISMISSED' | undefined,
+        reason: String(body.reason || ''),
+      });
+      return NextResponse.json({
+        ok: true,
+        admin: await getAdminConsoleSnapshot(identity.userId),
+      });
+    }
+
+    if (action === 'reinstate_closed_account') {
+      await adminReinstateClosedAccount(identity.userId, {
+        targetUserId: String(body.targetUserId || ''),
         reason: String(body.reason || ''),
       });
       return NextResponse.json({
@@ -125,6 +164,7 @@ export async function POST(req: NextRequest) {
           targetUserId: String(body.targetUserId || ''),
           scope: (body.scope || 'CAPABILITY') as RestrictionScope,
           capabilityCode: body.capabilityCode as CapabilityCode,
+          reasonCategory: normalizeReasonCategory(body.reasonCategory),
           reason: String(body.reason || ''),
           expiresInDays: body.expiresInDays ? Number(body.expiresInDays) : null,
         });

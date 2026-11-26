@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  ChevronDown,
   ExternalLink,
   FileCheck,
   FileText,
@@ -13,6 +14,7 @@ import {
   Lock,
   Pencil,
   Plus,
+  RotateCcw,
   Scale,
   Search,
   ShieldAlert,
@@ -34,6 +36,7 @@ import type {
   AbuseReportRecord,
   AuditLogRecord,
   GovernanceAppealDTO,
+  GovernanceReasonCategory,
   HelpArticleDTO,
   ListingCategoryDTO,
   MakerCheckerActionType,
@@ -133,6 +136,7 @@ export default function AdminConsoleView({
   // User Governance & Restriction state
   const [userSearch, setUserSearch] = useState('');
   const [govReason, setGovReason] = useState('');
+  const [reasonCategory, setReasonCategory] = useState<GovernanceReasonCategory>('GENERAL');
   const [selectedUserId, setSelectedUserId] = useState<string>(
     initialAdminData?.users[0]?.userId || ''
   );
@@ -264,6 +268,7 @@ export default function AdminConsoleView({
           accountStatus: payload.accountStatus,
           sellerStatus: payload.sellerStatus,
           subscriptionStatus: payload.subscriptionStatus,
+          reasonCategory,
           abuseReportId: payload.abuseReportId,
           abuseResolution: payload.abuseResolution,
           reason,
@@ -276,7 +281,51 @@ export default function AdminConsoleView({
       }
       if (data.admin) setAdminData(data.admin);
       setGovReason('');
-      setFeedback({ type: 'ok', message: 'Governance action applied and logged.' });
+      setFeedback({
+        type: 'ok',
+        message:
+          payload.actionType === 'SET_ACCOUNT_STATUS' &&
+          (payload.accountStatus === 'SUSPENDED' || reasonCategory === 'FRAUD_INVESTIGATION')
+            ? 'Account governance updated, pending commissions placed On Hold, and action logged.'
+            : 'Governance action applied and logged.',
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleReinstateClosedAccount = async (targetUserId: string) => {
+    const reason = govReason.trim();
+    if (reason.length < 5) {
+      setFeedback({
+        type: 'err',
+        message: 'Documented Super Admin reinstatement justification (minimum 5 chars) is required.',
+      });
+      return;
+    }
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: buildHeaders(),
+        body: JSON.stringify({
+          action: 'reinstate_closed_account',
+          targetUserId,
+          reason,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFeedback({ type: 'err', message: data.error || 'Account reinstatement failed.' });
+        return;
+      }
+      if (data.admin) setAdminData(data.admin);
+      setGovReason('');
+      setFeedback({
+        type: 'ok',
+        message: 'Closed account explicitly reinstated to ACTIVE by Super Admin and recorded in audit logs.',
+      });
     } finally {
       setBusy(false);
     }
@@ -313,6 +362,7 @@ export default function AdminConsoleView({
               targetUserId: payload.targetUserId,
               scope: restrictionScope,
               capabilityCode: restrictionCapability,
+              reasonCategory,
               expiresInDays: restrictionDays ? Number(restrictionDays) : null,
               reason,
             };
@@ -333,7 +383,9 @@ export default function AdminConsoleView({
         message:
           payload.operation === 'LIFT'
             ? 'Capability restriction lifted and logged.'
-            : 'Granular capability restriction imposed.',
+            : reasonCategory === 'FRAUD_INVESTIGATION'
+              ? 'Fraud investigation restriction imposed and pending commissions placed On Hold.'
+              : 'Granular capability restriction imposed.',
       });
     } finally {
       setBusy(false);
@@ -609,6 +661,7 @@ export default function AdminConsoleView({
   ).length;
   const activeCategoriesCount = adminData.categories.filter((c) => c.isActive).length;
   const isSuperAdmin = adminData.adminRole === 'SUPER_ADMIN';
+  const isAnalystViewer = adminData.adminRole === 'ANALYST_VIEWER';
   const selectedUser = adminData.users.find((u) => u.userId === selectedUserId) ?? null;
 
   return (
@@ -685,6 +738,18 @@ export default function AdminConsoleView({
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-8 py-8 space-y-8">
+        {isAnalystViewer && (
+          <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-800 dark:text-amber-200 flex items-center gap-2.5">
+            <Lock className="w-4 h-4 shrink-0" aria-hidden="true" />
+            <span>
+              <strong>Read-Only Audit &amp; Metrics Mode (ANALYST_VIEWER):</strong> You can inspect
+              aggregate operational metrics and Immutable Audit Logs. All write actions, verification
+              document signing, suspensions, appeals, and role changes are hidden and blocked
+              server-side.
+            </span>
+          </div>
+        )}
+
         {feedback && (
           <div
             role="status"
@@ -888,19 +953,21 @@ export default function AdminConsoleView({
                           )}
                         </div>
 
-                        <div className="flex flex-wrap gap-2">
-                          {v.evidencePaths.map((p) => (
-                            <button
-                              key={p}
-                              type="button"
-                              onClick={() => handleSignDocument(p)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-sans border border-border rounded-lg text-foreground hover:bg-muted cursor-pointer"
-                            >
-                              <FileText className="w-3.5 h-3.5 text-foreground" />
-                              Inspect (60s URL): {p.split('/').pop()}
-                            </button>
-                          ))}
-                        </div>
+                        {!isAnalystViewer && (
+                          <div className="flex flex-wrap gap-2">
+                            {v.evidencePaths.map((p) => (
+                              <button
+                                key={p}
+                                type="button"
+                                onClick={() => handleSignDocument(p)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-sans border border-border rounded-lg text-foreground hover:bg-muted cursor-pointer"
+                              >
+                                <FileText className="w-3.5 h-3.5 text-foreground" />
+                                Inspect (60s URL): {p.split('/').pop()}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
                       {v.reviewerNotes && (
@@ -909,61 +976,63 @@ export default function AdminConsoleView({
                         </p>
                       )}
 
-                      {isSelfRecord && (
+                      {isSelfRecord && !isAnalystViewer && (
                         <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
                           Own verification record — separation of duties prohibits self-review or
                           self-approval. A second Verification Officer must decide this record.
                         </div>
                       )}
 
-                      <div className="flex flex-col sm:flex-row gap-3 pt-2 border-t border-border">
-                        <input
-                          type="text"
-                          value={notesByVerif[v.id] || ''}
-                          onChange={(e) =>
-                            setNotesByVerif((prev) => ({ ...prev, [v.id]: e.target.value }))
-                          }
-                          placeholder="Mandatory reviewer notes (logged in audit_logs)..."
-                          disabled={isSelfRecord}
-                          className="flex-1 px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl disabled:bg-muted"
-                        />
-                        <div className="flex flex-wrap items-center gap-2 shrink-0">
-                          {v.status === 'SUBMITTED' && (
+                      {!isAnalystViewer && (
+                        <div className="flex flex-col sm:flex-row gap-3 pt-2 border-t border-border">
+                          <input
+                            type="text"
+                            value={notesByVerif[v.id] || ''}
+                            onChange={(e) =>
+                              setNotesByVerif((prev) => ({ ...prev, [v.id]: e.target.value }))
+                            }
+                            placeholder="Mandatory reviewer notes (logged in audit_logs)..."
+                            disabled={isSelfRecord}
+                            className="flex-1 px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl disabled:bg-muted"
+                          />
+                          <div className="flex flex-wrap items-center gap-2 shrink-0">
+                            {v.status === 'SUBMITTED' && (
+                              <button
+                                type="button"
+                                disabled={busy || isSelfRecord}
+                                onClick={() => handleVerificationDecision(v.id, 'UNDER_REVIEW')}
+                                className="px-3 py-2 text-xs font-semibold text-foreground border border-border rounded-xl hover:bg-muted disabled:opacity-40 cursor-pointer"
+                              >
+                                Claim Review
+                              </button>
+                            )}
                             <button
                               type="button"
                               disabled={busy || isSelfRecord}
-                              onClick={() => handleVerificationDecision(v.id, 'UNDER_REVIEW')}
-                              className="px-3 py-2 text-xs font-semibold text-foreground border border-border rounded-xl hover:bg-muted disabled:opacity-40 cursor-pointer"
+                              onClick={() => handleVerificationDecision(v.id, 'VERIFIED')}
+                              className="px-3.5 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-40 cursor-pointer"
                             >
-                              Claim Review
+                              Verify (VERIFIED)
                             </button>
-                          )}
-                          <button
-                            type="button"
-                            disabled={busy || isSelfRecord}
-                            onClick={() => handleVerificationDecision(v.id, 'VERIFIED')}
-                            className="px-3.5 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-40 cursor-pointer"
-                          >
-                            Verify (VERIFIED)
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busy || isSelfRecord}
-                            onClick={() => handleVerificationDecision(v.id, 'ACTION_REQUIRED')}
-                            className="px-3.5 py-2 text-xs font-semibold text-amber-600 dark:text-amber-400 border border-amber-500/40 rounded-xl hover:bg-amber-500/10 disabled:opacity-40 cursor-pointer"
-                          >
-                            Request Action
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busy || isSelfRecord}
-                            onClick={() => handleVerificationDecision(v.id, 'REJECTED')}
-                            className="px-3.5 py-2 text-xs font-semibold text-destructive border border-destructive/30 rounded-xl hover:bg-destructive/10 disabled:opacity-40 cursor-pointer"
-                          >
-                            Reject
-                          </button>
+                            <button
+                              type="button"
+                              disabled={busy || isSelfRecord}
+                              onClick={() => handleVerificationDecision(v.id, 'ACTION_REQUIRED')}
+                              className="px-3.5 py-2 text-xs font-semibold text-amber-600 dark:text-amber-400 border border-amber-500/40 rounded-xl hover:bg-amber-500/10 disabled:opacity-40 cursor-pointer"
+                            >
+                              Request Action
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy || isSelfRecord}
+                              onClick={() => handleVerificationDecision(v.id, 'REJECTED')}
+                              className="px-3.5 py-2 text-xs font-semibold text-destructive border border-destructive/30 rounded-xl hover:bg-destructive/10 disabled:opacity-40 cursor-pointer"
+                            >
+                              Reject
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   );
                 })
@@ -1079,7 +1148,7 @@ export default function AdminConsoleView({
                               {r.expiresAt ? ` · Expires ${r.expiresAt.slice(0, 10)}` : ''}
                             </p>
                           </div>
-                          {r.status === 'ACTIVE' && (
+                          {r.status === 'ACTIVE' && !isAnalystViewer && (
                             <button
                               type="button"
                               disabled={busy}
@@ -1099,7 +1168,7 @@ export default function AdminConsoleView({
               </div>
 
               <div className="lg:col-span-5 space-y-6">
-                {selectedUser && (
+                {selectedUser && !isAnalystViewer && (
                   <div className="bg-card border border-border rounded-2xl p-5 space-y-4">
                     <div className="space-y-2">
                       <p className="text-xs text-muted-foreground">Selected Identity</p>
@@ -1118,17 +1187,48 @@ export default function AdminConsoleView({
                       </p>
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-medium text-muted-foreground mb-1">
-                        Documented Governance Reason (Required)
-                      </label>
-                      <input
-                        type="text"
-                        value={govReason}
-                        onChange={(e) => setGovReason(e.target.value)}
-                        placeholder="e.g., Referral spam rate trigger — restrict referrals only"
-                        className="w-full px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl"
-                      />
+                    <div className="space-y-2">
+                      <div>
+                        <label
+                          htmlFor="gov-reason-category"
+                          className="block text-xs font-medium text-muted-foreground mb-1"
+                        >
+                          Governance Reason Category
+                        </label>
+                        <div className="relative">
+                          <select
+                            id="gov-reason-category"
+                            value={reasonCategory}
+                            onChange={(e) =>
+                              setReasonCategory(e.target.value as GovernanceReasonCategory)
+                            }
+                            className="w-full appearance-none pl-3.5 pr-10 py-2 text-xs border border-input rounded-xl bg-background text-foreground font-sans"
+                          >
+                            <option value="GENERAL">General Governance</option>
+                            <option value="FRAUD_INVESTIGATION">
+                              Fraud Investigation (Auto-Hold Pending Commissions)
+                            </option>
+                            <option value="SPAM_ABUSE">Spam / Referral Abuse</option>
+                            <option value="DISPUTE">Order / Fulfilment Dispute</option>
+                          </select>
+                          <ChevronDown
+                            className="w-3.5 h-3.5 text-muted-foreground absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                            aria-hidden="true"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1">
+                          Documented Governance Reason (Required)
+                        </label>
+                        <input
+                          type="text"
+                          value={govReason}
+                          onChange={(e) => setGovReason(e.target.value)}
+                          placeholder="e.g., Fraud investigation or referral spam trigger..."
+                          className="w-full px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl"
+                        />
+                      </div>
                     </div>
 
                     {/* Granular Restriction Composer */}
@@ -1137,30 +1237,42 @@ export default function AdminConsoleView({
                         Impose Granular Capability Restriction (Least-Privilege)
                       </p>
                       <div className="grid grid-cols-2 gap-2">
-                        <select
-                          value={restrictionCapability}
-                          onChange={(e) =>
-                            setRestrictionCapability(e.target.value as CapabilityCode)
-                          }
-                          className="pl-3.5 pr-10 py-1.5 text-xs border border-input rounded-lg bg-background text-foreground font-sans"
-                        >
-                          <option value="CREATE_REFERRAL">CREATE_REFERRAL</option>
-                          <option value="PUBLISH_LISTING">PUBLISH_LISTING</option>
-                          <option value="REQUEST_WITHDRAWAL">REQUEST_WITHDRAWAL</option>
-                          <option value="INITIATE_PURCHASE">INITIATE_PURCHASE</option>
-                          <option value="MANAGE_TEAM">MANAGE_TEAM</option>
-                        </select>
-                        <select
-                          value={restrictionScope}
-                          onChange={(e) =>
-                            setRestrictionScope(e.target.value as RestrictionScope)
-                          }
-                          className="pl-3.5 pr-10 py-1.5 text-xs border border-input rounded-lg bg-background text-foreground font-sans"
-                        >
-                          <option value="CAPABILITY">CAPABILITY</option>
-                          <option value="ROLE">ROLE</option>
-                          <option value="ACCOUNT">ACCOUNT</option>
-                        </select>
+                        <div className="relative">
+                          <select
+                            value={restrictionCapability}
+                            onChange={(e) =>
+                              setRestrictionCapability(e.target.value as CapabilityCode)
+                            }
+                            className="w-full appearance-none pl-3.5 pr-10 py-1.5 text-xs border border-input rounded-lg bg-background text-foreground font-sans"
+                          >
+                            <option value="CREATE_REFERRAL">CREATE_REFERRAL</option>
+                            <option value="PUBLISH_LISTING">PUBLISH_LISTING</option>
+                            <option value="REQUEST_WITHDRAWAL">REQUEST_WITHDRAWAL</option>
+                            <option value="INITIATE_PURCHASE">INITIATE_PURCHASE</option>
+                            <option value="MANAGE_TEAM">MANAGE_TEAM</option>
+                          </select>
+                          <ChevronDown
+                            className="w-3.5 h-3.5 text-muted-foreground absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                            aria-hidden="true"
+                          />
+                        </div>
+                        <div className="relative">
+                          <select
+                            value={restrictionScope}
+                            onChange={(e) =>
+                              setRestrictionScope(e.target.value as RestrictionScope)
+                            }
+                            className="w-full appearance-none pl-3.5 pr-10 py-1.5 text-xs border border-input rounded-lg bg-background text-foreground font-sans"
+                          >
+                            <option value="CAPABILITY">CAPABILITY</option>
+                            <option value="ROLE">ROLE</option>
+                            <option value="ACCOUNT">ACCOUNT</option>
+                          </select>
+                          <ChevronDown
+                            className="w-3.5 h-3.5 text-muted-foreground absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                            aria-hidden="true"
+                          />
+                        </div>
                       </div>
                       <div className="flex items-center gap-2">
                         <input
@@ -1247,6 +1359,11 @@ export default function AdminConsoleView({
                       <p className="text-xs font-semibold text-foreground">
                         Account Status &amp; Financial Holds
                       </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Suspending an account or selecting Fraud Investigation automatically moves
+                        all Pending commissions into On Hold while keeping ledger rows and referral
+                        ancestry intact.
+                      </p>
                       <div className="flex flex-wrap gap-1.5">
                         {(['ACTIVE', 'RESTRICTED', 'SUSPENDED'] as AccountStatus[]).map((st) => (
                           <button
@@ -1280,6 +1397,28 @@ export default function AdminConsoleView({
                         </button>
                       </div>
                     </div>
+
+                    {isSuperAdmin && selectedUser.accountStatus === 'CLOSED' && (
+                      <div className="space-y-2 pt-2 border-t border-border">
+                        <p className="text-xs font-semibold text-foreground">
+                          Super Admin Reinstatement (CLOSED Account)
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          CLOSED accounts cannot reactivate via normal login or registration. Use
+                          this audited workflow to reinstate Account status to ACTIVE while
+                          preserving permanent referral ancestry.
+                        </p>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => handleReinstateClosedAccount(selectedUser.userId)}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                          Reinstate CLOSED Account → ACTIVE
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1305,7 +1444,7 @@ export default function AdminConsoleView({
                             {rep.reason}
                           </p>
                           <p className="text-muted-foreground">{rep.description}</p>
-                          {rep.status === 'OPEN' && (
+                          {rep.status === 'OPEN' && !isAnalystViewer && (
                             <div className="flex gap-2 pt-1">
                               <button
                                 type="button"
@@ -1365,118 +1504,142 @@ export default function AdminConsoleView({
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-              <form
-                onSubmit={handleCreateMakerChecker}
-                className="lg:col-span-5 bg-card border border-border rounded-2xl p-5 space-y-4 self-start"
-              >
-                <h3 className="font-sans text-base font-bold text-foreground">
-                  Submit Maker Request
-                </h3>
-
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">
-                    Dual-Control Action Type
-                  </label>
-                  <select
-                    value={mcActionType}
-                    onChange={(e) => setMcActionType(e.target.value as MakerCheckerActionType)}
-                    className="w-full pl-3.5 pr-10 py-2 text-xs font-sans border border-input rounded-xl bg-background text-foreground"
-                  >
-                    <option value="COMMISSION_ADJUSTMENT">COMMISSION_ADJUSTMENT</option>
-                    <option value="WALLET_CORRECTION">WALLET_CORRECTION</option>
-                    <option value="EXCEPTIONAL_PAYOUT">EXCEPTIONAL_PAYOUT</option>
-                    <option value="REFUND_EXCEPTION">REFUND_EXCEPTION</option>
-                    <option value="ROLE_ASSIGNMENT">ROLE_ASSIGNMENT</option>
-                    <option value="ANCESTRY_OVERRIDE">ANCESTRY_OVERRIDE</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">
-                    Target Account
-                  </label>
-                  <select
-                    value={mcTargetUserId}
-                    onChange={(e) => setMcTargetUserId(e.target.value)}
-                    className="w-full pl-3.5 pr-10 py-2 text-xs border border-input rounded-xl bg-background text-foreground"
-                  >
-                    {adminData.users.map((u) => (
-                      <option key={u.userId} value={u.userId}>
-                        @{u.username} ({u.email})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {mcActionType === 'ROLE_ASSIGNMENT' ? (
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">
-                      Platform Role (9 Operational Roles)
-                    </label>
-                    <select
-                      value={mcAdminRole}
-                      onChange={(e) => setMcAdminRole(e.target.value as AdminRole)}
-                      className="w-full pl-3.5 pr-10 py-2 text-xs font-sans border border-input rounded-xl bg-background text-foreground"
-                    >
-                      {ALL_PLATFORM_ADMIN_ROLES.map((role) => (
-                        <option key={role} value={role}>
-                          {role}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : mcActionType === 'ANCESTRY_OVERRIDE' ? (
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">
-                      New Direct Referrer User UUID (blank for Organic)
-                    </label>
-                    <input
-                      type="text"
-                      value={mcDirectReferrerId}
-                      onChange={(e) => setMcDirectReferrerId(e.target.value)}
-                      placeholder="UUID..."
-                      className="w-full px-3 py-2 text-xs font-sans bg-background text-foreground border border-input rounded-xl"
-                    />
-                  </div>
-                ) : (
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">
-                      Amount (₦, negative for debit/reversal)
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      value={mcAmountNaira}
-                      onChange={(e) => setMcAmountNaira(e.target.value)}
-                      className="w-full px-3 py-2 text-xs font-numeric tabular-nums bg-background text-foreground border border-input rounded-xl"
-                    />
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">
-                    Maker Justification (Required)
-                  </label>
-                  <textarea
-                    rows={2}
-                    required
-                    value={mcReason}
-                    onChange={(e) => setMcReason(e.target.value)}
-                    placeholder="Document audit evidence and justification..."
-                    className="w-full px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={busy}
-                  className="w-full py-2.5 px-4 text-xs font-semibold text-commerce-foreground bg-commerce rounded-xl hover:bg-commerce/90 cursor-pointer"
+              {!isAnalystViewer && (
+                <form
+                  onSubmit={handleCreateMakerChecker}
+                  className="lg:col-span-5 bg-card border border-border rounded-2xl p-5 space-y-4 self-start"
                 >
-                  Submit Maker Request for Checker Approval
-                </button>
-              </form>
+                  <h3 className="font-sans text-base font-bold text-foreground">
+                    Submit Maker Request
+                  </h3>
 
-              <div className="lg:col-span-7 bg-card border border-border rounded-2xl divide-y divide-border">
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                      Dual-Control Action Type
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={mcActionType}
+                        onChange={(e) => setMcActionType(e.target.value as MakerCheckerActionType)}
+                        className="w-full appearance-none pl-3.5 pr-10 py-2 text-xs font-sans border border-input rounded-xl bg-background text-foreground"
+                      >
+                        <option value="COMMISSION_ADJUSTMENT">COMMISSION_ADJUSTMENT</option>
+                        <option value="WALLET_CORRECTION">WALLET_CORRECTION</option>
+                        <option value="EXCEPTIONAL_PAYOUT">EXCEPTIONAL_PAYOUT</option>
+                        <option value="REFUND_EXCEPTION">REFUND_EXCEPTION</option>
+                        <option value="ROLE_ASSIGNMENT">ROLE_ASSIGNMENT</option>
+                        <option value="ANCESTRY_OVERRIDE">ANCESTRY_OVERRIDE</option>
+                      </select>
+                      <ChevronDown
+                        className="w-3.5 h-3.5 text-muted-foreground absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                        aria-hidden="true"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                      Target Account
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={mcTargetUserId}
+                        onChange={(e) => setMcTargetUserId(e.target.value)}
+                        className="w-full appearance-none pl-3.5 pr-10 py-2 text-xs border border-input rounded-xl bg-background text-foreground"
+                      >
+                        {adminData.users.map((u) => (
+                          <option key={u.userId} value={u.userId}>
+                            @{u.username} ({u.email})
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        className="w-3.5 h-3.5 text-muted-foreground absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                        aria-hidden="true"
+                      />
+                    </div>
+                  </div>
+
+                  {mcActionType === 'ROLE_ASSIGNMENT' ? (
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">
+                        Platform Role (9 Operational Roles)
+                      </label>
+                      <div className="relative">
+                        <select
+                          value={mcAdminRole}
+                          onChange={(e) => setMcAdminRole(e.target.value as AdminRole)}
+                          className="w-full appearance-none pl-3.5 pr-10 py-2 text-xs font-sans border border-input rounded-xl bg-background text-foreground"
+                        >
+                          {ALL_PLATFORM_ADMIN_ROLES.map((role) => (
+                            <option key={role} value={role}>
+                              {role}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown
+                          className="w-3.5 h-3.5 text-muted-foreground absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                          aria-hidden="true"
+                        />
+                      </div>
+                    </div>
+                  ) : mcActionType === 'ANCESTRY_OVERRIDE' ? (
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">
+                        New Direct Referrer User UUID (blank for Organic)
+                      </label>
+                      <input
+                        type="text"
+                        value={mcDirectReferrerId}
+                        onChange={(e) => setMcDirectReferrerId(e.target.value)}
+                        placeholder="UUID..."
+                        className="w-full px-3 py-2 text-xs font-sans bg-background text-foreground border border-input rounded-xl"
+                      />
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">
+                        Amount (₦, negative for debit/reversal)
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        value={mcAmountNaira}
+                        onChange={(e) => setMcAmountNaira(e.target.value)}
+                        className="w-full px-3 py-2 text-xs font-numeric tabular-nums bg-background text-foreground border border-input rounded-xl"
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                      Maker Justification (Required)
+                    </label>
+                    <textarea
+                      rows={2}
+                      required
+                      value={mcReason}
+                      onChange={(e) => setMcReason(e.target.value)}
+                      placeholder="Document audit evidence and justification..."
+                      className="w-full px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={busy}
+                    className="w-full py-2.5 px-4 text-xs font-semibold text-commerce-foreground bg-commerce rounded-xl hover:bg-commerce/90 cursor-pointer"
+                  >
+                    Submit Maker Request for Checker Approval
+                  </button>
+                </form>
+              )}
+
+              <div
+                className={`${
+                  isAnalystViewer ? 'lg:col-span-12' : 'lg:col-span-7'
+                } bg-card border border-border rounded-2xl divide-y divide-border`}
+              >
                 {adminData.makerCheckerRequests.length === 0 ? (
                   <div className="p-8 text-center text-sm text-muted-foreground">
                     No Maker-Checker dual-control requests yet.
@@ -1507,7 +1670,7 @@ export default function AdminConsoleView({
                           Maker: @{m.makerHandle} · Payload: {JSON.stringify(m.payload)}
                         </p>
 
-                        {m.status === 'PENDING' && (
+                        {m.status === 'PENDING' && !isAnalystViewer && (
                           <div className="pt-2 border-t border-border space-y-2">
                             {isSelfMaker ? (
                               <p className="text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
@@ -1608,11 +1771,12 @@ export default function AdminConsoleView({
                         {a.appealsOfficerHandle ? ` · Adjudicated by @${a.appealsOfficerHandle}` : ''}
                       </p>
 
-                      {(a.status === 'OPEN' || a.status === 'UNDER_REVIEW') && (
+                      {(a.status === 'OPEN' || a.status === 'UNDER_REVIEW') && !isAnalystViewer && (
                         <div className="pt-2 border-t border-border space-y-2">
                           {conflict ? (
                             <p className="text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
-                              Independent review conflict: the original reviewer or appellant cannot
+                              Independent review conflict (appeals_officer_id !==
+                              original_reviewer_id): the original reviewer or appellant cannot
                               adjudicate this appeal.
                             </p>
                           ) : (
@@ -1693,93 +1857,99 @@ export default function AdminConsoleView({
             )}
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-              <form
-                onSubmit={handleCreateCategory}
-                className="lg:col-span-5 bg-card border border-border rounded-2xl p-5 space-y-4 self-start"
-              >
-                <div className="flex items-center gap-2">
-                  <Plus className="w-4 h-4 text-foreground" aria-hidden="true" />
-                  <h3 className="font-sans text-base font-bold text-foreground">
-                    Add Listing Category
-                  </h3>
-                </div>
+              {isSuperAdmin && !isAnalystViewer && (
+                <form
+                  onSubmit={handleCreateCategory}
+                  className="lg:col-span-5 bg-card border border-border rounded-2xl p-5 space-y-4 self-start"
+                >
+                  <div className="flex items-center gap-2">
+                    <Plus className="w-4 h-4 text-foreground" aria-hidden="true" />
+                    <h3 className="font-sans text-base font-bold text-foreground">
+                      Add Listing Category
+                    </h3>
+                  </div>
 
-                <div>
-                  <label
-                    htmlFor="cat-name"
-                    className="block text-xs font-medium text-muted-foreground mb-1"
-                  >
-                    Category Name
-                  </label>
-                  <input
-                    id="cat-name"
-                    type="text"
-                    required
-                    disabled={!isSuperAdmin || busy}
-                    value={newCatName}
-                    onChange={(e) => setNewCatName(e.target.value)}
-                    placeholder="e.g., Sports & Fitness"
-                    className="w-full px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl disabled:opacity-50"
-                  />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="cat-desc"
-                    className="block text-xs font-medium text-muted-foreground mb-1"
-                  >
-                    Description (Optional)
-                  </label>
-                  <textarea
-                    id="cat-desc"
-                    rows={2}
-                    disabled={!isSuperAdmin || busy}
-                    value={newCatDesc}
-                    onChange={(e) => setNewCatDesc(e.target.value)}
-                    placeholder="Short category summary..."
-                    className="w-full px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl disabled:opacity-50"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 items-end">
                   <div>
                     <label
-                      htmlFor="cat-sort"
+                      htmlFor="cat-name"
                       className="block text-xs font-medium text-muted-foreground mb-1"
                     >
-                      Sort Order
+                      Category Name
                     </label>
                     <input
-                      id="cat-sort"
-                      type="number"
-                      disabled={!isSuperAdmin || busy}
-                      value={newCatSort}
-                      onChange={(e) => setNewCatSort(e.target.value)}
-                      className="w-full px-3 py-2 text-xs font-numeric tabular-nums bg-background text-foreground border border-input rounded-xl disabled:opacity-50"
+                      id="cat-name"
+                      type="text"
+                      required
+                      disabled={busy}
+                      value={newCatName}
+                      onChange={(e) => setNewCatName(e.target.value)}
+                      placeholder="e.g., Sports & Fitness"
+                      className="w-full px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl disabled:opacity-50"
                     />
                   </div>
-                  <label className="flex items-center gap-2 p-2.5 bg-muted/50 border border-border rounded-xl text-xs font-medium text-foreground cursor-pointer">
-                    <input
-                      type="checkbox"
-                      disabled={!isSuperAdmin || busy}
-                      checked={newCatActive}
-                      onChange={(e) => setNewCatActive(e.target.checked)}
-                      className="accent-foreground"
+
+                  <div>
+                    <label
+                      htmlFor="cat-desc"
+                      className="block text-xs font-medium text-muted-foreground mb-1"
+                    >
+                      Description (Optional)
+                    </label>
+                    <textarea
+                      id="cat-desc"
+                      rows={2}
+                      disabled={busy}
+                      value={newCatDesc}
+                      onChange={(e) => setNewCatDesc(e.target.value)}
+                      placeholder="Short category summary..."
+                      className="w-full px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl disabled:opacity-50"
                     />
-                    Active immediately
-                  </label>
-                </div>
+                  </div>
 
-                <button
-                  type="submit"
-                  disabled={!isSuperAdmin || busy}
-                  className="w-full py-2.5 px-4 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-45 cursor-pointer"
-                >
-                  {busy ? 'Saving Category...' : 'Add Category'}
-                </button>
-              </form>
+                  <div className="grid grid-cols-2 gap-3 items-end">
+                    <div>
+                      <label
+                        htmlFor="cat-sort"
+                        className="block text-xs font-medium text-muted-foreground mb-1"
+                      >
+                        Sort Order
+                      </label>
+                      <input
+                        id="cat-sort"
+                        type="number"
+                        disabled={busy}
+                        value={newCatSort}
+                        onChange={(e) => setNewCatSort(e.target.value)}
+                        className="w-full px-3 py-2 text-xs font-numeric tabular-nums bg-background text-foreground border border-input rounded-xl disabled:opacity-50"
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 p-2.5 bg-muted/50 border border-border rounded-xl text-xs font-medium text-foreground cursor-pointer">
+                      <input
+                        type="checkbox"
+                        disabled={busy}
+                        checked={newCatActive}
+                        onChange={(e) => setNewCatActive(e.target.checked)}
+                        className="accent-foreground"
+                      />
+                      Active immediately
+                    </label>
+                  </div>
 
-              <div className="lg:col-span-7 bg-card border border-border rounded-2xl divide-y divide-border">
+                  <button
+                    type="submit"
+                    disabled={busy}
+                    className="w-full py-2.5 px-4 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-45 cursor-pointer"
+                  >
+                    {busy ? 'Saving Category...' : 'Add Category'}
+                  </button>
+                </form>
+              )}
+
+              <div
+                className={`${
+                  isSuperAdmin && !isAnalystViewer ? 'lg:col-span-7' : 'lg:col-span-12'
+                } bg-card border border-border rounded-2xl divide-y divide-border`}
+              >
                 {adminData.categories.length === 0 ? (
                   <div className="p-8 text-center text-sm text-muted-foreground">
                     No listing categories found.

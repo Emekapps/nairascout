@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Camera,
   CheckCircle2,
+  ChevronDown,
   Loader2,
   Lock,
   PackagePlus,
@@ -27,8 +28,9 @@ import { UserIdentityRow } from './shared/UserIdentityRow';
 import { DismissibleNoticePanel } from './shared/DismissibleNoticePanel';
 import type { SellerTeamPermissions } from '@/lib/db/schema';
 import {
-  MAX_SELLER_TEAM_SEATS,
+  ALL_SELLER_TEAM_ROLES,
   SELLER_TEAM_ROLE_PERMISSIONS,
+  SPRAWL_MAX_TEAM_SEATS,
   type SellerTeamRole,
 } from '@/lib/auth/rbac';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
@@ -583,7 +585,7 @@ export default function SellerHubView({
     scout.sellerVerificationStatus === 'VERIFIED' &&
     !publishRestriction;
   const delegatedSeatsUsed = scout.teamMembers.filter(
-    (m) => m.role !== 'BUSINESS_OWNER'
+    (m) => (m.status === 'ACTIVE' || m.status === 'INVITED') && m.role !== 'BUSINESS_OWNER'
   ).length;
 
 
@@ -1132,8 +1134,8 @@ export default function SellerHubView({
               <div className="lg:col-span-7 bg-card border border-border rounded-2xl divide-y divide-border overflow-hidden">
                 <div className="p-4 flex items-center justify-between text-xs bg-muted/50">
                   <span className="font-semibold text-foreground">Active Team Members</span>
-                  <span className="font-numeric font-semibold text-foreground tabular-nums">
-                    {delegatedSeatsUsed} / {MAX_SELLER_TEAM_SEATS} delegated seats used
+                  <span className="font-numeric font-semibold text-foreground px-2.5 py-1 rounded-full bg-background border border-border tabular-nums">
+                    Seats Used: {delegatedSeatsUsed} / {SPRAWL_MAX_TEAM_SEATS}
                   </span>
                 </div>
                 {scout.teamMembers.map((m) => (
@@ -1162,71 +1164,91 @@ export default function SellerHubView({
                   <h3 className="font-sans text-base font-bold text-foreground">
                     Add Business Team Member
                   </h3>
-                  <span className="font-numeric text-xs text-muted-foreground tabular-nums">
-                    {delegatedSeatsUsed}/{MAX_SELLER_TEAM_SEATS}
+                  <span className="font-numeric text-xs font-semibold text-muted-foreground tabular-nums">
+                    Seats Used: {delegatedSeatsUsed} / {SPRAWL_MAX_TEAM_SEATS}
                   </span>
                 </div>
                 <form onSubmit={handleInviteTeam} className="space-y-3">
                   <input
                     type="email"
                     required
+                    disabled={delegatedSeatsUsed >= SPRAWL_MAX_TEAM_SEATS}
                     value={memberEmail}
                     onChange={(e) => setMemberEmail(e.target.value)}
                     placeholder="Registered Scout email..."
-                    className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
+                    className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl disabled:opacity-55"
                   />
-                  <select
-                    value={memberRole}
-                    onChange={(e) => {
-                      const nextRole = e.target.value as Exclude<SellerTeamRole, 'BUSINESS_OWNER'>;
-                      setMemberRole(nextRole);
-                      setMemberPerms(SELLER_TEAM_ROLE_PERMISSIONS[nextRole]);
-                    }}
-                    className="w-full pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
-                  >
-                    {(
-                      [
-                        'BUSINESS_ADMIN',
-                        'PRODUCT_MANAGER',
-                        'ORDER_MANAGER',
-                        'FINANCE_MANAGER',
-                        'ANALYST_VIEWER',
-                      ] as Exclude<SellerTeamRole, 'BUSINESS_OWNER'>[]
-                    ).map((roleKey) => (
-                      <option key={roleKey} value={roleKey}>
-                        {SELLER_TEAM_ROLE_LABELS[roleKey].label}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <select
+                      aria-label="Seller Team Role"
+                      disabled={delegatedSeatsUsed >= SPRAWL_MAX_TEAM_SEATS}
+                      value={memberRole}
+                      onChange={(e) => {
+                        const val = e.target.value as SellerTeamRole;
+                        if (val === 'BUSINESS_OWNER') return;
+                        setMemberRole(val);
+                        setMemberPerms(SELLER_TEAM_ROLE_PERMISSIONS[val]);
+                      }}
+                      className="w-full appearance-none pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground disabled:opacity-55"
+                    >
+                      {ALL_SELLER_TEAM_ROLES.map((roleKey) => (
+                        <option
+                          key={roleKey}
+                          value={roleKey}
+                          disabled={roleKey === 'BUSINESS_OWNER'}
+                        >
+                          {SELLER_TEAM_ROLE_LABELS[roleKey].label}
+                          {roleKey === 'BUSINESS_OWNER' ? ' (Primary Owner Only)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      className="w-4 h-4 text-muted-foreground absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    {SELLER_TEAM_ROLE_LABELS[memberRole].summary}
+                  </p>
                   <div className="space-y-1.5 text-xs text-muted-foreground">
                     {(
                       [
                         ['canManageListings', 'Manage Listings'],
                         ['canManageOrders', 'Manage Orders'],
-                        ['canViewAnalytics', 'View Analytics'],
-                        ['canManageBilling', 'Manage Billing'],
+                        ['canViewAnalytics', 'View Analytics / Financial Summaries'],
+                        ['canManageBilling', 'Manage Billing (Owner Only)'],
                         ['canManageTeam', 'Manage Team'],
                       ] as const
-                    ).map(([key, label]) => (
-                      <label key={key} className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={memberPerms[key]}
-                          onChange={(e) =>
-                            setMemberPerms((p) => ({ ...p, [key]: e.target.checked }))
-                          }
-                          className="accent-foreground"
-                        />
-                        <span>{label}</span>
-                      </label>
-                    ))}
+                    ).map(([key, label]) => {
+                      const isBillingLocked = key === 'canManageBilling';
+                      return (
+                        <label
+                          key={key}
+                          className={`flex items-center gap-2 ${
+                            isBillingLocked ? 'opacity-55 cursor-not-allowed' : 'cursor-pointer'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            disabled={isBillingLocked || delegatedSeatsUsed >= SPRAWL_MAX_TEAM_SEATS}
+                            checked={isBillingLocked ? false : memberPerms[key]}
+                            onChange={(e) => {
+                              if (isBillingLocked) return;
+                              setMemberPerms((p) => ({ ...p, [key]: e.target.checked }));
+                            }}
+                            className="accent-foreground"
+                          />
+                          <span>{label}</span>
+                        </label>
+                      );
+                    })}
                   </div>
                   <button
                     type="submit"
-                    disabled={submitting || delegatedSeatsUsed >= MAX_SELLER_TEAM_SEATS}
+                    disabled={submitting || delegatedSeatsUsed >= SPRAWL_MAX_TEAM_SEATS}
                     className="w-full py-2.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-45 cursor-pointer"
                   >
-                    {delegatedSeatsUsed >= MAX_SELLER_TEAM_SEATS
+                    {delegatedSeatsUsed >= SPRAWL_MAX_TEAM_SEATS
                       ? 'Seat Limit Reached (5 / 5)'
                       : 'Add Team Member'}
                   </button>

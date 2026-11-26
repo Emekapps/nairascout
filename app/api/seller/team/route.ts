@@ -13,7 +13,7 @@ import {
   manageSellerTeamForActor,
 } from '@/lib/nairascout-store';
 
-// NS-SEL-004: Business Seller team seat management (Sprawl plan, max 5 seats)
+// NS-ACC-014 & NS-SEL-004: Business Seller team seat management (Sprawl plan, max 5 seats, 6 roles)
 export async function POST(req: NextRequest) {
   if (!verifyMutationOrigin(req)) {
     return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
           canManageListings: Boolean(body.permissions?.canManageListings ?? defaults.canManageListings),
           canManageOrders: Boolean(body.permissions?.canManageOrders ?? defaults.canManageOrders),
           canViewAnalytics: Boolean(body.permissions?.canViewAnalytics ?? defaults.canViewAnalytics),
-          canManageBilling: Boolean(body.permissions?.canManageBilling ?? defaults.canManageBilling),
+          canManageBilling: false,
           canManageTeam: Boolean(body.permissions?.canManageTeam ?? defaults.canManageTeam),
         },
       });

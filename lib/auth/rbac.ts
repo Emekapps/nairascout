@@ -57,7 +57,9 @@ export const ALL_SELLER_TEAM_ROLES: SellerTeamRole[] = [
   'ANALYST_VIEWER',
 ];
 
-export const MAX_SELLER_TEAM_SEATS = 5;
+// NS-ACC-014: Sprawl plan 5-seat cap & all 6 Seller Team Roles
+export const SPRAWL_MAX_TEAM_SEATS = 5;
+export const MAX_SELLER_TEAM_SEATS = SPRAWL_MAX_TEAM_SEATS;
 export const MAX_REFERRAL_RECIPIENTS_PER_BATCH = 20;
 
 export const SELLER_TEAM_ROLE_PERMISSIONS: Record<SellerTeamRole, SellerTeamPermissions> = {
@@ -78,7 +80,7 @@ export const SELLER_TEAM_ROLE_PERMISSIONS: Record<SellerTeamRole, SellerTeamPerm
   PRODUCT_MANAGER: {
     canManageListings: true,
     canManageOrders: false,
-    canViewAnalytics: true,
+    canViewAnalytics: false,
     canManageBilling: false,
     canManageTeam: false,
   },
@@ -93,7 +95,7 @@ export const SELLER_TEAM_ROLE_PERMISSIONS: Record<SellerTeamRole, SellerTeamPerm
     canManageListings: false,
     canManageOrders: false,
     canViewAnalytics: true,
-    canManageBilling: true,
+    canManageBilling: false,
     canManageTeam: false,
   },
   ANALYST_VIEWER: {
@@ -446,8 +448,11 @@ export function assertCanPublishListing(
   }
 }
 
-// NS-SEL-004: Business Seller & Sprawl plan team-seat enforcement (max 5 seats)
-export function assertCanManageSellerTeam(ctx: UserAuthContext | null): void {
+// NS-ACC-014 & NS-SEL-004: Business Seller & Sprawl plan team-seat enforcement (max 5 seats)
+export function assertCanManageSellerTeam(
+  ctx: UserAuthContext | null,
+  options?: { operation?: 'invite' | 'revoke'; activeOrInvitedSeats?: number }
+): void {
   assertAccountOperational(ctx);
   assertCapabilityNotRestricted(ctx, 'MANAGE_TEAM');
   const seller = ctx?.seller;
@@ -484,6 +489,18 @@ export function assertCanManageSellerTeam(ctx: UserAuthContext | null): void {
       'You do not have permission to manage team members.',
       403,
       'MISSING_TEAM_PERMISSION'
+    );
+  }
+
+  if (
+    options?.operation === 'invite' &&
+    typeof options.activeOrInvitedSeats === 'number' &&
+    options.activeOrInvitedSeats >= SPRAWL_MAX_TEAM_SEATS
+  ) {
+    throw new AuthorizationError(
+      `Sprawl plan seat cap (${SPRAWL_MAX_TEAM_SEATS} active or invited team seats) reached. Revoke an inactive seat before inviting another member.`,
+      403,
+      'SPRAWL_TEAM_SEAT_LIMIT_REACHED'
     );
   }
 }
@@ -581,9 +598,7 @@ export function assertMakerCheckerDistinct(makerId: string, checkerId: string): 
   }
 }
 
-/**
- * Enforces independent appeals reviewer (appeals officer cannot review own prior decision).
- */
+// NS-ACC-015 & NS-GOV-004: Enforce independent appeals reviewer (appeals_officer_id !== original_reviewer_id)
 export function assertIndependentAppealsOfficer(
   appealsOfficerId: string,
   originalReviewerId: string | null | undefined,

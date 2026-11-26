@@ -9,8 +9,9 @@ import {
   ensureUserProvisionedInDb,
   getNairaScoutSnapshot,
 } from '@/lib/nairascout-store';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 
-// NS-ACC-001 & NS-REF-001: Authenticated idempotent PostgreSQL Scout provisioning & referral attribution
+// NS-ACC-001, NS-ACC-017 & NS-REF-001: Authenticated idempotent PostgreSQL Scout provisioning & CLOSED guard
 export async function POST(req: NextRequest) {
   if (!verifyMutationOrigin(req)) {
     return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });
@@ -56,6 +57,12 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     if (err instanceof AuthorizationError) {
+      if (err.code === 'ACCOUNT_CLOSED') {
+        const supabase = await createSupabaseServerClient();
+        if (supabase) {
+          await supabase.auth.signOut().catch(() => undefined);
+        }
+      }
       return NextResponse.json({ error: err.message, code: err.code }, { status: err.statusCode });
     }
     const formatted = formatPostgresError(err);

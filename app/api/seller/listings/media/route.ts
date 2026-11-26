@@ -202,7 +202,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// NS-SEL-002: Scoped removal of uploaded listing media owned by the authenticated user
+// NS-SEL-002 & NS-ACC-017: Scoped removal of uploaded listing media with live Seller privilege check
 export async function DELETE(req: NextRequest) {
   if (!verifyMutationOrigin(req)) {
     return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });
@@ -214,6 +214,9 @@ export async function DELETE(req: NextRequest) {
   }
 
   try {
+    const ctx = await loadDbAuthContext(identity.userId);
+    assertCanManageSellerDrafts(ctx);
+
     const body = await req.json();
     const url = typeof body?.url === 'string' ? body.url : null;
     const objectPath = extractScopedStoragePath(url, identity.userId);
@@ -227,6 +230,12 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (err) {
+    if (err instanceof AuthorizationError) {
+      return NextResponse.json(
+        { error: err.message, code: err.code },
+        { status: err.statusCode }
+      );
+    }
     console.error('[DELETE /api/seller/listings/media] Failed:', formatPostgresError(err), err);
     return NextResponse.json({ error: 'Could not remove listing image.' }, { status: 500 });
   }
