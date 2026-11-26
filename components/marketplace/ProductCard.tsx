@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   ChevronLeft,
   ChevronRight,
@@ -20,7 +22,7 @@ import { UserAvatar } from '@/components/shared/UserAvatar';
 
 interface ProductCardProps {
   product: ProductListing;
-  onInspect: (product: ProductListing) => void;
+  onInspect?: (product: ProductListing) => void;
   onBuyDirect: (product: ProductListing) => void;
   onRefer: (product: ProductListing) => void;
 }
@@ -31,6 +33,9 @@ export function ProductCard({
   onBuyDirect,
   onRefer,
 }: ProductCardProps) {
+  const router = useRouter();
+  const detailHref = `/products/${encodeURIComponent(product.id)}`;
+
   const images =
     product.imageUrls && product.imageUrls.length > 0
       ? product.imageUrls
@@ -46,6 +51,14 @@ export function ProductCard({
 
   const safeSlideIndex = images.length > 0 ? Math.min(activeSlide, images.length - 1) : 0;
   const currentImageSrc = images[safeSlideIndex] || product.imageUrl;
+
+  const navigateToDetail = () => {
+    if (onInspect) {
+      onInspect(product);
+      return;
+    }
+    router.push(detailHref);
+  };
 
   const goPrev = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -111,7 +124,7 @@ export function ProductCard({
         {product.isSellerVerified && (
           <span
             title="KYC Verified Seller"
-            className="inline-flex items-center gap-1 text-[11px] font-semibold text-success shrink-0"
+            className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#005B46] dark:text-[#34D399] shrink-0"
           >
             <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
             Verified
@@ -161,14 +174,14 @@ export function ProductCard({
 
           {/* Shrunk Horizontal Multi-Item Image Carousel Below Video */}
           {images.length > 0 && (
-            <div className="px-3 flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5">
+            <div className="px-3 flex items-center gap-2 overflow-x-auto no-scrollbar scrollbar-none pb-0.5">
               {images.map((imgUrl, idx) => (
                 <button
                   key={`${product.id}-thumb-${idx}`}
                   type="button"
                   onClick={() => {
                     setActiveSlide(idx);
-                    onInspect(product);
+                    navigateToDetail();
                   }}
                   aria-label={`View image ${idx + 1} of ${images.length}`}
                   className={`relative h-14 w-14 rounded-lg overflow-hidden shrink-0 border transition-all cursor-pointer ${
@@ -209,16 +222,16 @@ export function ProductCard({
           onTouchEnd={handleTouchEnd}
         >
           <div
-            role="button"
+            role="link"
             tabIndex={0}
-            onClick={() => onInspect(product)}
+            onClick={navigateToDetail}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                onInspect(product);
+                navigateToDetail();
               }
             }}
-            aria-label={`Inspect ${product.title}`}
+            aria-label={`View ${product.title}`}
             className="relative aspect-[4/3] w-full rounded-xl overflow-hidden bg-muted cursor-pointer focus-visible:outline-2 focus-visible:outline-ring"
           >
             <ProductImage
@@ -291,25 +304,21 @@ export function ProductCard({
         </div>
       )}
 
-      {/* Details & Monochrome Dual Actions */}
+      {/* Details & Action Buttons */}
       <div className="p-4 flex-1 flex flex-col justify-between gap-3">
         <div>
-          <button
-            type="button"
-            onClick={() => onInspect(product)}
-            className="text-left block w-full cursor-pointer"
-          >
-            <h3 className="font-sans text-sm font-semibold line-clamp-1 text-foreground transition-colors">
+          <Link href={detailHref} className="text-left block w-full">
+            <h3 className="font-sans text-sm font-semibold line-clamp-1 text-foreground hover:underline transition-colors">
               {product.title}
             </h3>
-          </button>
+          </Link>
           <p className="mt-1 font-sans text-xs text-muted-foreground line-clamp-2 leading-relaxed">
             {product.description}
           </p>
         </div>
 
         <div className="space-y-2.5 pt-2 border-t border-border">
-          <div className="flex items-baseline justify-between gap-2">
+          <Link href={detailHref} className="flex items-baseline justify-between gap-2">
             <div>
               <span className="font-numeric text-base font-bold tabular-nums text-foreground">
                 {formatWholeNaira(product.priceKobo)}
@@ -321,14 +330,14 @@ export function ProductCard({
             <span className="font-numeric text-[11px] text-muted-foreground tabular-nums">
               {product.stock} left · {product.daysRemaining}d
             </span>
-          </div>
+          </Link>
 
           <div className="grid grid-cols-2 gap-2 pt-1">
             <button
               type="button"
               disabled={product.stock <= 0}
               onClick={() => onBuyDirect(product)}
-              className="inline-flex items-center justify-center gap-1.5 bg-commerce text-commerce-foreground hover:bg-commerce/90 disabled:opacity-45 font-sans text-xs font-bold uppercase tracking-wider rounded-lg h-10 transition-colors cursor-pointer"
+              className="inline-flex items-center justify-center gap-1.5 bg-[#E53935] text-[#FFFFFF] hover:bg-[#C62828] disabled:opacity-45 font-sans text-xs font-bold uppercase tracking-wider rounded-lg h-10 transition-colors cursor-pointer"
             >
               <ShoppingBag className="w-3.5 h-3.5" aria-hidden="true" />
               BUY
@@ -336,7 +345,7 @@ export function ProductCard({
             <button
               type="button"
               onClick={() => onRefer(product)}
-              className="inline-flex items-center justify-center gap-1.5 bg-primary text-primary-foreground border border-primary-border hover:bg-primary/90 font-sans text-xs font-bold uppercase tracking-wider rounded-lg h-10 transition-colors cursor-pointer"
+              className="inline-flex items-center justify-center gap-1.5 bg-[#000000] text-[#FFFFFF] border border-transparent dark:border-[#2E2E2E] hover:bg-[#1A1A1A] font-sans text-xs font-bold uppercase tracking-wider rounded-lg h-10 transition-colors cursor-pointer"
             >
               <Share2 className="w-3.5 h-3.5" aria-hidden="true" />
               REFER

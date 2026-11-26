@@ -22,14 +22,10 @@ import {
   NAIRASCOUT_EARNINGS_DISCLAIMER,
   NAIRASCOUT_TAGLINE,
 } from '@/lib/constants/foundation-content';
-import type { NavTab } from './HeaderNav';
 import { DismissibleNoticePanel } from './shared/DismissibleNoticePanel';
-import { RestrictionNoticeBanner } from './shared/RestrictionNoticeBanner';
 import { UserIdentityRow } from './shared/UserIdentityRow';
-import { ScoutOverviewDashboard } from './scout/ScoutOverviewDashboard';
-import { ScoutActivityFeed } from './scout/ScoutActivityFeed';
 
-export type NetworkSubTab = 'overview' | 'activity' | 'explorer' | 'scouts_list' | 'simulator';
+export type NetworkSubTab = 'explorer' | 'scouts_list' | 'simulator';
 
 interface NetworkViewProps {
   snapshot: NairaScoutSnapshot;
@@ -37,7 +33,6 @@ interface NetworkViewProps {
   onExternalSubTabChange?: (tab: NetworkSubTab) => void;
   externalScoutSearch?: string;
   onExternalScoutSearchChange?: (q: string) => void;
-  onNavigateMainTab?: (tab: NavTab) => void;
   onInviteScout: (targetScoutId: string) => Promise<void>;
   onRespondInvite: (invitationId: string, decision: 'accept' | 'reject' | 'withdraw') => Promise<void>;
   onManageContact: (payload: {
@@ -59,16 +54,13 @@ export default function NetworkView({
   onExternalSubTabChange,
   externalScoutSearch,
   onExternalScoutSearchChange,
-  onNavigateMainTab,
   onInviteScout,
   onRespondInvite,
   onManageContact,
   onReportAbuse,
   onOpenReferForProduct,
 }: NetworkViewProps) {
-  const [localSubTab, setLocalSubTab] = useState<NetworkSubTab>(
-    snapshot.authenticated ? 'overview' : 'explorer'
-  );
+  const [localSubTab, setLocalSubTab] = useState<NetworkSubTab>('explorer');
   const [inviteSubTab, setInviteSubTab] = useState<'received' | 'sent'>('received');
   const [localScoutSearch, setLocalScoutSearch] = useState('');
 
@@ -178,8 +170,6 @@ export default function NetworkView({
     }
   };
 
-  const unreadNotificationsCount = snapshot.notifications.filter((n) => !n.isRead).length;
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-5">
@@ -187,57 +177,37 @@ export default function NetworkView({
           Scout Hub &amp; Network
         </h1>
 
-        <div className="flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] rounded-xl shrink-0 self-start overflow-x-auto max-w-full">
-          {(
-            [
-              ...(snapshot.authenticated
-                ? [
-                    { id: 'overview', label: 'Overview' },
-                    { id: 'activity', label: 'Activity' },
-                  ]
-                : []),
-              { id: 'explorer', label: 'Ancestry' },
-              { id: 'scouts_list', label: 'Scouts' },
-              { id: 'simulator', label: 'Calculator' },
-            ] as { id: NetworkSubTab; label: string }[]
-          ).map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setSubTab(item.id)}
-              className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
-                subTab === item.id
-                  ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
-                  : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
+        <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto no-scrollbar scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] max-w-full">
+          <div className="flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] border border-border rounded-xl w-max">
+            {(
+              [
+                { id: 'explorer', label: 'Ancestry' },
+                { id: 'scouts_list', label: 'Scouts' },
+                { id: 'simulator', label: 'Calculator' },
+              ] as { id: NetworkSubTab; label: string }[]
+            ).map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setSubTab(item.id)}
+                className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
+                  subTab === item.id
+                    ? 'bg-[#000000] text-[#FFFFFF] border-[#000000] dark:bg-white dark:text-black dark:border-white font-semibold shadow-sm'
+                    : 'bg-[#FFFFFF] text-[#000000] border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium hover:opacity-90'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {subTab !== 'overview' && <RestrictionNoticeBanner activeScout={snapshot.activeScout} />}
-
       <DismissibleNoticePanel
         storageKey="nairascout_network_explainer_notice_v1"
-        description="Track your Scout performance, chronological activity, permanent referral ancestry, Scouts List with private-by-default controls, or calculate 13-Gen commissions."
+        description="Inspect your permanent referral ancestry, manage your Scouts List with private-by-default controls, or calculate 13-Gen commissions."
         ariaLabel="Network Explainer Notice"
       />
-
-      {subTab === 'overview' && snapshot.authenticated && snapshot.activeScout && (
-        <ScoutOverviewDashboard
-          activeScout={snapshot.activeScout}
-          unreadNotificationsCount={unreadNotificationsCount}
-          onNavigateTab={(tab) => onNavigateMainTab?.(tab)}
-          onOpenScoutsList={() => setSubTab('scouts_list')}
-          onOpenActivityFeed={() => setSubTab('activity')}
-        />
-      )}
-
-      {subTab === 'activity' && snapshot.authenticated && snapshot.activeScout && (
-        <ScoutActivityFeed userId={snapshot.activeScout.id} />
-      )}
 
       {subTab === 'explorer' && (
         !snapshot.authenticated ? (
@@ -738,14 +708,14 @@ export default function NetworkView({
                   <h3 className="font-sans text-base font-semibold text-foreground">
                     Pending Invitations
                   </h3>
-                  <div className="flex items-center gap-1 p-1 bg-[#D1D5DB] dark:bg-[#181818] rounded-lg text-xs">
+                  <div className="flex items-center gap-1 p-1 bg-[#F3F4F6] dark:bg-[#181818] border border-border rounded-lg text-xs overflow-x-auto no-scrollbar scrollbar-none">
                     <button
                       type="button"
                       onClick={() => setInviteSubTab('received')}
-                      className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors ${
+                      className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors whitespace-nowrap border ${
                         inviteSubTab === 'received'
-                          ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
-                          : 'bg-[#D1D5D8] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
+                          ? 'bg-[#000000] text-[#FFFFFF] border-[#000000] dark:bg-white dark:text-black dark:border-white font-semibold shadow-sm'
+                          : 'bg-[#FFFFFF] text-[#000000] border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium hover:opacity-90'
                       }`}
                     >
                       Received ({receivedInvites.length})
@@ -753,10 +723,10 @@ export default function NetworkView({
                     <button
                       type="button"
                       onClick={() => setInviteSubTab('sent')}
-                      className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors ${
+                      className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors whitespace-nowrap border ${
                         inviteSubTab === 'sent'
-                          ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
-                          : 'bg-[#D1D5D8] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
+                          ? 'bg-[#000000] text-[#FFFFFF] border-[#000000] dark:bg-white dark:text-black dark:border-white font-semibold shadow-sm'
+                          : 'bg-[#FFFFFF] text-[#000000] border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium hover:opacity-90'
                       }`}
                     >
                       Sent ({sentInvites.length})

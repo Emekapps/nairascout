@@ -51,7 +51,8 @@ export async function middleware(req: NextRequest) {
     await supabase.auth.getUser();
   }
 
-  const refEvent = req.nextUrl.searchParams.get('refEvent');
+  const refEvent =
+    req.nextUrl.searchParams.get('refEvent') || req.nextUrl.searchParams.get('ref');
   const refScout = req.nextUrl.searchParams.get('refScout');
 
   if (refEvent) {

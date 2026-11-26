@@ -506,7 +506,7 @@ export function TopUtilityBar({
             {unreadCount > 0 && (
               <span
                 aria-hidden="true"
-                className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-white font-numeric text-[10px] font-bold tabular-nums flex items-center justify-center shadow-xs"
+                className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#005B46] text-white font-numeric text-[10px] font-bold tabular-nums flex items-center justify-center shadow-xs"
               >
                 {unreadCount > 99 ? '99+' : unreadCount}
               </span>

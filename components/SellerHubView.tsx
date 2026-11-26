@@ -260,26 +260,28 @@ export default function SellerHubView({
           ariaLabel="Activate Seller Capabilities Notice"
         />
 
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1 snap-x text-xs font-medium">
-          {[
-            { step: 1, label: '1. Seller Type' },
-            { step: 2, label: '2. Business Profile' },
-            { step: 3, label: '3. Verification Docs' },
-            { step: 4, label: '4. Plan & Terms' },
-          ].map((s) => (
-            <button
-              key={s.step}
-              type="button"
-              onClick={() => setWizardStep(s.step as 1 | 2 | 3 | 4)}
-              className={`whitespace-nowrap shrink-0 snap-start rounded-full px-3.5 py-2 cursor-pointer transition-colors ${
-                wizardStep === s.step
-                  ? 'bg-primary text-primary-foreground border border-primary-border font-semibold'
-                  : 'bg-muted text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
+        <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto no-scrollbar scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] pb-1 text-xs font-medium">
+          <div className="flex items-center gap-2 w-max">
+            {[
+              { step: 1, label: '1. Seller Type' },
+              { step: 2, label: '2. Business Profile' },
+              { step: 3, label: '3. Verification Docs' },
+              { step: 4, label: '4. Plan & Terms' },
+            ].map((s) => (
+              <button
+                key={s.step}
+                type="button"
+                onClick={() => setWizardStep(s.step as 1 | 2 | 3 | 4)}
+                className={`whitespace-nowrap shrink-0 rounded-full px-3.5 py-2 cursor-pointer transition-colors border ${
+                  wizardStep === s.step
+                    ? 'bg-[#000000] text-[#FFFFFF] border-[#000000] dark:bg-white dark:text-black dark:border-white font-semibold'
+                    : 'bg-[#FFFFFF] text-[#000000] border-input dark:bg-secondary dark:text-foreground dark:border-border hover:opacity-90'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <form
@@ -693,44 +695,46 @@ export default function SellerHubView({
           )}
         </div>
 
-        {/* Navigation Pills directly under Row 4 */}
-        <div className="flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] rounded-xl shrink-0 self-start overflow-x-auto max-w-full">
-          <button
-            type="button"
-            onClick={() => setSubTab('operations')}
-            className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
-              subTab === 'operations'
-                ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
-                : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
-            }`}
-          >
-            Drafts, Listings &amp; Orders
-          </button>
-          <button
-            type="button"
-            onClick={() => setSubTab('plans')}
-            className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
-              subTab === 'plans'
-                ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
-                : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
-            }`}
-          >
-            Plans ({currentPlan.name})
-          </button>
-          {sellerProfile.sellerType === 'BUSINESS' && (
+        {/* Navigation Pills directly under Row 4 (NS-UI-020 & NS-UI-021) */}
+        <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto no-scrollbar scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] max-w-full">
+          <div className="flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] border border-border rounded-xl w-max">
             <button
               type="button"
-              onClick={() => setSubTab('team')}
-              className={`inline-flex items-center gap-1 px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
-                subTab === 'team'
-                  ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
-                  : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
+              onClick={() => setSubTab('operations')}
+              className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
+                subTab === 'operations'
+                  ? 'bg-[#000000] text-[#FFFFFF] border-[#000000] dark:bg-white dark:text-black dark:border-white font-semibold shadow-sm'
+                  : 'bg-[#FFFFFF] text-[#000000] border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium hover:opacity-90'
               }`}
             >
-              <Users className="w-3.5 h-3.5" aria-hidden="true" />
-              Team
+              Drafts, Listings &amp; Orders
             </button>
-          )}
+            <button
+              type="button"
+              onClick={() => setSubTab('plans')}
+              className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
+                subTab === 'plans'
+                  ? 'bg-[#000000] text-[#FFFFFF] border-[#000000] dark:bg-white dark:text-black dark:border-white font-semibold shadow-sm'
+                  : 'bg-[#FFFFFF] text-[#000000] border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium hover:opacity-90'
+              }`}
+            >
+              Plans ({currentPlan.name})
+            </button>
+            {sellerProfile.sellerType === 'BUSINESS' && (
+              <button
+                type="button"
+                onClick={() => setSubTab('team')}
+                className={`inline-flex items-center gap-1 px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
+                  subTab === 'team'
+                    ? 'bg-[#000000] text-[#FFFFFF] border-[#000000] dark:bg-white dark:text-black dark:border-white font-semibold shadow-sm'
+                    : 'bg-[#FFFFFF] text-[#000000] border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium hover:opacity-90'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" aria-hidden="true" />
+                Team
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1024,15 +1028,15 @@ export default function SellerHubView({
 
                     <ul className="mt-5 pt-4 border-t border-border space-y-2.5 text-xs">
                       <li className="flex items-center gap-2 text-foreground">
-                        <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" aria-hidden="true" />
+                        <CheckCircle2 className="h-4 w-4 text-[#005B46] dark:text-[#34D399] shrink-0" aria-hidden="true" />
                         <span>{plan.maxActiveListings} active product listings</span>
                       </li>
                       <li className="flex items-center gap-2 text-foreground">
-                        <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" aria-hidden="true" />
+                        <CheckCircle2 className="h-4 w-4 text-[#005B46] dark:text-[#34D399] shrink-0" aria-hidden="true" />
                         <span>{plan.monthlyPublications} monthly publications</span>
                       </li>
                       <li className="flex items-center gap-2 text-foreground">
-                        <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" aria-hidden="true" />
+                        <CheckCircle2 className="h-4 w-4 text-[#005B46] dark:text-[#34D399] shrink-0" aria-hidden="true" />
                         <span>{plan.maxCategories} product categories</span>
                       </li>
                       <li
@@ -1044,7 +1048,7 @@ export default function SellerHubView({
                           <XCircle className="h-4 w-4 text-red-500 shrink-0" aria-hidden="true" />
                         ) : (
                           <CheckCircle2
-                            className="h-4 w-4 text-emerald-500 shrink-0"
+                            className="h-4 w-4 text-[#005B46] dark:text-[#34D399] shrink-0"
                             aria-hidden="true"
                           />
                         )}
@@ -1057,7 +1061,7 @@ export default function SellerHubView({
                       >
                         {plan.promotionalPlacements ? (
                           <CheckCircle2
-                            className="h-4 w-4 text-emerald-500 shrink-0"
+                            className="h-4 w-4 text-[#005B46] dark:text-[#34D399] shrink-0"
                             aria-hidden="true"
                           />
                         ) : (
@@ -1072,7 +1076,7 @@ export default function SellerHubView({
                       >
                         {plan.sellerTeamAccounts ? (
                           <CheckCircle2
-                            className="h-4 w-4 text-emerald-500 shrink-0"
+                            className="h-4 w-4 text-[#005B46] dark:text-[#34D399] shrink-0"
                             aria-hidden="true"
                           />
                         ) : (

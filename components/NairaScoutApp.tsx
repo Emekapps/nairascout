@@ -58,10 +58,7 @@ export default function NairaScoutApp({
   const [locationSheetOpen, setLocationSheetOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [marketplaceCategoryFilter, setMarketplaceCategoryFilter] = useState<string>('All');
-  const [selectedProductIdFromSearch, setSelectedProductIdFromSearch] = useState<string | null>(null);
-  const [networkSubTab, setNetworkSubTab] = useState<NetworkSubTab>(
-    initialSnapshot.authenticated ? 'overview' : 'explorer'
-  );
+  const [networkSubTab, setNetworkSubTab] = useState<NetworkSubTab>('explorer');
   const [networkScoutSearch, setNetworkScoutSearch] = useState('');
   const [checkoutSession, setCheckoutSession] = useState<{
     product: ProductListing;
@@ -81,21 +78,17 @@ export default function NairaScoutApp({
   }, [snapshot.states, snapshot.products]);
 
   const handleSelectSearchProduct = (product: GlobalSearchProductHit) => {
-    setSelectedProductIdFromSearch(product.id);
-    setMarketplaceCategoryFilter('All');
     setGlobalSearchQuery('');
-    setActiveTab('marketplace');
+    router.push(`/products/${encodeURIComponent(product.id)}`);
   };
 
   const handleSelectSearchCategory = (cat: GlobalSearchCategoryHit) => {
-    setSelectedProductIdFromSearch(null);
     setMarketplaceCategoryFilter(cat.name);
     setGlobalSearchQuery('');
     setActiveTab('marketplace');
   };
 
   const handleSelectSearchPerson = (person: GlobalSearchPersonHit) => {
-    setSelectedProductIdFromSearch(null);
     if (!snapshot.authenticated && person.isSeller && person.sellerName) {
       setMarketplaceCategoryFilter('All');
       setGlobalSearchQuery(person.sellerName);
@@ -440,7 +433,6 @@ export default function NairaScoutApp({
         selectedLocation={locationFilter}
         onSearchChange={(q) => setGlobalSearchQuery(q)}
         onSearchSubmit={() => {
-          setSelectedProductIdFromSearch(null);
           setActiveTab('marketplace');
         }}
         onOpenLocationPicker={() => setLocationSheetOpen(true)}
@@ -466,8 +458,6 @@ export default function NairaScoutApp({
               onExternalLocationChange={setLocationFilter}
               externalCategoryFilter={marketplaceCategoryFilter}
               onExternalCategoryChange={setMarketplaceCategoryFilter}
-              externalSelectedProductId={selectedProductIdFromSearch}
-              onClearExternalProduct={() => setSelectedProductIdFromSearch(null)}
               onStartDirectCheckout={(product) =>
                 setCheckoutSession({ product, referralEvent: null })
               }
@@ -493,7 +483,6 @@ export default function NairaScoutApp({
               onExternalSubTabChange={setNetworkSubTab}
               externalScoutSearch={networkScoutSearch}
               onExternalScoutSearchChange={setNetworkScoutSearch}
-              onNavigateMainTab={setActiveTab}
               onInviteScout={handleInviteScout}
               onRespondInvite={handleRespondInvite}
               onManageContact={handleManageContact}
@@ -552,7 +541,6 @@ export default function NairaScoutApp({
         selectedLocation={locationFilter}
         onSearchChange={setGlobalSearchQuery}
         onSearchSubmit={() => {
-          setSelectedProductIdFromSearch(null);
           setActiveTab('marketplace');
         }}
         onOpenLocationPicker={() => setLocationSheetOpen(true)}

@@ -144,7 +144,7 @@ export default function NotificationsView({ initialSnapshot }: NotificationsView
               {unreadCount > 0 && (
                 <span
                   aria-label={`${unreadCount} unread notifications`}
-                  className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-white font-numeric text-[10px] font-bold tabular-nums flex items-center justify-center"
+                  className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#005B46] text-white font-numeric text-[10px] font-bold tabular-nums flex items-center justify-center"
                 >
                   {unreadCount}
                 </span>
@@ -163,7 +163,7 @@ export default function NotificationsView({ initialSnapshot }: NotificationsView
                 Notifications
               </h1>
               {unreadCount > 0 && (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500 text-white font-numeric text-xs font-semibold tabular-nums">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#005B46] text-white font-numeric text-xs font-semibold tabular-nums">
                   <span className="w-1.5 h-1.5 rounded-full bg-white" aria-hidden="true" />
                   {unreadCount} New
                 </span>
@@ -181,7 +181,7 @@ export default function NotificationsView({ initialSnapshot }: NotificationsView
               onClick={handleMarkAllRead}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl border border-border bg-card hover:bg-muted text-foreground self-start sm:self-auto cursor-pointer disabled:opacity-50"
             >
-              <CheckCheck className="w-3.5 h-3.5 text-emerald-500" aria-hidden="true" />
+              <CheckCheck className="w-3.5 h-3.5 text-[#005B46] dark:text-[#34D399]" aria-hidden="true" />
               {markingAll ? 'Marking all...' : 'Mark all as read'}
             </button>
           )}
@@ -210,7 +210,7 @@ export default function NotificationsView({ initialSnapshot }: NotificationsView
                   key={notice.id}
                   className={`rounded-2xl border transition-colors overflow-hidden ${
                     isUnread
-                      ? 'bg-card border-emerald-500/40 shadow-xs'
+                      ? 'bg-card border-[#005B46]/50 dark:border-[#34D399]/50 shadow-xs'
                       : 'bg-card border-border opacity-90'
                   }`}
                 >
@@ -224,7 +224,7 @@ export default function NotificationsView({ initialSnapshot }: NotificationsView
                       <div className="flex items-center gap-2 min-w-0">
                         {isUnread && (
                           <span
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-wider shrink-0"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#005B46] text-white text-[10px] font-bold uppercase tracking-wider shrink-0"
                             aria-label="Unread notification"
                           >
                             <span className="w-1.5 h-1.5 rounded-full bg-white" aria-hidden="true" />

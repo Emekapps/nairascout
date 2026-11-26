@@ -1,24 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
-  ArrowDownToLine,
   Banknote,
   CheckCircle2,
   Clock,
-  Loader2,
   RotateCcw,
   ShieldCheck,
 } from 'lucide-react';
 import { formatRemainingCooldown } from '@/lib/auth/rbac';
-import type {
-  CommissionHistoryRowDTO,
-  NairaScoutSnapshot,
-  WithdrawalRequestDTO,
-} from '@/lib/nairascout-store';
+import type { LedgerEntryStatus, NairaScoutSnapshot } from '@/lib/nairascout-store';
 import { formatKoboToNaira } from '@/lib/commission-engine';
 import {
   NAIRASCOUT_ACCOUNTING_BOUNDARY,
@@ -26,36 +19,25 @@ import {
 } from '@/lib/constants/foundation-content';
 import { WalletHeroCard } from './wallet/WalletHeroCard';
 import { DismissibleNoticePanel } from './shared/DismissibleNoticePanel';
-import { RestrictionNoticeBanner } from './shared/RestrictionNoticeBanner';
 
 interface WalletViewProps {
   snapshot: NairaScoutSnapshot;
   onSnapshotUpdated?: (next: NairaScoutSnapshot) => void;
 }
 
-interface CommissionsCursorResponse {
-  items: CommissionHistoryRowDTO[];
-  nextCursor: { createdAt: string; id: string } | null;
-  hasMore: boolean;
-  productOptions: Array<{ id: string; title: string }>;
-}
-
-const COMMISSION_STATUS_FILTERS = [
+const LEDGER_STATUS_FILTERS: ReadonlyArray<'All' | LedgerEntryStatus> = [
   'All',
   'Pending',
   'Available',
-  'Withdrawn',
-  'Reversed / Adjusted',
-] as const;
+  'On Hold',
+  'Paid',
+  'Reversed',
+];
 
-function StatusLabel({
-  status,
-}: {
-  status: CommissionHistoryRowDTO['displayStatus'];
-}) {
+function StatusLabel({ status }: { status: LedgerEntryStatus }) {
   if (status === 'Available') {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success">
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#005B46] dark:text-[#34D399]">
         <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
         Available
       </span>
@@ -77,84 +59,29 @@ function StatusLabel({
       </span>
     );
   }
-  if (status === 'Withdrawn') {
+  if (status === 'Paid') {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground">
         <Banknote className="w-3.5 h-3.5" aria-hidden="true" />
-        Withdrawn
+        Paid
       </span>
     );
   }
   return (
     <span className="inline-flex items-center gap-1.5 text-xs font-medium text-destructive">
       <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-      Reversed / Adjusted
+      Reversed
     </span>
   );
 }
 
-// NS-SCT-065 - NS-SCT-075 & NS-SCT-084: Wallet, Authoritative Withdrawals & 20-Item Cursor Commission History
-export default function WalletView({ snapshot, onSnapshotUpdated }: WalletViewProps) {
-  const queryClient = useQueryClient();
+export default function WalletView({ snapshot }: WalletViewProps) {
+  const [statusFilter, setStatusFilter] = useState<'All' | LedgerEntryStatus>('All');
 
-  const [statusFilter, setStatusFilter] = useState<string>('All');
-  const [productFilter, setProductFilter] = useState<string>('All');
-  const [fromDate, setFromDate] = useState<string>('');
-  const [toDate, setToDate] = useState<string>('');
-  const [loadedExtraPages, setLoadedExtraPages] = useState<CommissionHistoryRowDTO[]>([]);
-  const [extraNextCursor, setExtraNextCursor] = useState<{
-    createdAt: string;
-    id: string;
-  } | null>(null);
-  const [extraHasMore, setExtraHasMore] = useState<boolean | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
-
-  const [withdrawBusy, setWithdrawBusy] = useState(false);
-  const [withdrawFeedback, setWithdrawFeedback] = useState<{
-    type: 'ok' | 'err';
-    message: string;
-  } | null>(null);
-
-  const userId = snapshot.activeScout?.id ?? '';
-
-  const resetCursorPagination = () => {
-    setLoadedExtraPages([]);
-    setExtraNextCursor(null);
-    setExtraHasMore(null);
-  };
-
-  const commissionsQuery = useQuery<CommissionsCursorResponse>({
-    queryKey: ['scout-commissions', userId, statusFilter, productFilter, fromDate, toDate],
-    enabled: Boolean(snapshot.authenticated && userId),
-    staleTime: 60 * 1000,
-    queryFn: async () => {
-      const params = new URLSearchParams();
-      if (statusFilter !== 'All') params.set('status', statusFilter);
-      if (productFilter !== 'All') params.set('productId', productFilter);
-      if (fromDate) params.set('from', fromDate);
-      if (toDate) params.set('to', toDate);
-
-      const res = await fetch(`/api/scout/commissions?${params.toString()}`, {
-        cache: 'no-store',
-      });
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        throw new Error(errBody?.error || 'Could not load commission history.');
-      }
-      return res.json();
-    },
-  });
-
-  const withdrawalsQuery = useQuery<{ requests: WithdrawalRequestDTO[] }>({
-    queryKey: ['scout-withdrawals', userId],
-    enabled: Boolean(snapshot.authenticated && userId),
-    staleTime: 60 * 1000,
-    queryFn: async () => {
-      const res = await fetch('/api/wallet/withdraw', { cache: 'no-store' });
-      if (!res.ok) return { requests: [] };
-      return res.json();
-    },
-  });
+  const filteredLedgerEntries = useMemo(() => {
+    if (statusFilter === 'All') return snapshot.ledgerEntries;
+    return snapshot.ledgerEntries.filter((entry) => entry.status === statusFilter);
+  }, [snapshot.ledgerEntries, statusFilter]);
 
   if (!snapshot.authenticated || !snapshot.activeScout) {
     return (
@@ -181,92 +108,6 @@ export default function WalletView({ snapshot, onSnapshotUpdated }: WalletViewPr
   const withdrawableNowKobo = wallet.withdrawableNowKobo ?? wallet.availableKobo;
   const pendingWithdrawalKobo = wallet.pendingWithdrawalKobo ?? 0;
 
-  const firstPageItems = commissionsQuery.data?.items ?? [];
-  const displayedCommissions = [...firstPageItems, ...loadedExtraPages];
-  const currentNextCursor =
-    loadedExtraPages.length > 0 ? extraNextCursor : (commissionsQuery.data?.nextCursor ?? null);
-  const hasMorePages =
-    extraHasMore !== null ? extraHasMore : Boolean(commissionsQuery.data?.hasMore);
-
-  const handleLoadMore = async () => {
-    if (!currentNextCursor || loadingMore) return;
-    setLoadingMore(true);
-    try {
-      const params = new URLSearchParams({
-        cursorCreatedAt: currentNextCursor.createdAt,
-        cursorId: currentNextCursor.id,
-      });
-      if (statusFilter !== 'All') params.set('status', statusFilter);
-      if (productFilter !== 'All') params.set('productId', productFilter);
-      if (fromDate) params.set('from', fromDate);
-      if (toDate) params.set('to', toDate);
-
-      const res = await fetch(`/api/scout/commissions?${params.toString()}`, {
-        cache: 'no-store',
-      });
-      if (!res.ok) return;
-      const nextPage: CommissionsCursorResponse = await res.json();
-      setLoadedExtraPages((prev) => [...prev, ...nextPage.items]);
-      setExtraNextCursor(nextPage.nextCursor);
-      setExtraHasMore(nextPage.hasMore);
-    } finally {
-      setLoadingMore(false);
-    }
-  };
-
-  // NS-SCT-075: Authoritative server-side withdrawal trigger (server re-queries live ledger balances)
-  const handleRequestWithdrawal = async () => {
-    setWithdrawBusy(true);
-    setWithdrawFeedback(null);
-    try {
-      const res = await fetch('/api/wallet/withdraw', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'NairaScout',
-        },
-        body: JSON.stringify({}),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setWithdrawFeedback({
-          type: 'err',
-          message: data.error || 'Could not queue withdrawal request.',
-        });
-        return;
-      }
-      if (data.snapshot && onSnapshotUpdated) {
-        onSnapshotUpdated(data.snapshot);
-      }
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['scout-withdrawals'] }),
-        queryClient.invalidateQueries({ queryKey: ['scout-stats'] }),
-        queryClient.invalidateQueries({ queryKey: ['scout-activity'] }),
-        queryClient.invalidateQueries({ queryKey: ['scout-commissions'] }),
-      ]);
-      setWithdrawFeedback({
-        type: 'ok',
-        message: `Withdrawal request for ${formatKoboToNaira(
-          data.withdrawalRequest.amountKobo
-        )} queued for the ${data.withdrawalRequest.scheduledPayoutDate} payout run.`,
-      });
-    } catch {
-      setWithdrawFeedback({
-        type: 'err',
-        message: 'Network error while submitting withdrawal request.',
-      });
-    } finally {
-      setWithdrawBusy(false);
-    }
-  };
-
-  const hasWithdrawalRestriction = activeScout.activeRestrictions.some(
-    (r) =>
-      r.status === 'ACTIVE' &&
-      (!r.expiresAt || new Date(r.expiresAt) > new Date()) &&
-      (r.scope === 'ACCOUNT' || r.capabilityCode === 'REQUEST_WITHDRAWAL')
-  );
-
   return (
     <div className="space-y-8">
       <div className="border-b border-border pb-5">
@@ -274,9 +115,6 @@ export default function WalletView({ snapshot, onSnapshotUpdated }: WalletViewPr
           Wallet
         </h1>
       </div>
-
-      {/* Restriction Awareness Banner (NS-SCT-084 - NS-SCT-095) */}
-      <RestrictionNoticeBanner activeScout={activeScout} />
 
       {remainingCooldown && (
         <div
@@ -322,7 +160,7 @@ export default function WalletView({ snapshot, onSnapshotUpdated }: WalletViewPr
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="bg-card border border-border rounded-2xl p-5">
           <p className="text-xs text-muted-foreground">Available</p>
-          <p className="mt-2 font-numeric text-xl font-bold text-success tabular-nums">
+          <p className="mt-2 font-numeric text-xl font-bold text-[#005B46] dark:text-[#34D399] tabular-nums">
             {formatKoboToNaira(withdrawableNowKobo)}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -367,12 +205,12 @@ export default function WalletView({ snapshot, onSnapshotUpdated }: WalletViewPr
         </div>
       </section>
 
-      {/* Monthly Payout Policy, KYC Readiness & Authoritative Withdrawal Request */}
+      {/* Monthly Payout Policy & KYC Readiness */}
       <section className="bg-card border border-border rounded-2xl p-6 space-y-4">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
           <div className="lg:col-span-8 space-y-2">
             <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-success" aria-hidden="true" />
+              <ShieldCheck className="w-4 h-4 text-[#005B46] dark:text-[#34D399]" aria-hidden="true" />
               <h2 className="font-sans text-base font-semibold text-foreground">
                 Payout — 15th of Each Month
               </h2>
@@ -389,7 +227,7 @@ export default function WalletView({ snapshot, onSnapshotUpdated }: WalletViewPr
                 <strong
                   className={
                     activeScout.kycVerified
-                      ? 'text-success'
+                      ? 'text-[#005B46] dark:text-[#34D399]'
                       : 'text-amber-600 dark:text-amber-400'
                   }
                 >
@@ -410,13 +248,15 @@ export default function WalletView({ snapshot, onSnapshotUpdated }: WalletViewPr
           </div>
 
           <div className="lg:col-span-4 border-t lg:border-t-0 lg:border-l border-border pt-4 lg:pt-0 lg:pl-6 space-y-2.5">
-            <p className="text-xs text-muted-foreground">Available for Withdrawal Request</p>
+            <p className="text-xs text-muted-foreground">Eligible for Monthly Payout</p>
             <p className="font-numeric text-xl font-bold text-foreground tabular-nums">
               {formatKoboToNaira(withdrawableNowKobo)}
             </p>
             <p
               className={`text-xs font-medium ${
-                wallet.eligibleForNextPayout ? 'text-success' : 'text-muted-foreground'
+                wallet.eligibleForNextPayout
+                  ? 'text-[#005B46] dark:text-[#34D399]'
+                  : 'text-muted-foreground'
               }`}
             >
               {wallet.eligibleForNextPayout
@@ -424,24 +264,12 @@ export default function WalletView({ snapshot, onSnapshotUpdated }: WalletViewPr
                 : 'Requires KYC, verified bank & ₦5,000 minimum'}
             </p>
             <div className="flex flex-wrap items-center gap-3 pt-1">
-              <button
-                type="button"
-                disabled={
-                  withdrawBusy ||
-                  !wallet.eligibleForNextPayout ||
-                  Boolean(remainingCooldown) ||
-                  hasWithdrawalRestriction
-                }
-                onClick={handleRequestWithdrawal}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl bg-primary text-primary-foreground border border-primary-border hover:bg-primary/90 disabled:opacity-45 cursor-pointer"
+              <Link
+                href="/settings?tab=verification"
+                className="px-4 py-2 text-xs font-semibold rounded-xl bg-primary text-primary-foreground border border-primary-border hover:bg-primary/90"
               >
-                {withdrawBusy ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
-                ) : (
-                  <ArrowDownToLine className="w-3.5 h-3.5" aria-hidden="true" />
-                )}
-                {withdrawBusy ? 'Submitting...' : 'Request Withdrawal'}
-              </button>
+                Manage Bank &amp; KYC
+              </Link>
               <Link
                 href="/programme-rules?policy=payout-policy"
                 className="text-xs font-semibold text-foreground hover:underline"
@@ -451,45 +279,6 @@ export default function WalletView({ snapshot, onSnapshotUpdated }: WalletViewPr
             </div>
           </div>
         </div>
-
-        {withdrawFeedback && (
-          <div
-            role="status"
-            className={`p-3 rounded-xl border text-xs font-medium ${
-              withdrawFeedback.type === 'ok'
-                ? 'bg-accent border-border text-accent-foreground'
-                : 'bg-destructive/10 border-destructive/30 text-destructive'
-            }`}
-          >
-            {withdrawFeedback.message}
-          </div>
-        )}
-
-        {(withdrawalsQuery.data?.requests?.length ?? 0) > 0 && (
-          <div className="pt-3 border-t border-border space-y-2">
-            <p className="text-xs font-semibold text-foreground">Withdrawal Requests</p>
-            <div className="divide-y divide-border rounded-xl border border-border bg-background">
-              {withdrawalsQuery.data!.requests.slice(0, 5).map((wr) => (
-                <div
-                  key={wr.id}
-                  className="px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
-                >
-                  <div>
-                    <p className="font-semibold text-foreground">
-                      {formatKoboToNaira(wr.amountKobo)} · {wr.bankSummary}
-                    </p>
-                    <p className="text-muted-foreground font-numeric">
-                      Requested {wr.requestedAtLagos} · Payout Run {wr.scheduledPayoutDate}
-                    </p>
-                  </div>
-                  <span className="self-start sm:self-center px-2.5 py-0.5 rounded-md font-semibold bg-secondary text-secondary-foreground">
-                    {wr.status}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </section>
 
       {/* NS-FND-001 & NS-FND-002: Platform Accounting Boundary & Earnings Disclosure */}
@@ -501,33 +290,31 @@ export default function WalletView({ snapshot, onSnapshotUpdated }: WalletViewPr
         </p>
       </section>
 
-      {/* Commission History with 20-Item Cursor Pagination (NS-SCT-065 - NS-SCT-075) */}
+      {/* Immutable Ledger Entries */}
       <section className="space-y-4">
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <h2 className="font-sans text-xl font-bold text-foreground">
-                Commission History
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                Append-only ledger records loaded 20 at a time in Africa/Lagos time. Delivery
-                releases and refund reversals create linked references.
-              </p>
-            </div>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h2 className="font-sans text-xl font-bold text-foreground">
+              Immutable Financial Ledger
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Append-only ledger entries. Delivery releases and refund reversals create linked
+              references.
+            </p>
+          </div>
 
-            <div className="flex items-center gap-1 p-1 bg-[#F3F4F6] dark:bg-[#181818] rounded-xl overflow-x-auto">
-              {COMMISSION_STATUS_FILTERS.map((st) => (
+          {/* NS-UI-020 & NS-UI-021 Sliding Filter Pills */}
+          <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto no-scrollbar scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] max-w-full">
+            <div className="flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] border border-border rounded-xl w-max">
+              {LEDGER_STATUS_FILTERS.map((st) => (
                 <button
                   key={st}
                   type="button"
-                  onClick={() => {
-                    setStatusFilter(st);
-                    resetCursorPagination();
-                  }}
-                  className={`px-2.5 py-1 text-xs rounded-lg whitespace-nowrap cursor-pointer transition-colors ${
+                  onClick={() => setStatusFilter(st)}
+                  className={`px-3 py-1.5 text-xs rounded-lg whitespace-nowrap shrink-0 cursor-pointer transition-colors border ${
                     statusFilter === st
-                      ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
-                      : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
+                      ? 'bg-[#000000] text-[#FFFFFF] border-[#000000] dark:bg-white dark:text-black dark:border-white font-semibold shadow-sm'
+                      : 'bg-[#FFFFFF] text-[#000000] border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium hover:opacity-90'
                   }`}
                 >
                   {st}
@@ -535,94 +322,26 @@ export default function WalletView({ snapshot, onSnapshotUpdated }: WalletViewPr
               ))}
             </div>
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-card border border-border rounded-2xl p-4">
-            <div>
-              <label
-                htmlFor="commission-product-filter"
-                className="block text-xs font-medium text-muted-foreground mb-1"
-              >
-                Product Filter
-              </label>
-              <select
-                id="commission-product-filter"
-                value={productFilter}
-                onChange={(e) => {
-                  setProductFilter(e.target.value);
-                  resetCursorPagination();
-                }}
-                className="w-full px-3.5 py-2 text-xs bg-background text-foreground border border-input rounded-xl"
-              >
-                <option value="All">All Products</option>
-                {(commissionsQuery.data?.productOptions ?? []).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label
-                htmlFor="commission-from-date"
-                className="block text-xs font-medium text-muted-foreground mb-1"
-              >
-                From Date (Africa/Lagos)
-              </label>
-              <input
-                id="commission-from-date"
-                type="date"
-                value={fromDate}
-                onChange={(e) => {
-                  setFromDate(e.target.value);
-                  resetCursorPagination();
-                }}
-                className="w-full px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="commission-to-date"
-                className="block text-xs font-medium text-muted-foreground mb-1"
-              >
-                To Date (Africa/Lagos)
-              </label>
-              <input
-                id="commission-to-date"
-                type="date"
-                value={toDate}
-                onChange={(e) => {
-                  setToDate(e.target.value);
-                  resetCursorPagination();
-                }}
-                className="w-full px-3 py-2 text-xs bg-background text-foreground border border-input rounded-xl"
-              />
-            </div>
-          </div>
         </div>
 
         <div className="bg-card border border-border rounded-2xl overflow-x-auto">
-          {commissionsQuery.isLoading ? (
+          {filteredLedgerEntries.length === 0 ? (
             <div className="p-10 text-center text-sm text-muted-foreground">
-              Loading commission history...
-            </div>
-          ) : displayedCommissions.length === 0 ? (
-            <div className="p-10 text-center text-sm text-muted-foreground">
-              No commission records match the selected filters.
+              No ledger entries match the selected filter.
             </div>
           ) : (
-            <table className="w-full text-left border-collapse text-sm">
+            <table className="w-full min-w-[640px] text-left border-collapse text-sm">
               <thead>
                 <tr className="border-b border-border text-xs text-muted-foreground">
                   <th className="py-3 px-4 font-medium">Reference</th>
-                  <th className="py-3 px-4 font-medium">Product · Order</th>
+                  <th className="py-3 px-4 font-medium">Order / Event</th>
                   <th className="py-3 px-4 font-medium">Tier</th>
-                  <th className="py-3 px-4 font-medium">Earned / Released</th>
                   <th className="py-3 px-4 font-medium">Status &amp; Notes</th>
                   <th className="py-3 px-4 font-medium text-right">Amount</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {displayedCommissions.map((entry) => (
+                {filteredLedgerEntries.map((entry) => (
                   <tr key={entry.id} className="hover:bg-muted/40">
                     <td className="py-3 px-4 font-numeric text-xs text-foreground whitespace-nowrap">
                       {entry.reference}
@@ -631,26 +350,20 @@ export default function WalletView({ snapshot, onSnapshotUpdated }: WalletViewPr
                           Linked: {entry.linkedToReference}
                         </p>
                       )}
-                    </td>
-                    <td className="py-3 px-4 text-xs text-foreground">
-                      <p className="font-medium">{entry.productTitle}</p>
-                      <p className="font-numeric text-muted-foreground">
-                        {entry.orderId}
-                        {entry.referralEventId ? ` · ${entry.referralEventId.slice(0, 8)}…` : ''}
+                      <p className="text-[11px] text-muted-foreground">
+                        {entry.createdAt.slice(0, 10)}
                       </p>
+                    </td>
+                    <td className="py-3 px-4 font-numeric text-xs text-muted-foreground whitespace-nowrap">
+                      <p className="text-foreground font-medium">{entry.orderId}</p>
+                      {entry.referralEventId && <p>{entry.referralEventId.slice(0, 8)}…</p>}
                     </td>
                     <td className="py-3 px-4 font-numeric text-xs text-muted-foreground whitespace-nowrap tabular-nums">
                       Gen {entry.generation} ({entry.fractionLabel})
                     </td>
-                    <td className="py-3 px-4 font-numeric text-xs text-muted-foreground whitespace-nowrap">
-                      <p>Earned: {entry.createdAtLagos}</p>
-                      <p>Released: {entry.releasedAtLagos || '—'}</p>
-                    </td>
                     <td className="py-3 px-4 text-xs max-w-xs">
-                      <StatusLabel status={entry.displayStatus} />
-                      <p className="mt-1 text-muted-foreground">
-                        {entry.reversalReason || entry.description}
-                      </p>
+                      <StatusLabel status={entry.status} />
+                      <p className="mt-1 text-muted-foreground">{entry.description}</p>
                     </td>
                     <td className="py-3 px-4 font-numeric text-right tabular-nums font-bold text-foreground whitespace-nowrap">
                       {formatKoboToNaira(entry.amountKobo)}
@@ -661,20 +374,6 @@ export default function WalletView({ snapshot, onSnapshotUpdated }: WalletViewPr
             </table>
           )}
         </div>
-
-        {hasMorePages && (
-          <div className="flex justify-center">
-            <button
-              type="button"
-              disabled={loadingMore}
-              onClick={handleLoadMore}
-              className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-xl border border-border bg-card text-foreground hover:bg-muted disabled:opacity-50 cursor-pointer"
-            >
-              {loadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />}
-              {loadingMore ? 'Loading Next 20...' : 'Load More (Next 20)'}
-            </button>
-          </div>
-        )}
       </section>
     </div>
   );

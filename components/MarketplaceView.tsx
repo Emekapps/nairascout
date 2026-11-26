@@ -2,16 +2,11 @@
 
 import { Fragment, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ExternalLink, Play, Share2, ShoppingBag, X } from 'lucide-react';
 import type { NairaScoutSnapshot, ProductListing } from '@/lib/nairascout-store';
 import { DEFAULT_LISTING_CATEGORIES_SEED } from '@/lib/constants/nigeria-and-categories';
-import { formatWholeNaira } from '@/lib/commission-engine';
-import { getVideoEmbedInfo } from '@/lib/media/video-links';
-import ProductImage from './ProductImage';
 import { ProductCard } from './marketplace/ProductCard';
 import { InFeedPromoCarousel } from './marketplace/InFeedPromoCarousel';
 import { DismissibleNoticePanel } from './shared/DismissibleNoticePanel';
-import { UserAvatar } from './shared/UserAvatar';
 
 interface MarketplaceViewProps {
   snapshot: NairaScoutSnapshot;
@@ -21,8 +16,6 @@ interface MarketplaceViewProps {
   onExternalLocationChange?: (loc: string) => void;
   externalCategoryFilter?: string;
   onExternalCategoryChange?: (cat: string) => void;
-  externalSelectedProductId?: string | null;
-  onClearExternalProduct?: () => void;
   onStartDirectCheckout: (product: ProductListing) => void;
   onOpenReferModal: (product: ProductListing) => void;
   onGoToReferrals: () => void;
@@ -36,8 +29,6 @@ export default function MarketplaceView({
   onExternalLocationChange,
   externalCategoryFilter,
   onExternalCategoryChange,
-  externalSelectedProductId,
-  onClearExternalProduct,
   onStartDirectCheckout,
   onOpenReferModal,
   onGoToReferrals,
@@ -45,9 +36,6 @@ export default function MarketplaceView({
   const [localSelectedCategory, setLocalSelectedCategory] = useState<string>('All');
   const [localSearchQuery, setLocalSearchQuery] = useState('');
   const [localCityFilter, setLocalCityFilter] = useState<string>('All');
-  const [selectedProduct, setSelectedProduct] = useState<ProductListing | null>(null);
-  const [modalImageIdx, setModalImageIdx] = useState(0);
-  const [modalVideoIdx, setModalVideoIdx] = useState<number | null>(null);
 
   const searchQuery = externalSearchQuery !== undefined ? externalSearchQuery : localSearchQuery;
   const setSearchQuery = onExternalSearchChange ?? setLocalSearchQuery;
@@ -123,21 +111,6 @@ export default function MarketplaceView({
     searchQuery,
   ]);
 
-  const activeSelectedProduct = useMemo(() => {
-    if (selectedProduct) return selectedProduct;
-    if (externalSelectedProductId) {
-      return snapshot.products.find((p) => p.id === externalSelectedProductId) ?? null;
-    }
-    return null;
-  }, [selectedProduct, externalSelectedProductId, snapshot.products]);
-
-  const closeProductModal = () => {
-    setSelectedProduct(null);
-    setModalImageIdx(0);
-    setModalVideoIdx(null);
-    onClearExternalProduct?.();
-  };
-
   const activeInboxCount = snapshot.referralsInbox.filter((r) => r.status === 'active').length;
 
   return (
@@ -151,25 +124,27 @@ export default function MarketplaceView({
           ariaLabel="General Product Discovery Notice"
         />
 
-        {/* Category Filter Pills */}
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-          {categories.map((cat) => {
-            const active = effectiveCategory === cat;
-            return (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  active
-                    ? 'bg-commerce text-commerce-foreground'
-                    : 'bg-[#FFFFFF] dark:bg-[#181818] text-foreground hover:bg-muted dark:hover:bg-muted'
-                }`}
-              >
-                {cat}
-              </button>
-            );
-          })}
+        {/* Category Filter Pills (NS-UI-020 border-input + NS-UI-021 hidden scrollbar & mobile halfway peek) */}
+        <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto no-scrollbar scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] pb-1">
+          <div className="flex items-center gap-2 w-max">
+            {categories.map((cat) => {
+              const active = effectiveCategory === cat;
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-3.5 py-2 text-xs rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
+                    active
+                      ? 'bg-[#000000] text-[#FFFFFF] border-[#000000] dark:bg-white dark:text-black dark:border-white font-semibold'
+                      : 'bg-[#FFFFFF] dark:bg-[#181818] text-foreground border-input dark:border-border hover:bg-muted dark:hover:bg-muted font-medium'
+                  }`}
+                >
+                  {cat}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {filteredProducts.length === 0 ? (
@@ -220,12 +195,6 @@ export default function MarketplaceView({
               <Fragment key={product.id}>
                 <ProductCard
                   product={product}
-                  onInspect={(p) => {
-                    onClearExternalProduct?.();
-                    setModalImageIdx(0);
-                    setModalVideoIdx(null);
-                    setSelectedProduct(p);
-                  }}
                   onBuyDirect={onStartDirectCheckout}
                   onRefer={onOpenReferModal}
                 />
@@ -242,234 +211,6 @@ export default function MarketplaceView({
           </div>
         )}
       </section>
-
-      {/* Product Detail Modal */}
-      {activeSelectedProduct && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={activeSelectedProduct.title}
-          className="fixed inset-0 z-50 bg-black/55 backdrop-blur-xs flex items-center justify-center p-4"
-        >
-          <div className="bg-card text-card-foreground border border-border rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto grid grid-cols-1 md:grid-cols-2">
-            <div className="flex flex-col bg-muted/40">
-              {(() => {
-                const modalImages =
-                  activeSelectedProduct.imageUrls && activeSelectedProduct.imageUrls.length > 0
-                    ? activeSelectedProduct.imageUrls
-                    : [activeSelectedProduct.imageUrl];
-                const safeImgIdx = Math.min(modalImageIdx, Math.max(0, modalImages.length - 1));
-                const modalVideos = activeSelectedProduct.videoLinks ?? [];
-                const activeVid =
-                  modalVideoIdx !== null && modalVideos[modalVideoIdx]
-                    ? getVideoEmbedInfo(modalVideos[modalVideoIdx], { autoplay: true })
-                    : null;
-
-                return (
-                  <>
-                    {activeVid && activeVid.embedUrl ? (
-                      <div className="relative w-full h-[280px] md:h-[360px] bg-black">
-                        <iframe
-                          src={activeVid.embedUrl}
-                          title={`${activeSelectedProduct.title} video`}
-                          allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-                          allowFullScreen
-                          referrerPolicy="strict-origin-when-cross-origin"
-                          className="w-full h-full border-0"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setModalVideoIdx(null)}
-                          aria-label="Return to product images"
-                          className="absolute top-2.5 right-2.5 w-8 h-8 rounded-full bg-black/75 text-white flex items-center justify-center cursor-pointer"
-                        >
-                          <X className="w-4 h-4" aria-hidden="true" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="aspect-[4/3] md:aspect-auto md:min-h-[340px] w-full">
-                        <ProductImage
-                          src={modalImages[safeImgIdx] || activeSelectedProduct.imageUrl}
-                          alt={activeSelectedProduct.title}
-                          category={activeSelectedProduct.category}
-                          className="w-full h-full"
-                        />
-                      </div>
-                    )}
-
-                    {modalImages.length > 1 && (
-                      <div className="p-3 flex items-center gap-2 overflow-x-auto no-scrollbar border-t border-border bg-card">
-                        {modalImages.map((imgUrl, idx) => (
-                          <button
-                            key={`modal-img-${idx}`}
-                            type="button"
-                            onClick={() => {
-                              setModalVideoIdx(null);
-                              setModalImageIdx(idx);
-                            }}
-                            className={`relative h-12 w-12 rounded-lg overflow-hidden shrink-0 border cursor-pointer ${
-                              modalVideoIdx === null && safeImgIdx === idx
-                                ? 'border-foreground ring-1 ring-foreground'
-                                : 'border-border opacity-80 hover:opacity-100'
-                            }`}
-                          >
-                            <ProductImage
-                              src={imgUrl}
-                              alt={`${activeSelectedProduct.title} photo ${idx + 1}`}
-                              category={activeSelectedProduct.category}
-                              className="w-full h-full"
-                            />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
-            </div>
-
-            <div className="p-6 flex flex-col justify-between gap-6">
-              <div>
-                <div className="flex items-start justify-between gap-4">
-                  <p className="font-sans text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    {activeSelectedProduct.category} · {activeSelectedProduct.sellerCity}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={closeProductModal}
-                    aria-label="Close product details"
-                    className="p-1 text-muted-foreground hover:text-foreground cursor-pointer"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <h3 className="mt-2 font-sans text-xl font-bold text-foreground">
-                  {activeSelectedProduct.title}
-                </h3>
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                  <UserAvatar
-                    avatarUrl={activeSelectedProduct.sellerLogoUrl}
-                    displayName={activeSelectedProduct.sellerName}
-                    size="sm"
-                    shape="rounded-square"
-                  />
-                  <span className="text-muted-foreground">
-                    Seller: {activeSelectedProduct.sellerName}
-                  </span>
-                  {activeSelectedProduct.hasActiveSellerBadge && (
-                    <span className="font-medium text-foreground">· Active Seller</span>
-                  )}
-                  {activeSelectedProduct.isSellerVerified && (
-                    <span className="font-semibold text-success">· KYC Verified</span>
-                  )}
-                </div>
-
-                <p className="mt-4 text-sm text-muted-foreground leading-relaxed">
-                  {activeSelectedProduct.description}
-                </p>
-
-                {activeSelectedProduct.videoLinks && activeSelectedProduct.videoLinks.length > 0 && (
-                  <div className="mt-4 pt-3 border-t border-border space-y-2">
-                    <p className="text-xs font-semibold text-foreground">
-                      Product Videos ({activeSelectedProduct.videoLinks.length})
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {activeSelectedProduct.videoLinks.map((vid, idx) => {
-                        const info = getVideoEmbedInfo(vid);
-                        const isPlaying = modalVideoIdx === idx;
-                        return (
-                          <div key={`modal-vid-${idx}`} className="flex items-center gap-1.5">
-                            {info.embedUrl ? (
-                              <button
-                                type="button"
-                                onClick={() => setModalVideoIdx(isPlaying ? null : idx)}
-                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition-colors ${
-                                  isPlaying
-                                    ? 'bg-primary text-primary-foreground border-primary-border'
-                                    : 'bg-muted text-foreground border-border hover:bg-muted/80'
-                                }`}
-                              >
-                                <Play className="w-3 h-3 fill-current" aria-hidden="true" />
-                                {vid.platform} #{idx + 1}
-                              </button>
-                            ) : (
-                              <a
-                                href={info.safeHref}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-muted text-foreground border border-border hover:bg-muted/80"
-                              >
-                                <ExternalLink className="w-3 h-3" aria-hidden="true" />
-                                {vid.platform} #{idx + 1}
-                              </a>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                <div className="mt-5 pt-4 border-t border-border space-y-2 text-xs text-muted-foreground">
-                  <p className="font-semibold text-foreground">Specifications &amp; Terms</p>
-                  <ul className="space-y-1 list-disc list-inside">
-                    {activeSelectedProduct.specifications.map((spec) => (
-                      <li key={spec}>{spec}</li>
-                    ))}
-                  </ul>
-                  <p className="pt-2">Return policy: {activeSelectedProduct.returnPolicy}</p>
-                  <p>Warranty: {activeSelectedProduct.warranty}</p>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-border space-y-4">
-                <div className="flex items-baseline justify-between">
-                  <div>
-                    <p className="font-numeric text-2xl font-bold text-foreground tabular-nums">
-                      {formatWholeNaira(activeSelectedProduct.priceKobo)}
-                    </p>
-                    <p className="font-numeric text-xs text-muted-foreground tabular-nums">
-                      Delivery: {formatWholeNaira(activeSelectedProduct.deliveryFeeKobo)} (excluded from
-                      commission base)
-                    </p>
-                  </div>
-                  <span className="font-numeric text-xs font-medium text-foreground tabular-nums">
-                    {activeSelectedProduct.stock} units left
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const p = activeSelectedProduct;
-                      closeProductModal();
-                      onStartDirectCheckout(p);
-                    }}
-                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-commerce-foreground bg-commerce rounded-lg hover:bg-commerce/90 cursor-pointer"
-                  >
-                    <ShoppingBag className="w-3.5 h-3.5" aria-hidden="true" />
-                    BUY DIRECT
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const p = activeSelectedProduct;
-                      closeProductModal();
-                      onOpenReferModal(p);
-                    }}
-                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-primary-foreground bg-primary border border-primary-border rounded-lg hover:bg-primary/90 cursor-pointer"
-                  >
-                    <Share2 className="w-3.5 h-3.5" aria-hidden="true" />
-                    REFER
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

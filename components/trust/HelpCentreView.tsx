@@ -138,30 +138,32 @@ export default function HelpCentreView({
           </div>
 
           {/* Horizontally sliding capsule category pills */}
-          <div
-            role="tablist"
-            aria-label="Help Centre categories"
-            className="flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] border border-border rounded-full overflow-x-auto no-scrollbar snap-x"
-          >
-            {categoriesWithAll.map((cat) => {
-              const active = selectedCategory === cat.id;
-              return (
-                <button
-                  key={cat.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => setSelectedCategory(cat.id)}
-                  className={`snap-start px-3.5 py-1.5 rounded-full text-xs whitespace-nowrap transition-colors cursor-pointer ${
-                    active
-                      ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-xs'
-                      : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium hover:opacity-90'
-                  }`}
-                >
-                  {cat.label}
-                </button>
-              );
-            })}
+          <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto scrollbar-none snap-x">
+            <div
+              role="tablist"
+              aria-label="Help Centre categories"
+              className="inline-flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] border border-border rounded-full w-max"
+            >
+              {categoriesWithAll.map((cat) => {
+                const active = selectedCategory === cat.id;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setSelectedCategory(cat.id)}
+                    className={`snap-start px-3.5 py-1.5 rounded-full text-xs whitespace-nowrap transition-colors cursor-pointer ${
+                      active
+                        ? 'bg-[#000000] text-[#FFFFFF] border border-transparent dark:bg-white dark:text-black font-semibold shadow-xs'
+                        : 'bg-[#FFFFFF] text-[#000000] border border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium hover:opacity-90'
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </section>
 

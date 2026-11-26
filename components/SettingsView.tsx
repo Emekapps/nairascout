@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
   ArrowLeft,
-  Bell,
   Camera,
   CheckCircle2,
   Clock,
@@ -21,7 +20,6 @@ import {
   Trash2,
   User,
 } from 'lucide-react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   formatRemainingCooldown,
   REAUTH_WINDOW_MS,
@@ -39,12 +37,6 @@ import {
   DEFAULT_LISTING_CATEGORIES_SEED,
   NIGERIAN_STATES_SEED,
 } from '@/lib/constants/nigeria-and-categories';
-import {
-  SCOUT_BIO_MAX_LENGTH,
-  containsReservedImpersonationTerm,
-  type NotificationCategoryCode,
-} from '@/lib/constants/notification-preferences';
-import { formatLagosDate } from '@/lib/utils/africa-lagos';
 import { formatKoboToNaira } from '@/lib/commission-engine';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { UserAvatar } from './shared/UserAvatar';
@@ -54,24 +46,46 @@ import { VerifiedSellerFab } from './seller/VerifiedSellerFab';
 import { PasswordStrengthInput } from './auth/PasswordStrengthInput';
 import { ReauthModal } from './auth/ReauthModal';
 
+const SCOUT_BIO_MAX_LENGTH = 250;
+const RESERVED_IMPERSONATION_TERMS = [
+  'nairascout',
+  'admin',
+  'moderator',
+  'official',
+  'support',
+  'staff',
+] as const;
+
+function containsReservedImpersonationTerm(value: string): string | null {
+  const normalized = value.toLowerCase();
+  for (const term of RESERVED_IMPERSONATION_TERMS) {
+    if (normalized.includes(term)) return term;
+  }
+  return null;
+}
+
+function formatLagosDate(isoString: string): string {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return isoString.slice(0, 10);
+  return date.toLocaleDateString('en-NG', {
+    timeZone: 'Africa/Lagos',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
 interface SettingsViewProps {
   initialSnapshot: NairaScoutSnapshot;
   initialTab?: string;
 }
 
-type SettingsTab =
-  | 'profile'
-  | 'privacy'
-  | 'notifications'
-  | 'security'
-  | 'verification'
-  | 'lifecycle';
+type SettingsTab = 'profile' | 'privacy' | 'security' | 'verification' | 'lifecycle';
 
 function resolveInitialTab(raw?: string): SettingsTab {
   if (
     raw === 'profile' ||
     raw === 'privacy' ||
-    raw === 'notifications' ||
     raw === 'security' ||
     raw === 'verification' ||
     raw === 'lifecycle'
@@ -656,40 +670,44 @@ export default function SettingsView({ initialSnapshot, initialTab }: SettingsVi
                 <span>Account Status:</span>
                 <span className="inline-flex items-center gap-1.5 font-sans font-semibold text-foreground">
                   {scout.accountStatus === 'ACTIVE' && (
-                    <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" aria-hidden="true" />
+                    <CheckCircle2
+                      className="h-4 w-4 text-[#005B46] dark:text-[#34D399] shrink-0"
+                      aria-hidden="true"
+                    />
                   )}
                   <span>{scout.accountStatus}</span>
                 </span>
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1 snap-x">
-            {(
-              [
-                { id: 'profile', label: 'Profile' },
-                { id: 'privacy', label: 'Privacy & Referrals' },
-                { id: 'notifications', label: 'Notifications' },
-                { id: 'security', label: 'Security & 2FA' },
-                { id: 'verification', label: 'Verification & Banking' },
-                { id: 'lifecycle', label: 'Account Lifecycle' },
-              ] as { id: SettingsTab; label: string }[]
-            ).map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => {
-                  setTab(t.id);
-                  setFeedback(null);
-                }}
-                className={`whitespace-nowrap shrink-0 snap-start rounded-full px-4 py-2 font-sans text-xs transition-colors cursor-pointer ${
-                  tab === t.id
-                    ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-sm'
-                    : 'bg-[#FFFFFF] text-[#000000] dark:bg-card dark:text-foreground font-medium border border-border/60 dark:border-border hover:opacity-90'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
+          <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto no-scrollbar scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] pb-1">
+            <div className="flex items-center gap-2 w-max">
+              {(
+                [
+                  { id: 'profile', label: 'Profile' },
+                  { id: 'privacy', label: 'Privacy & Referrals' },
+                  { id: 'security', label: 'Security & 2FA' },
+                  { id: 'verification', label: 'Verification & Banking' },
+                  { id: 'lifecycle', label: 'Account Lifecycle' },
+                ] as { id: SettingsTab; label: string }[]
+              ).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => {
+                    setTab(t.id);
+                    setFeedback(null);
+                  }}
+                  className={`whitespace-nowrap shrink-0 rounded-full px-4 py-2 font-sans text-xs transition-colors cursor-pointer border ${
+                    tab === t.id
+                      ? 'bg-[#000000] text-[#FFFFFF] border-[#000000] dark:bg-white dark:text-black dark:border-white font-semibold shadow-sm'
+                      : 'bg-[#FFFFFF] text-[#000000] border-input dark:bg-card dark:text-foreground dark:border-border font-medium hover:opacity-90'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -1125,12 +1143,6 @@ export default function SettingsView({ initialSnapshot, initialTab }: SettingsVi
               )}
             </div>
           </div>
-        )}
-
-        {tab === 'notifications' && (
-          <NotificationPreferencesPanel
-            onFeedback={(msg) => setFeedback(msg)}
-          />
         )}
 
         {tab === 'security' && (
@@ -2007,177 +2019,6 @@ export default function SettingsView({ initialSnapshot, initialTab }: SettingsVi
         authenticated={snapshot.authenticated}
         activeScout={snapshot.activeScout}
       />
-    </div>
-  );
-}
-
-interface NotificationPreferenceRowDTO {
-  categoryCode: NotificationCategoryCode;
-  label: string;
-  description: string;
-  isEssential: boolean;
-  inAppEnabled: boolean;
-  emailEnabled: boolean;
-}
-
-// NS-SCT-076 - NS-SCT-083: Eight-group notification preferences UI with essential lock protection
-function NotificationPreferencesPanel({
-  onFeedback,
-}: {
-  onFeedback: (msg: { type: 'ok' | 'err'; message: string } | null) => void;
-}) {
-  const queryClient = useQueryClient();
-
-  const prefsQuery = useQuery<{ preferences: NotificationPreferenceRowDTO[] }>({
-    queryKey: ['notification-preferences'],
-    queryFn: async () => {
-      const res = await fetch('/api/settings/notifications', { cache: 'no-store' });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Could not load notification preferences.');
-      }
-      return data;
-    },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: async (
-      updates: Array<{
-        categoryCode: NotificationCategoryCode;
-        inAppEnabled?: boolean;
-        emailEnabled?: boolean;
-      }>
-    ) => {
-      onFeedback(null);
-      const res = await fetch('/api/settings/notifications', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'NairaScout',
-        },
-        body: JSON.stringify({ preferences: updates }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Could not update notification preferences.');
-      }
-      return data as { preferences: NotificationPreferenceRowDTO[] };
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(['notification-preferences'], { preferences: data.preferences });
-      onFeedback({ type: 'ok', message: 'Notification preferences saved.' });
-    },
-    onError: (err) => {
-      onFeedback({
-        type: 'err',
-        message: err instanceof Error ? err.message : 'Failed to update preferences.',
-      });
-    },
-  });
-
-  const preferences = prefsQuery.data?.preferences ?? [];
-
-  return (
-    <div className="bg-card border border-border rounded-2xl p-6 space-y-5 max-w-3xl">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <Bell className="w-4 h-4 text-foreground" aria-hidden="true" />
-            <h2 className="font-sans text-lg font-bold text-foreground">
-              Notification Preferences
-            </h2>
-          </div>
-          <p className="text-xs text-muted-foreground mt-1">
-            Control In-App and Email alerts across 8 Scout &amp; marketplace groups. Essential
-            security, order, withdrawal, and restriction alerts stay locked ON.
-          </p>
-        </div>
-      </div>
-
-      {prefsQuery.isLoading ? (
-        <div className="flex items-center gap-2 py-8 text-xs text-muted-foreground">
-          <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-          Loading notification preferences...
-        </div>
-      ) : prefsQuery.isError ? (
-        <div className="p-4 rounded-xl border border-destructive/30 bg-destructive/10 text-xs text-destructive">
-          {prefsQuery.error instanceof Error
-            ? prefsQuery.error.message
-            : 'Unable to load notification preferences.'}
-        </div>
-      ) : (
-        <div className="divide-y divide-border border border-border rounded-xl overflow-hidden">
-          {preferences.map((pref) => (
-            <div
-              key={pref.categoryCode}
-              className="p-4 bg-background/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-            >
-              <div className="space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="font-sans text-sm font-semibold text-foreground">{pref.label}</p>
-                  {pref.isEssential && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-secondary text-secondary-foreground border border-border">
-                      <Lock className="w-2.5 h-2.5" aria-hidden="true" />
-                      Locked ON — Essential
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">{pref.description}</p>
-              </div>
-
-              <div className="flex items-center gap-3 shrink-0">
-                <label
-                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-medium ${
-                    pref.isEssential
-                      ? 'border-border bg-muted/60 text-muted-foreground cursor-not-allowed'
-                      : 'border-border bg-card text-foreground cursor-pointer'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={pref.isEssential ? true : pref.inAppEnabled}
-                    disabled={pref.isEssential || updateMutation.isPending}
-                    onChange={(e) => {
-                      updateMutation.mutate([
-                        {
-                          categoryCode: pref.categoryCode,
-                          inAppEnabled: e.target.checked,
-                        },
-                      ]);
-                    }}
-                    className="accent-foreground"
-                  />
-                  In-App
-                </label>
-
-                <label
-                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-medium ${
-                    pref.isEssential
-                      ? 'border-border bg-muted/60 text-muted-foreground cursor-not-allowed'
-                      : 'border-border bg-card text-foreground cursor-pointer'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={pref.isEssential ? true : pref.emailEnabled}
-                    disabled={pref.isEssential || updateMutation.isPending}
-                    onChange={(e) => {
-                      updateMutation.mutate([
-                        {
-                          categoryCode: pref.categoryCode,
-                          emailEnabled: e.target.checked,
-                        },
-                      ]);
-                    }}
-                    className="accent-foreground"
-                  />
-                  Email
-                </label>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

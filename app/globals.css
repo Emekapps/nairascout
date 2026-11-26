@@ -22,8 +22,8 @@
   --primary-foreground: 0 0% 100%;    /* #FFFFFF */
   --primary-border: 200 7% 17%;       /* #292D2F */
 
-  /* Commerce Action (BUY buttons): Pure Black (#000000) in Light Mode */
-  --commerce: 0 0% 0%;                /* #000000 */
+  /* Commerce Action (BUY / BUY DIRECT buttons): Red (#E53935) */
+  --commerce: 1 77% 55%;              /* #E53935 */
   --commerce-foreground: 0 0% 100%;   /* #FFFFFF */
 
   --secondary: 210 40% 96%;           /* #F1F5F9 */
@@ -38,7 +38,7 @@
   --destructive: 0 84% 60%;           /* #EF4444 */
   --destructive-foreground: 0 0% 100%;
 
-  --success: 160 84% 39%;             /* #10B981 */
+  --success: 166 100% 18%;            /* #005B46 — Deep Emerald */
   --warning: 38 92% 50%;              /* #F59E0B */
 
   --border: 214 32% 91%;              /* #E2E8F0 */
@@ -67,9 +67,9 @@
   --primary-foreground: 0 0% 100%;    /* #FFFFFF */
   --primary-border: 204 6% 26%;       /* #3E4346 */
 
-  /* Commerce Action (BUY buttons): Pure White (#FFFFFF) in Dark Mode */
-  --commerce: 0 0% 100%;              /* #FFFFFF */
-  --commerce-foreground: 0 0% 0%;     /* #000000 */
+  /* Commerce Action (BUY / BUY DIRECT buttons): Red (#E53935) */
+  --commerce: 1 77% 55%;              /* #E53935 */
+  --commerce-foreground: 0 0% 100%;   /* #FFFFFF */
 
   --secondary: 0 0% 14%;              /* #242424 */
   --secondary-foreground: 210 40% 98%;
@@ -159,11 +159,13 @@
   }
 }
 
-.no-scrollbar::-webkit-scrollbar {
+.no-scrollbar::-webkit-scrollbar,
+.scrollbar-none::-webkit-scrollbar {
   display: none;
 }
 
-.no-scrollbar {
+.no-scrollbar,
+.scrollbar-none {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }

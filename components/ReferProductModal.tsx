@@ -100,7 +100,7 @@ export default function ReferProductModal({
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://nairascout.ng';
 
   const buildShareUrl = (ev: ProductReferralEvent) =>
-    `${origin}/?refEvent=${ev.id}&refScout=${ev.senderHandle}`;
+    `${origin}/r/${encodeURIComponent(ev.id)}`;
 
   const primaryQuickShareUrl =
     createdEvents[0]
