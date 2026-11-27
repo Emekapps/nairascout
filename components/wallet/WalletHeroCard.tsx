@@ -19,7 +19,7 @@ export function WalletHeroCard({
   return (
     <section
       aria-label="Available Wallet Summary"
-      className="bg-[#292D2F] border border-primary-border text-white rounded-2xl p-5 sm:p-6 shadow-sm"
+      className="bg-[#2E5339] dark:bg-[#1F2E24] border border-[#2E5339] dark:border-[#3A6B49] text-white rounded-2xl p-5 sm:p-6 shadow-sm"
     >
       <div className="flex items-start justify-between gap-4">
         <div>

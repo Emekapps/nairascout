@@ -124,7 +124,7 @@ export function ProductCard({
         {product.isSellerVerified && (
           <span
             title="KYC Verified Seller"
-            className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#005B46] dark:text-[#34D399] shrink-0"
+            className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#5C7C5D] dark:text-[#6E9470] shrink-0"
           >
             <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
             Verified
@@ -232,7 +232,7 @@ export function ProductCard({
               }
             }}
             aria-label={`View ${product.title}`}
-            className="relative aspect-[4/3] w-full rounded-xl overflow-hidden bg-muted cursor-pointer focus-visible:outline-2 focus-visible:outline-ring"
+            className="relative aspect-[4/3] w-full rounded-xl overflow-hidden bg-[#EDE4D7] dark:bg-[#262E2A] cursor-pointer focus-visible:outline-2 focus-visible:outline-ring"
           >
             <ProductImage
               src={currentImageSrc}
@@ -294,7 +294,7 @@ export function ProductCard({
                   setVideoMode(true);
                 }}
                 aria-label={`Play ${primaryVideo.platform} video inline`}
-                className="absolute bottom-2.5 right-2.5 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#292D2F]/90 text-white border border-white/20 hover:bg-black text-[11px] font-semibold shadow-md backdrop-blur-xs cursor-pointer"
+                className="absolute bottom-2.5 right-2.5 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#1E241E]/90 text-white border border-white/20 hover:bg-[#1E241E] text-[11px] font-semibold shadow-md backdrop-blur-xs cursor-pointer"
               >
                 <Play className="w-3 h-3 fill-current" aria-hidden="true" />
                 <span>{primaryVideo.platform}</span>
@@ -337,7 +337,7 @@ export function ProductCard({
               type="button"
               disabled={product.stock <= 0}
               onClick={() => onBuyDirect(product)}
-              className="inline-flex items-center justify-center gap-1.5 bg-[#E53935] text-[#FFFFFF] hover:bg-[#C62828] disabled:opacity-45 font-sans text-xs font-bold uppercase tracking-wider rounded-lg h-10 transition-colors cursor-pointer"
+              className="inline-flex items-center justify-center gap-1.5 bg-[#6B4214] text-[#FFFFFF] hover:bg-[#56340F] dark:bg-[#8A5820] dark:hover:bg-[#754A1A] disabled:opacity-45 font-sans text-xs font-bold uppercase tracking-wider rounded-lg h-10 transition-colors cursor-pointer"
             >
               <ShoppingBag className="w-3.5 h-3.5" aria-hidden="true" />
               BUY
@@ -345,7 +345,7 @@ export function ProductCard({
             <button
               type="button"
               onClick={() => onRefer(product)}
-              className="inline-flex items-center justify-center gap-1.5 bg-[#000000] text-[#FFFFFF] border border-transparent dark:border-[#2E2E2E] hover:bg-[#1A1A1A] font-sans text-xs font-bold uppercase tracking-wider rounded-lg h-10 transition-colors cursor-pointer"
+              className="inline-flex items-center justify-center gap-1.5 bg-[#2E5339] text-[#FFFFFF] border border-transparent hover:bg-[#23412C] dark:bg-[#3A6B49] dark:hover:bg-[#305A3D] font-sans text-xs font-bold uppercase tracking-wider rounded-lg h-10 transition-colors cursor-pointer"
             >
               <Share2 className="w-3.5 h-3.5" aria-hidden="true" />
               REFER

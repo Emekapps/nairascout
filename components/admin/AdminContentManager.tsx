@@ -246,14 +246,14 @@ export function AdminContentManager({
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] border border-border rounded-full self-start">
+        <div className="flex items-center gap-1.5 p-1 bg-[#F7F5F0] dark:bg-[#222925] border border-border rounded-full self-start">
           <button
             type="button"
             onClick={() => setContentTab('policies')}
             className={`px-3.5 py-1.5 rounded-full text-xs cursor-pointer transition-colors ${
               contentTab === 'policies'
-                ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-xs'
-                : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium'
+                ? 'bg-[#2E5339] text-[#FFFFFF] dark:bg-[#3A6B49] dark:text-[#FFFFFF] font-semibold shadow-xs'
+                : 'bg-card text-foreground border border-border font-medium'
             }`}
           >
             Platform Policies ({policies.length})
@@ -263,8 +263,8 @@ export function AdminContentManager({
             onClick={() => setContentTab('articles')}
             className={`px-3.5 py-1.5 rounded-full text-xs cursor-pointer transition-colors ${
               contentTab === 'articles'
-                ? 'bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black font-semibold shadow-xs'
-                : 'bg-[#FFFFFF] text-[#000000] dark:bg-secondary dark:text-foreground font-medium'
+                ? 'bg-[#2E5339] text-[#FFFFFF] dark:bg-[#3A6B49] dark:text-[#FFFFFF] font-semibold shadow-xs'
+                : 'bg-card text-foreground border border-border font-medium'
             }`}
           >
             Help Centre Articles ({helpArticles.length})

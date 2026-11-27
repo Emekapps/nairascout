@@ -1,11 +1,12 @@
 import type { Metadata } from 'next';
-import { Plus_Jakarta_Sans, Inter, Lexend } from 'next/font/google';
+import { Lato, Inter, Lexend } from 'next/font/google';
 import { ThemeProvider } from '@/components/layout/ThemeProvider';
 import './globals.css';
 
-const plusJakarta = Plus_Jakarta_Sans({
+// NS-PDP-001: Lato (400, 700, 900) primary font + Inter tabular-nums + Lexend 800 wordmark
+const lato = Lato({
   subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800'],
+  weight: ['400', '700', '900'],
   variable: '--font-sans',
   display: 'swap',
 });
@@ -46,7 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="en"
-      className={`${plusJakarta.variable} ${inter.variable} ${lexend.variable}`}
+      className={`${lato.variable} ${inter.variable} ${lexend.variable}`}
       suppressHydrationWarning
     >
       <body

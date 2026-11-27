@@ -3,122 +3,150 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  /* LIGHT MODE — Cool Surface (#F3F4F6) + Pure White Cards + Black BUY + Charcoal Black (#292D2F) REFER */
-  --background: 220 14% 96%;          /* #F3F4F6 */
-  --foreground: 222 47% 11%;          /* #0F172A */
+  /* LIGHT MODE — Warm Botanical Earth & Forest Olive (NS-PDP-001) */
+  --background: #F6EFE6;              /* Warm Oat / Linen */
+  --foreground: #1E241E;              /* Deep Charcoal Olive */
 
-  --card: 0 0% 100%;                  /* #FFFFFF */
-  --card-foreground: 222 47% 11%;     /* #0F172A */
+  --card: #FFFFFF;                    /* Pure White */
+  --card-foreground: #1E241E;
 
-  --popover: 0 0% 100%;               /* #FFFFFF */
-  --popover-foreground: 222 47% 11%;
+  --popover: #FFFFFF;
+  --popover-foreground: #1E241E;
 
-  --sidebar: 0 0% 100%;               /* #FFFFFF */
-  --sidebar-foreground: 215 25% 27%;  /* #334155 */
-  --sidebar-border: 214 32% 91%;      /* #E2E8F0 */
+  --sidebar: #FFFFFF;
+  --sidebar-foreground: #596059;
+  --sidebar-border: #E2DDD5;
 
-  /* Primary Brand Action (REFER & Primary CTAs): Charcoal Black (#292D2F) */
-  --primary: 200 7% 17%;              /* #292D2F */
-  --primary-foreground: 0 0% 100%;    /* #FFFFFF */
-  --primary-border: 200 7% 17%;       /* #292D2F */
+  /* Primary CTA (BUY DIRECT / BUY): Rich Saddle Bronze */
+  --primary: #6B4214;
+  --primary-foreground: #FFFFFF;
+  --primary-border: #6B4214;
 
-  /* Commerce Action (BUY / BUY DIRECT buttons): Red (#E53935) */
-  --commerce: 1 77% 55%;              /* #E53935 */
-  --commerce-foreground: 0 0% 100%;   /* #FFFFFF */
+  --commerce: #6B4214;
+  --commerce-foreground: #FFFFFF;
 
-  --secondary: 210 40% 96%;           /* #F1F5F9 */
-  --secondary-foreground: 222 47% 11%;
+  /* Secondary Brand / REFER / Highlighted Pills: Deep Forest Olive */
+  --secondary-cta: #2E5339;
+  --secondary-cta-foreground: #FFFFFF;
 
-  --muted: 210 40% 96%;               /* #F1F5F9 */
-  --muted-foreground: 215 16% 47%;    /* #64748B */
+  --secondary: #F7F5F0;               /* Warm Ivory Tint */
+  --secondary-foreground: #1E241E;
 
-  --accent: 210 20% 94%;              /* #ECEFF2 — Soft Charcoal Tint */
-  --accent-foreground: 200 7% 17%;    /* #292D2F */
+  --muted: #F7F5F0;                   /* Warm Ivory Tint */
+  --muted-foreground: #596059;        /* Muted Slate Olive */
 
-  --destructive: 0 84% 60%;           /* #EF4444 */
-  --destructive-foreground: 0 0% 100%;
+  --media-backdrop: #EDE4D7;          /* Warm Sand Pedestal */
 
-  --success: 166 100% 18%;            /* #005B46 — Deep Emerald */
-  --warning: 38 92% 50%;              /* #F59E0B */
+  /* Soft Sage Wash for selected card fills & subtle highlights */
+  --accent: #F2F6F2;
+  --accent-foreground: #1E241E;
+  --selected-fill: #F2F6F2;
 
-  --border: 214 32% 91%;              /* #E2E8F0 */
-  --input: 214 32% 91%;
-  --ring: 200 7% 17%;                 /* #292D2F */
+  /* Sage Olive Green for verified checkmarks, selected borders & unread indicators */
+  --sage: #5C7C5D;
+  --ochre: #C88A2B;                   /* Warm Ochre Gold */
+
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+
+  --success: #5C7C5D;                 /* Sage Olive Green */
+  --warning: #C88A2B;                 /* Warm Ochre Gold */
+
+  --border: #E2DDD5;                  /* Warm Stone Hairline */
+  --input: #E2DDD5;
+  --ring: #2E5339;
   --radius: 0.875rem;                 /* 14px rounded cards */
 }
 
 .dark {
-  /* DARK MODE — Midnight Obsidian (#101010) + Charcoal Black (#292D2F) Buttons */
-  --background: 0 0% 6.3%;            /* #101010 — Midnight Obsidian */
-  --foreground: 210 40% 98%;          /* #F8FAFC */
+  /* DARK MODE — Deep Forest Charcoal & Botanical Olive (NS-PDP-001) */
+  --background: #121614;              /* Deep Forest Charcoal */
+  --foreground: #F4F2ED;              /* Warm Off-White */
 
-  --card: 0 0% 9.5%;                  /* #181818 — Elevated Midnight Card */
-  --card-foreground: 210 40% 98%;
+  --card: #1A201D;                    /* Dark Moss Slate */
+  --card-foreground: #F4F2ED;
 
-  --popover: 0 0% 11%;                /* #1C1C1C */
-  --popover-foreground: 210 40% 98%;
+  --popover: #1A201D;
+  --popover-foreground: #F4F2ED;
 
-  --sidebar: 0 0% 8%;                 /* #141414 — Midnight Sidebar */
-  --sidebar-foreground: 215 20% 75%;  /* #94A3B8 */
-  --sidebar-border: 0 0% 16%;         /* #292929 */
+  --sidebar: #161B18;
+  --sidebar-foreground: #B2B8B2;
+  --sidebar-border: #2E3631;
 
-  /* Primary Brand Action (REFER & Primary CTAs): Charcoal Black (#292D2F) */
-  --primary: 200 7% 17%;              /* #292D2F */
-  --primary-foreground: 0 0% 100%;    /* #FFFFFF */
-  --primary-border: 204 6% 26%;       /* #3E4346 */
+  /* Primary CTA (BUY DIRECT / BUY): Warm Amber Bronze */
+  --primary: #8A5820;
+  --primary-foreground: #FFFFFF;
+  --primary-border: #8A5820;
 
-  /* Commerce Action (BUY / BUY DIRECT buttons): Red (#E53935) */
-  --commerce: 1 77% 55%;              /* #E53935 */
-  --commerce-foreground: 0 0% 100%;   /* #FFFFFF */
+  --commerce: #8A5820;
+  --commerce-foreground: #FFFFFF;
 
-  --secondary: 0 0% 14%;              /* #242424 */
-  --secondary-foreground: 210 40% 98%;
+  /* Secondary Brand / REFER / Highlighted Pills: Botanical Forest Green */
+  --secondary-cta: #3A6B49;
+  --secondary-cta-foreground: #FFFFFF;
 
-  --muted: 0 0% 14%;                  /* #242424 */
-  --muted-foreground: 0 0% 62%;       /* #9E9E9E */
+  --secondary: #222925;               /* Elevated Olive Tint */
+  --secondary-foreground: #F4F2ED;
 
-  --accent: 200 7% 17%;               /* #292D2F */
-  --accent-foreground: 210 40% 98%;
+  --muted: #222925;                   /* Elevated Olive Tint */
+  --muted-foreground: #B2B8B2;        /* Soft Warm Gray */
 
-  --destructive: 0 72% 51%;           /* #DC2626 */
-  --destructive-foreground: 0 0% 100%;
+  --media-backdrop: #262E2A;          /* Muted Earth Slate */
 
-  --success: 158 64% 52%;             /* #34D399 */
-  --warning: 38 92% 50%;              /* #F59E0B */
+  /* Deep Sage Wash for selected card fills & subtle highlights */
+  --accent: #1F2E24;
+  --accent-foreground: #F4F2ED;
+  --selected-fill: #1F2E24;
 
-  --border: 0 0% 16%;                 /* #292929 */
-  --input: 0 0% 18%;                  /* #2E2E2E */
-  --ring: 204 6% 35%;
+  /* Soft Sage Green for verified checkmarks, selected borders & unread indicators */
+  --sage: #6E9470;
+  --ochre: #E0A13B;                   /* Golden Ochre */
+
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+
+  --success: #6E9470;                 /* Soft Sage Green */
+  --warning: #E0A13B;                 /* Golden Ochre */
+
+  --border: #2E3631;                  /* Dark Stone Border */
+  --input: #2E3631;
+  --ring: #6E9470;
 }
 
 @theme inline {
-  --color-background: hsl(var(--background));
-  --color-foreground: hsl(var(--foreground));
-  --color-card: hsl(var(--card));
-  --color-card-foreground: hsl(var(--card-foreground));
-  --color-popover: hsl(var(--popover));
-  --color-popover-foreground: hsl(var(--popover-foreground));
-  --color-sidebar: hsl(var(--sidebar));
-  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
-  --color-sidebar-border: hsl(var(--sidebar-border));
-  --color-primary: hsl(var(--primary));
-  --color-primary-foreground: hsl(var(--primary-foreground));
-  --color-primary-border: hsl(var(--primary-border));
-  --color-commerce: hsl(var(--commerce));
-  --color-commerce-foreground: hsl(var(--commerce-foreground));
-  --color-secondary: hsl(var(--secondary));
-  --color-secondary-foreground: hsl(var(--secondary-foreground));
-  --color-muted: hsl(var(--muted));
-  --color-muted-foreground: hsl(var(--muted-foreground));
-  --color-accent: hsl(var(--accent));
-  --color-accent-foreground: hsl(var(--accent-foreground));
-  --color-destructive: hsl(var(--destructive));
-  --color-destructive-foreground: hsl(var(--destructive-foreground));
-  --color-success: hsl(var(--success));
-  --color-warning: hsl(var(--warning));
-  --color-border: hsl(var(--border));
-  --color-input: hsl(var(--input));
-  --color-ring: hsl(var(--ring));
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-border: var(--primary-border);
+  --color-commerce: var(--commerce);
+  --color-commerce-foreground: var(--commerce-foreground);
+  --color-secondary-cta: var(--secondary-cta);
+  --color-secondary-cta-foreground: var(--secondary-cta-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-media-backdrop: var(--media-backdrop);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-selected-fill: var(--selected-fill);
+  --color-sage: var(--sage);
+  --color-ochre: var(--ochre);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
 
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
@@ -151,11 +179,11 @@
     background-repeat: no-repeat;
     background-position: right 0.875rem center;
     background-size: 1rem 1rem;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23596059' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   }
 
   .dark select {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23B2B8B2' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   }
 }
 

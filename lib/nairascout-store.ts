@@ -278,6 +278,12 @@ export interface VerificationRecord {
   reviewedAt: string | null;
 }
 
+export interface ProductVariantOption {
+  id: string;
+  label: string;
+  imageUrl?: string;
+}
+
 export interface ProductListing {
   id: string;
   productId: string;
@@ -305,6 +311,8 @@ export interface ProductListing {
   warranty: string;
   impressions: number;
   referralShares: number;
+  unitsSold?: number;
+  variants?: ProductVariantOption[];
 }
 
 export interface ScoutsListContact {
@@ -1452,11 +1460,55 @@ export async function getNairaScoutSnapshot(
     };
   };
 
-  const publishedRows = await db
-    .select()
-    .from(productListings)
-    .where(eq(productListings.status, 'PUBLISHED'))
-    .orderBy(desc(productListings.createdAt));
+  const extractProductVariants = (
+    specifications: string[] | null | undefined,
+    imageUrls: string[]
+  ): ProductVariantOption[] => {
+    if (!Array.isArray(specifications)) return [];
+    for (const rawSpec of specifications) {
+      const match = rawSpec.match(
+        /^(?:options?|variants?|sizes?|colou?rs?|editions?|styles?)\s*[:\-]\s*(.+)$/i
+      );
+      if (!match) continue;
+      const parts = match[1]
+        .split(/[|,/;]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (parts.length > 1) {
+        return parts.slice(0, 6).map((label, idx) => ({
+          id: `opt-${idx + 1}`,
+          label,
+          imageUrl: imageUrls[idx] ?? imageUrls[0],
+        }));
+      }
+    }
+    return [];
+  };
+
+  const [publishedRows, orderCountsRows] = await Promise.all([
+    db
+      .select()
+      .from(productListings)
+      .where(eq(productListings.status, 'PUBLISHED'))
+      .orderBy(desc(productListings.createdAt)),
+    db
+      .select({
+        productListingId: marketplaceOrders.productListingId,
+        quantity: marketplaceOrders.quantity,
+        fulfilmentStatus: marketplaceOrders.fulfilmentStatus,
+      })
+      .from(marketplaceOrders),
+  ]);
+
+  const unitsSoldByListingId = new Map<string, number>();
+  for (const row of orderCountsRows) {
+    if (row.fulfilmentStatus !== 'Refunded') {
+      unitsSoldByListingId.set(
+        row.productListingId,
+        (unitsSoldByListingId.get(row.productListingId) ?? 0) + Number(row.quantity || 0)
+      );
+    }
+  }
 
   const publishedProducts: ProductListing[] = publishedRows.map((p) => {
     const flags = getSellerFlags(p.sellerProfileId);
@@ -1488,6 +1540,8 @@ export async function getNairaScoutSnapshot(
       warranty: p.warranty,
       impressions: p.impressions,
       referralShares: p.referralShares,
+      unitsSold: unitsSoldByListingId.get(p.id) ?? 0,
+      variants: extractProductVariants(p.specifications, resolvedImages),
     };
   });
 
@@ -1653,6 +1707,8 @@ export async function getNairaScoutSnapshot(
       warranty: p.warranty,
       impressions: p.impressions,
       referralShares: p.referralShares,
+      unitsSold: unitsSoldByListingId.get(p.id) ?? 0,
+      variants: extractProductVariants(p.specifications, resolvedImages),
     };
   });
 

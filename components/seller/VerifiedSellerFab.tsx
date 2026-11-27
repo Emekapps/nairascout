@@ -27,7 +27,7 @@ export function VerifiedSellerFab({ authenticated, activeScout }: VerifiedSeller
       href="/seller/listings/new"
       aria-label="Create Listing"
       title="Create Listing"
-      className="fixed right-4 bottom-20 md:bottom-6 z-40 w-12 h-12 md:w-14 md:h-14 rounded-2xl bg-[#292D2F] text-white dark:bg-white dark:text-black shadow-lg flex items-center justify-center hover:opacity-90 active:scale-95 transition-all focus-visible:outline-2 focus-visible:outline-ring"
+      className="fixed right-4 bottom-20 md:bottom-6 z-40 w-12 h-12 md:w-14 md:h-14 rounded-2xl bg-[#2E5339] text-white dark:bg-[#3A6B49] dark:text-white shadow-lg flex items-center justify-center hover:opacity-90 active:scale-95 transition-all focus-visible:outline-2 focus-visible:outline-ring"
     >
       <Plus className="w-6 h-6 stroke-[2.25]" aria-hidden="true" />
     </Link>

@@ -43,9 +43,9 @@ export function PasswordStrengthInput({
 
   const barColor =
     assessment.strengthLabel === 'Very Strong'
-      ? 'bg-[#005B46] dark:bg-[#34D399]'
+      ? 'bg-[#5C7C5D] dark:bg-[#6E9470]'
       : assessment.strengthLabel === 'Strong'
-        ? 'bg-[#005B46]/80 dark:bg-[#34D399]/80'
+        ? 'bg-[#5C7C5D]/80 dark:bg-[#6E9470]/80'
         : assessment.strengthLabel === 'Weak'
           ? 'bg-amber-500'
           : 'bg-destructive';

@@ -142,7 +142,7 @@ export default function HelpCentreView({
             <div
               role="tablist"
               aria-label="Help Centre categories"
-              className="inline-flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] border border-border rounded-full w-max"
+              className="inline-flex items-center gap-1.5 p-1 bg-[#F7F5F0] dark:bg-[#222925] border border-border rounded-full w-max"
             >
               {categoriesWithAll.map((cat) => {
                 const active = selectedCategory === cat.id;
@@ -155,8 +155,8 @@ export default function HelpCentreView({
                     onClick={() => setSelectedCategory(cat.id)}
                     className={`snap-start px-3.5 py-1.5 rounded-full text-xs whitespace-nowrap transition-colors cursor-pointer ${
                       active
-                        ? 'bg-[#000000] text-[#FFFFFF] border border-transparent dark:bg-white dark:text-black font-semibold shadow-xs'
-                        : 'bg-[#FFFFFF] text-[#000000] border border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium hover:opacity-90'
+                        ? 'bg-[#2E5339] text-[#FFFFFF] border border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-xs'
+                        : 'bg-card text-foreground border border-border font-medium hover:opacity-90'
                     }`}
                   >
                     {cat.label}

@@ -17,7 +17,7 @@ export default function ProductImage({ src, alt, category, className = '' }: Pro
   if (failed) {
     return (
       <div
-        className={`flex flex-col items-center justify-center bg-muted text-muted-foreground p-6 text-center ${className}`}
+        className={`flex flex-col items-center justify-center bg-[#EDE4D7] dark:bg-[#262E2A] text-muted-foreground p-6 text-center ${className}`}
       >
         <Package className="w-8 h-8 mb-2 stroke-[1.5]" aria-hidden="true" />
         <span className="text-xs font-sans font-medium tracking-wide uppercase">{category}</span>
@@ -29,7 +29,7 @@ export default function ProductImage({ src, alt, category, className = '' }: Pro
   }
 
   return (
-    <div className={`relative overflow-hidden bg-muted ${className}`}>
+    <div className={`relative overflow-hidden bg-[#EDE4D7] dark:bg-[#262E2A] ${className}`}>
       <Image
         src={src}
         alt={alt}

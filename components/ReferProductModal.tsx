@@ -211,7 +211,7 @@ export default function ReferProductModal({
               href={whatsappHref}
               target="_blank"
               rel="noopener noreferrer"
-              className="w-full h-11 px-4 rounded-full bg-[#292D2F] text-white hover:bg-[#292D2F]/90 dark:bg-white dark:text-black dark:hover:bg-white/90 font-sans text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
+              className="w-full h-11 px-4 rounded-full bg-[#2E5339] text-white hover:bg-[#23412C] dark:bg-[#3A6B49] dark:hover:bg-[#305A3D] font-sans text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
             >
               <MessageCircle className="w-4 h-4" aria-hidden="true" />
               Share on WhatsApp
@@ -221,7 +221,7 @@ export default function ReferProductModal({
               href={twitterHref}
               target="_blank"
               rel="noopener noreferrer"
-              className="w-full h-11 px-4 rounded-full bg-[#292D2F] text-white hover:bg-[#292D2F]/90 dark:bg-white dark:text-black dark:hover:bg-white/90 font-sans text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
+              className="w-full h-11 px-4 rounded-full bg-[#2E5339] text-white hover:bg-[#23412C] dark:bg-[#3A6B49] dark:hover:bg-[#305A3D] font-sans text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
             >
               <Share2 className="w-4 h-4" aria-hidden="true" />
               Share on X / Twitter
@@ -230,7 +230,7 @@ export default function ReferProductModal({
             <button
               type="button"
               onClick={handleCopyQuickLink}
-              className="w-full h-11 px-4 rounded-full bg-[#292D2F] text-white hover:bg-[#292D2F]/90 dark:bg-white dark:text-black dark:hover:bg-white/90 font-sans text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              className="w-full h-11 px-4 rounded-full bg-[#2E5339] text-white hover:bg-[#23412C] dark:bg-[#3A6B49] dark:hover:bg-[#305A3D] font-sans text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
               {copiedGeneral ? (
                 <Check className="w-4 h-4" aria-hidden="true" />

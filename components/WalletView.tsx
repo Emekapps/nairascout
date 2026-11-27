@@ -37,7 +37,7 @@ const LEDGER_STATUS_FILTERS: ReadonlyArray<'All' | LedgerEntryStatus> = [
 function StatusLabel({ status }: { status: LedgerEntryStatus }) {
   if (status === 'Available') {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#005B46] dark:text-[#34D399]">
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#5C7C5D] dark:text-[#6E9470]">
         <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
         Available
       </span>
@@ -148,7 +148,7 @@ export default function WalletView({ snapshot }: WalletViewProps) {
         ariaLabel="Referral Earnings Wallet & Ledger Notice"
       />
 
-      {/* Hero Wallet Card (Charcoal Black #292D2F) */}
+      {/* Hero Wallet Card (Deep Forest Olive) */}
       <WalletHeroCard
         availableKobo={withdrawableNowKobo}
         pendingKobo={wallet.pendingKobo}
@@ -160,7 +160,7 @@ export default function WalletView({ snapshot }: WalletViewProps) {
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="bg-card border border-border rounded-2xl p-5">
           <p className="text-xs text-muted-foreground">Available</p>
-          <p className="mt-2 font-numeric text-xl font-bold text-[#005B46] dark:text-[#34D399] tabular-nums">
+          <p className="mt-2 font-numeric text-xl font-bold text-[#5C7C5D] dark:text-[#6E9470] tabular-nums">
             {formatKoboToNaira(withdrawableNowKobo)}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -188,7 +188,7 @@ export default function WalletView({ snapshot }: WalletViewProps) {
           <p className="mt-1 text-xs text-muted-foreground">Dispute or review hold</p>
         </div>
 
-        <div className="bg-[#FFFFFF] dark:bg-[#181818] border border-border rounded-2xl p-5">
+        <div className="bg-card border border-border rounded-2xl p-5">
           <p className="text-xs text-muted-foreground">Paid (Cumulative)</p>
           <p className="mt-2 font-numeric text-xl font-semibold text-foreground tabular-nums">
             {formatKoboToNaira(wallet.paidKobo)}
@@ -196,7 +196,7 @@ export default function WalletView({ snapshot }: WalletViewProps) {
           <p className="mt-1 text-xs text-muted-foreground">Settled to bank account</p>
         </div>
 
-        <div className="bg-[#FFFFFF] dark:bg-[#181818] border border-border rounded-2xl p-5">
+        <div className="bg-card border border-border rounded-2xl p-5">
           <p className="text-xs text-muted-foreground">Reversed (Cumulative)</p>
           <p className="mt-2 font-numeric text-xl font-semibold text-destructive tabular-nums">
             {formatKoboToNaira(wallet.reversedKobo)}
@@ -210,7 +210,7 @@ export default function WalletView({ snapshot }: WalletViewProps) {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
           <div className="lg:col-span-8 space-y-2">
             <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-[#005B46] dark:text-[#34D399]" aria-hidden="true" />
+              <ShieldCheck className="w-4 h-4 text-[#5C7C5D] dark:text-[#6E9470]" aria-hidden="true" />
               <h2 className="font-sans text-base font-semibold text-foreground">
                 Payout — 15th of Each Month
               </h2>
@@ -227,7 +227,7 @@ export default function WalletView({ snapshot }: WalletViewProps) {
                 <strong
                   className={
                     activeScout.kycVerified
-                      ? 'text-[#005B46] dark:text-[#34D399]'
+                      ? 'text-[#5C7C5D] dark:text-[#6E9470]'
                       : 'text-amber-600 dark:text-amber-400'
                   }
                 >
@@ -255,7 +255,7 @@ export default function WalletView({ snapshot }: WalletViewProps) {
             <p
               className={`text-xs font-medium ${
                 wallet.eligibleForNextPayout
-                  ? 'text-[#005B46] dark:text-[#34D399]'
+                  ? 'text-[#5C7C5D] dark:text-[#6E9470]'
                   : 'text-muted-foreground'
               }`}
             >
@@ -305,7 +305,7 @@ export default function WalletView({ snapshot }: WalletViewProps) {
 
           {/* NS-UI-020 & NS-UI-021 Sliding Filter Pills */}
           <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto no-scrollbar scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] max-w-full">
-            <div className="flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] border border-border rounded-xl w-max">
+            <div className="flex items-center gap-1.5 p-1 bg-[#F7F5F0] dark:bg-[#222925] border border-border rounded-xl w-max">
               {LEDGER_STATUS_FILTERS.map((st) => (
                 <button
                   key={st}
@@ -313,8 +313,8 @@ export default function WalletView({ snapshot }: WalletViewProps) {
                   onClick={() => setStatusFilter(st)}
                   className={`px-3 py-1.5 text-xs rounded-lg whitespace-nowrap shrink-0 cursor-pointer transition-colors border ${
                     statusFilter === st
-                      ? 'bg-[#000000] text-[#FFFFFF] border-[#000000] dark:bg-white dark:text-black dark:border-white font-semibold shadow-sm'
-                      : 'bg-[#FFFFFF] text-[#000000] border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium hover:opacity-90'
+                      ? 'bg-[#2E5339] text-[#FFFFFF] border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-sm'
+                      : 'bg-card text-foreground border-border font-medium hover:opacity-90'
                   }`}
                 >
                   {st}

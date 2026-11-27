@@ -103,14 +103,14 @@ export default function TrustGuideDrawer({
           </button>
         </div>
 
-        <div className="flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] border border-border rounded-full">
+        <div className="flex items-center gap-1.5 p-1 bg-[#F7F5F0] dark:bg-[#222925] border border-border rounded-full">
           <button
             type="button"
             onClick={() => setSection('guide')}
             className={`flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs rounded-full cursor-pointer transition-colors ${
               section === 'guide'
-                ? 'bg-[#000000] text-[#FFFFFF] border border-transparent dark:bg-white dark:text-black font-semibold shadow-xs'
-                : 'bg-[#FFFFFF] text-[#000000] border border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium'
+                ? 'bg-[#2E5339] text-[#FFFFFF] border border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-xs'
+                : 'bg-card text-foreground border border-border font-medium'
             }`}
           >
             <BookOpen className="w-3.5 h-3.5" />
@@ -121,8 +121,8 @@ export default function TrustGuideDrawer({
             onClick={() => setSection('notifications')}
             className={`flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs rounded-full cursor-pointer transition-colors ${
               section === 'notifications'
-                ? 'bg-[#000000] text-[#FFFFFF] border border-transparent dark:bg-white dark:text-black font-semibold shadow-xs'
-                : 'bg-[#FFFFFF] text-[#000000] border border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium'
+                ? 'bg-[#2E5339] text-[#FFFFFF] border border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-xs'
+                : 'bg-card text-foreground border border-border font-medium'
             }`}
           >
             <Bell className="w-3.5 h-3.5" />
@@ -133,8 +133,8 @@ export default function TrustGuideDrawer({
             onClick={() => setSection('support')}
             className={`flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs rounded-full cursor-pointer transition-colors ${
               section === 'support'
-                ? 'bg-[#000000] text-[#FFFFFF] border border-transparent dark:bg-white dark:text-black font-semibold shadow-xs'
-                : 'bg-[#FFFFFF] text-[#000000] border border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium'
+                ? 'bg-[#2E5339] text-[#FFFFFF] border border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-xs'
+                : 'bg-card text-foreground border border-border font-medium'
             }`}
           >
             <LifeBuoy className="w-3.5 h-3.5" />
@@ -168,7 +168,7 @@ export default function TrustGuideDrawer({
 
             {/* Policy selector pills */}
             <div className="-mx-6 px-6 sm:mx-0 sm:px-0 overflow-x-auto scrollbar-none snap-x">
-              <div className="inline-flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] border border-border rounded-full w-max">
+              <div className="inline-flex items-center gap-1.5 p-1 bg-[#F7F5F0] dark:bg-[#222925] border border-border rounded-full w-max">
                 {livePolicies.map((policy) => {
                   const active = policy.slug === activePolicy?.slug;
                   return (
@@ -178,8 +178,8 @@ export default function TrustGuideDrawer({
                       onClick={() => setSelectedPolicySlug(policy.slug)}
                       className={`snap-start px-3 py-1 rounded-full text-[11px] whitespace-nowrap cursor-pointer transition-colors ${
                         active
-                          ? 'bg-[#000000] text-[#FFFFFF] border border-transparent dark:bg-white dark:text-black font-semibold'
-                          : 'bg-[#FFFFFF] text-[#000000] border border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium'
+                          ? 'bg-[#2E5339] text-[#FFFFFF] border border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold'
+                          : 'bg-card text-foreground border border-border font-medium'
                       }`}
                     >
                       {policy.title}
@@ -221,7 +221,7 @@ export default function TrustGuideDrawer({
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <div className="flex items-center gap-2">
                         {isUnread && (
-                          <span className="px-1.5 py-0.5 rounded-full bg-[#005B46] text-white text-[10px] font-bold uppercase">
+                          <span className="px-1.5 py-0.5 rounded-full bg-[#5C7C5D] dark:bg-[#6E9470] text-white text-[10px] font-bold uppercase">
                             New
                           </span>
                         )}

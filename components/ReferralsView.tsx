@@ -240,7 +240,7 @@ export default function ReferralsView({
                             }).catch(() => undefined);
                             onStartReferralCheckout(product, refEvent);
                           }}
-                          className="flex-1 inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-[#FFFFFF] bg-[#E53935] rounded-lg hover:bg-[#C62828] disabled:opacity-45 transition-colors whitespace-nowrap cursor-pointer"
+                          className="flex-1 inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-[#FFFFFF] bg-[#6B4214] rounded-lg hover:bg-[#56340F] dark:bg-[#8A5820] dark:hover:bg-[#754A1A] disabled:opacity-45 transition-colors whitespace-nowrap cursor-pointer"
                         >
                           <ShoppingBag className="w-3.5 h-3.5" aria-hidden="true" />
                           Buy via Card
@@ -248,7 +248,7 @@ export default function ReferralsView({
                         <button
                           type="button"
                           onClick={() => onOpenReferModal(product)}
-                          className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-[#FFFFFF] bg-[#000000] border border-transparent dark:border-[#2E2E2E] rounded-lg hover:bg-[#1A1A1A] transition-colors whitespace-nowrap cursor-pointer"
+                          className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider text-[#FFFFFF] bg-[#2E5339] border border-transparent rounded-lg hover:bg-[#23412C] dark:bg-[#3A6B49] dark:hover:bg-[#305A3D] transition-colors whitespace-nowrap cursor-pointer"
                         >
                           <Send className="w-3.5 h-3.5" aria-hidden="true" />
                           Refer On

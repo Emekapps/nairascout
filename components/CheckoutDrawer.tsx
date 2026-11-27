@@ -20,6 +20,8 @@ interface CheckoutDrawerProps {
   session: {
     product: ProductListing;
     referralEvent: ProductReferralEvent | null;
+    initialQuantity?: number;
+    selectedVariantLabel?: string | null;
   } | null;
   onClose: () => void;
   onOtpAuthenticated: (snapshot: NairaScoutSnapshot) => void;
@@ -37,7 +39,9 @@ export default function CheckoutDrawer({
   onOtpAuthenticated,
   onConfirmOrder,
 }: CheckoutDrawerProps) {
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState(() =>
+    Math.max(1, Math.min(session?.product.stock ?? 1, session?.initialQuantity ?? 1))
+  );
   const [submitting, setSubmitting] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState<MarketplaceOrder | null>(null);
 
@@ -315,7 +319,10 @@ export default function CheckoutDrawer({
                   <h3 className="font-sans text-base font-semibold text-foreground truncate">
                     {product.title}
                   </h3>
-                  <p className="text-xs text-muted-foreground">Seller: {product.sellerName}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Seller: {product.sellerName}
+                    {session.selectedVariantLabel ? ` · Option: ${session.selectedVariantLabel}` : ''}
+                  </p>
                   <p className="mt-1 font-numeric text-sm font-bold text-foreground tabular-nums">
                     {formatKoboToNaira(product.priceKobo)} each
                   </p>

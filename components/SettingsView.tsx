@@ -671,7 +671,7 @@ export default function SettingsView({ initialSnapshot, initialTab }: SettingsVi
                 <span className="inline-flex items-center gap-1.5 font-sans font-semibold text-foreground">
                   {scout.accountStatus === 'ACTIVE' && (
                     <CheckCircle2
-                      className="h-4 w-4 text-[#005B46] dark:text-[#34D399] shrink-0"
+                      className="h-4 w-4 text-[#5C7C5D] dark:text-[#6E9470] shrink-0"
                       aria-hidden="true"
                     />
                   )}
@@ -700,8 +700,8 @@ export default function SettingsView({ initialSnapshot, initialTab }: SettingsVi
                   }}
                   className={`whitespace-nowrap shrink-0 rounded-full px-4 py-2 font-sans text-xs transition-colors cursor-pointer border ${
                     tab === t.id
-                      ? 'bg-[#000000] text-[#FFFFFF] border-[#000000] dark:bg-white dark:text-black dark:border-white font-semibold shadow-sm'
-                      : 'bg-[#FFFFFF] text-[#000000] border-input dark:bg-card dark:text-foreground dark:border-border font-medium hover:opacity-90'
+                      ? 'bg-[#2E5339] text-[#FFFFFF] border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-sm'
+                      : 'bg-card text-foreground border-border font-medium hover:opacity-90'
                   }`}
                 >
                   {t.label}

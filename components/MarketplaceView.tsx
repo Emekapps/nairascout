@@ -136,8 +136,8 @@ export default function MarketplaceView({
                   onClick={() => setSelectedCategory(cat)}
                   className={`px-3.5 py-2 text-xs rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
                     active
-                      ? 'bg-[#000000] text-[#FFFFFF] border-[#000000] dark:bg-white dark:text-black dark:border-white font-semibold'
-                      : 'bg-[#FFFFFF] dark:bg-[#181818] text-foreground border-input dark:border-border hover:bg-muted dark:hover:bg-muted font-medium'
+                      ? 'bg-[#2E5339] text-[#FFFFFF] border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold'
+                      : 'bg-card text-foreground border-border hover:bg-muted font-medium'
                   }`}
                 >
                   {cat}

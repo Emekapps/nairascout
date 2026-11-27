@@ -55,7 +55,7 @@ export default async function ProductDetailPage({ params, searchParams }: Produc
           </p>
           <Link
             href="/"
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold rounded-xl bg-[#000000] text-[#FFFFFF] dark:bg-white dark:text-black"
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold rounded-xl bg-[#2E5339] text-[#FFFFFF] dark:bg-[#3A6B49] dark:text-[#FFFFFF]"
           >
             <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
             Back to Feed

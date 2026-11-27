@@ -178,7 +178,7 @@ export default function NetworkView({
         </h1>
 
         <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto no-scrollbar scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] max-w-full">
-          <div className="flex items-center gap-1.5 p-1 bg-[#F3F4F6] dark:bg-[#181818] border border-border rounded-xl w-max">
+          <div className="flex items-center gap-1.5 p-1 bg-[#F7F5F0] dark:bg-[#222925] border border-border rounded-xl w-max">
             {(
               [
                 { id: 'explorer', label: 'Ancestry' },
@@ -192,8 +192,8 @@ export default function NetworkView({
                 onClick={() => setSubTab(item.id)}
                 className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
                   subTab === item.id
-                    ? 'bg-[#000000] text-[#FFFFFF] border-[#000000] dark:bg-white dark:text-black dark:border-white font-semibold shadow-sm'
-                    : 'bg-[#FFFFFF] text-[#000000] border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium hover:opacity-90'
+                    ? 'bg-[#2E5339] text-[#FFFFFF] border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-sm'
+                    : 'bg-card text-foreground border-border font-medium hover:opacity-90'
                 }`}
               >
                 {item.label}
@@ -708,14 +708,14 @@ export default function NetworkView({
                   <h3 className="font-sans text-base font-semibold text-foreground">
                     Pending Invitations
                   </h3>
-                  <div className="flex items-center gap-1 p-1 bg-[#F3F4F6] dark:bg-[#181818] border border-border rounded-lg text-xs overflow-x-auto no-scrollbar scrollbar-none">
+                  <div className="flex items-center gap-1 p-1 bg-[#F7F5F0] dark:bg-[#222925] border border-border rounded-lg text-xs overflow-x-auto no-scrollbar scrollbar-none">
                     <button
                       type="button"
                       onClick={() => setInviteSubTab('received')}
                       className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors whitespace-nowrap border ${
                         inviteSubTab === 'received'
-                          ? 'bg-[#000000] text-[#FFFFFF] border-[#000000] dark:bg-white dark:text-black dark:border-white font-semibold shadow-sm'
-                          : 'bg-[#FFFFFF] text-[#000000] border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium hover:opacity-90'
+                          ? 'bg-[#2E5339] text-[#FFFFFF] border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-sm'
+                          : 'bg-card text-foreground border-border font-medium hover:opacity-90'
                       }`}
                     >
                       Received ({receivedInvites.length})
@@ -725,8 +725,8 @@ export default function NetworkView({
                       onClick={() => setInviteSubTab('sent')}
                       className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors whitespace-nowrap border ${
                         inviteSubTab === 'sent'
-                          ? 'bg-[#000000] text-[#FFFFFF] border-[#000000] dark:bg-white dark:text-black dark:border-white font-semibold shadow-sm'
-                          : 'bg-[#FFFFFF] text-[#000000] border-input dark:bg-secondary dark:text-foreground dark:border-border font-medium hover:opacity-90'
+                          ? 'bg-[#2E5339] text-[#FFFFFF] border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-sm'
+                          : 'bg-card text-foreground border-border font-medium hover:opacity-90'
                       }`}
                     >
                       Sent ({sentInvites.length})
@@ -907,7 +907,7 @@ export default function NetworkView({
                   onClick={() => setIsReferral(true)}
                   className={`py-2 px-3 text-xs font-semibold rounded-xl border cursor-pointer ${
                     isReferral
-                      ? 'bg-primary text-primary-foreground border-primary-border'
+                      ? 'bg-[#2E5339] text-[#FFFFFF] border-[#2E5339] dark:bg-[#3A6B49] dark:border-[#3A6B49]'
                       : 'bg-background text-muted-foreground border-border'
                   }`}
                 >
@@ -918,7 +918,7 @@ export default function NetworkView({
                   onClick={() => setIsReferral(false)}
                   className={`py-2 px-3 text-xs font-semibold rounded-xl border cursor-pointer ${
                     !isReferral
-                      ? 'bg-commerce text-commerce-foreground border-commerce'
+                      ? 'bg-[#6B4214] text-[#FFFFFF] border-[#6B4214] dark:bg-[#8A5820] dark:border-[#8A5820]'
                       : 'bg-background text-muted-foreground border-border'
                   }`}
                 >

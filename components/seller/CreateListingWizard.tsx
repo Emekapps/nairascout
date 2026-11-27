@@ -599,7 +599,7 @@ export default function CreateListingWizard({ initialSnapshot }: CreateListingWi
                             className="w-full h-full object-cover"
                           />
                           {idx === 0 ? (
-                            <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md bg-[#000000]/80 text-white text-[10px] font-semibold">
+                            <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md bg-[#1E241E]/85 text-white text-[10px] font-semibold">
                               Cover
                             </span>
                           ) : (

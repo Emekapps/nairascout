@@ -2017,7 +2017,7 @@ export default function AdminConsoleView({
                               : r.status === 'REJECTED'
                                 ? 'bg-destructive/15 text-destructive'
                                 : r.status === 'RECOMMENDED_APPROVAL'
-                                  ? 'bg-[#005B46]/10 text-[#005B46] dark:bg-[#005B46] dark:text-white'
+                                  ? 'bg-[#F2F6F2] text-[#2E5339] dark:bg-[#1F2E24] dark:text-[#6E9470]'
                                   : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                           }`}
                         >
