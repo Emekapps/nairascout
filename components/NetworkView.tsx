@@ -1,5 +1,6 @@
 'use client';
 
+// NS-UI-310 & NS-UI-320: Dedicated Scouts List, Ancestry & 13-Gen Commission Calculator Views
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
@@ -26,9 +27,11 @@ import { DismissibleNoticePanel } from './shared/DismissibleNoticePanel';
 import { UserIdentityRow } from './shared/UserIdentityRow';
 
 export type NetworkSubTab = 'explorer' | 'scouts_list' | 'simulator';
+export type NetworkViewMode = 'all' | 'scouts' | 'ancestry' | 'calculator';
 
 interface NetworkViewProps {
   snapshot: NairaScoutSnapshot;
+  viewMode?: NetworkViewMode;
   externalSubTab?: NetworkSubTab;
   onExternalSubTabChange?: (tab: NetworkSubTab) => void;
   externalScoutSearch?: string;
@@ -50,6 +53,7 @@ interface NetworkViewProps {
 
 export default function NetworkView({
   snapshot,
+  viewMode = 'all',
   externalSubTab,
   onExternalSubTabChange,
   externalScoutSearch,
@@ -64,7 +68,16 @@ export default function NetworkView({
   const [inviteSubTab, setInviteSubTab] = useState<'received' | 'sent'>('received');
   const [localScoutSearch, setLocalScoutSearch] = useState('');
 
-  const subTab = externalSubTab ?? localSubTab;
+  const forcedSubTab: NetworkSubTab | null =
+    viewMode === 'ancestry'
+      ? 'explorer'
+      : viewMode === 'scouts'
+        ? 'scouts_list'
+        : viewMode === 'calculator'
+          ? 'simulator'
+          : null;
+
+  const subTab = forcedSubTab ?? externalSubTab ?? localSubTab;
   const setSubTab = onExternalSubTabChange ?? setLocalSubTab;
   const scoutSearch = externalScoutSearch !== undefined ? externalScoutSearch : localScoutSearch;
   const setScoutSearch = onExternalScoutSearchChange ?? setLocalScoutSearch;
@@ -127,7 +140,7 @@ export default function NetworkView({
         if (active) setSimLoading(false);
       }
     };
-    runSim();
+    void runSim();
     return () => {
       active = false;
     };
@@ -170,37 +183,75 @@ export default function NetworkView({
     }
   };
 
+  const pageTitle =
+    viewMode === 'scouts'
+      ? 'Scouts List'
+      : viewMode === 'ancestry'
+        ? 'Ancestry'
+        : viewMode === 'calculator'
+          ? 'Commission Calculator'
+          : 'Scout Hub & Network';
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-5">
         <h1 className="font-sans text-xl md:text-2xl font-bold tracking-tight text-foreground">
-          Scout Hub &amp; Network
+          {pageTitle}
         </h1>
 
-        <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto no-scrollbar scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] max-w-full">
-          <div className="flex items-center gap-1.5 p-1 bg-[#F7F5F0] dark:bg-[#222925] border border-border rounded-xl w-max">
-            {(
-              [
-                { id: 'explorer', label: 'Ancestry' },
-                { id: 'scouts_list', label: 'Scouts' },
-                { id: 'simulator', label: 'Calculator' },
-              ] as { id: NetworkSubTab; label: string }[]
-            ).map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setSubTab(item.id)}
-                className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
-                  subTab === item.id
-                    ? 'bg-[#2E5339] text-[#FFFFFF] border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-sm'
-                    : 'bg-card text-foreground border-border font-medium hover:opacity-90'
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
+        {viewMode === 'all' ? (
+          <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto no-scrollbar scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] max-w-full">
+            <div className="flex items-center gap-1.5 p-1 bg-[#F7F5F0] dark:bg-[#222925] border border-border rounded-xl w-max">
+              {(
+                [
+                  { id: 'explorer', label: 'Ancestry' },
+                  { id: 'scouts_list', label: 'Scouts' },
+                  { id: 'simulator', label: 'Calculator' },
+                ] as { id: NetworkSubTab; label: string }[]
+              ).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setSubTab(item.id)}
+                  className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
+                    subTab === item.id
+                      ? 'bg-[#2E5339] text-[#FFFFFF] border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-sm'
+                      : 'bg-card text-foreground border-border font-medium hover:opacity-90'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-4 text-xs font-semibold">
+            {viewMode !== 'scouts' && (
+              <Link
+                href="/network/scouts"
+                className="text-[#2E5339] dark:text-[#6E9470] hover:underline"
+              >
+                Scouts List →
+              </Link>
+            )}
+            {viewMode !== 'ancestry' && (
+              <Link
+                href="/network/ancestry"
+                className="text-[#2E5339] dark:text-[#6E9470] hover:underline"
+              >
+                Ancestry →
+              </Link>
+            )}
+            {viewMode !== 'calculator' && (
+              <Link
+                href="/network/calculator"
+                className="text-[#2E5339] dark:text-[#6E9470] hover:underline"
+              >
+                Commission Calculator →
+              </Link>
+            )}
+          </div>
+        )}
       </div>
 
       <DismissibleNoticePanel
@@ -226,18 +277,23 @@ export default function NetworkView({
               >
                 Sign In/Join Free
               </Link>
-              <button
-                type="button"
-                onClick={() => setSubTab('simulator')}
-                className="w-full sm:w-auto min-h-[44px] inline-flex items-center justify-center px-4 py-2.5 text-xs font-semibold text-foreground border border-border bg-card rounded-xl hover:bg-muted cursor-pointer"
+              <Link
+                href="/network/calculator"
+                className="w-full sm:w-auto min-h-[44px] inline-flex items-center justify-center px-4 py-2.5 text-xs font-semibold text-foreground border border-border bg-card rounded-xl hover:bg-muted"
               >
                 Open Commission Calculator
-              </button>
+              </Link>
             </div>
           </div>
         ) : (
           <div className="space-y-8">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div
+              className={
+                viewMode === 'ancestry'
+                  ? 'grid grid-cols-1 gap-3'
+                  : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3'
+              }
+            >
               <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
                 <p className="text-xs text-muted-foreground">Permanent Direct Referrer (Gen 1)</p>
                 <p className="mt-1 font-sans text-lg font-semibold text-foreground">
@@ -413,9 +469,15 @@ export default function NetworkView({
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-            {/* Left: Active Contacts & Sanitized Scout Directory Search */}
-            <div className="lg:col-span-7 space-y-8">
+          <div
+            className={
+              viewMode === 'scouts'
+                ? 'space-y-6'
+                : 'grid grid-cols-1 lg:grid-cols-12 gap-8'
+            }
+          >
+            {/* Active Contacts & Sanitized Scout Directory Search */}
+            <div className={viewMode === 'scouts' ? 'space-y-6' : 'lg:col-span-7 space-y-8'}>
               <section className="space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
                   <h2 className="font-sans text-lg font-bold text-foreground">
@@ -701,8 +763,8 @@ export default function NetworkView({
               </section>
             </div>
 
-            {/* Right: Pending Invitations (Received / Sent) */}
-            <div className="lg:col-span-5 space-y-6">
+            {/* Pending Invitations (Received / Sent) + Privacy Controls */}
+            <div className={viewMode === 'scouts' ? 'space-y-6' : 'lg:col-span-5 space-y-6'}>
               <div className="bg-card border border-border rounded-2xl p-5 space-y-4">
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="font-sans text-base font-semibold text-foreground">
@@ -825,10 +887,10 @@ export default function NetworkView({
                   </div>
                 </div>
                 <Link
-                  href="/settings"
+                  href="/settings/privacy"
                   className="inline-block text-xs font-semibold text-foreground hover:underline"
                 >
-                  Configure privacy &amp; unblock users in Settings →
+                  Configure privacy &amp; unblock users →
                 </Link>
               </div>
             </div>
@@ -956,7 +1018,13 @@ export default function NetworkView({
           <div className="lg:col-span-7 space-y-5">
             {simResult && (
               <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div
+                  className={
+                    viewMode === 'calculator'
+                      ? 'grid grid-cols-1 gap-3'
+                      : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3'
+                  }
+                >
                   <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
                     <p className="text-xs text-muted-foreground">Seller Proceeds (90%)</p>
                     <p className="mt-1 font-numeric text-base font-bold text-foreground tabular-nums">

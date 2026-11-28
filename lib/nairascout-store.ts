@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, ilike, inArray, lt, lte, or, sql } from 'drizzle-orm';
 import {
   AncestorNode,
   CommissionBreakdown,
@@ -2408,6 +2408,25 @@ export async function advanceOrderStatus(
           ruleVersion: COMMISSION_RULE_VERSION,
           description: `${reasonLabel} (${root.reference})`,
           linkedToReference: root.reference,
+        });
+
+        const formattedAmount = `₦${(Number(root.amountKobo) / 100).toLocaleString('en-NG', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`;
+        const notifTitle =
+          newLedgerStatus === 'Available'
+            ? 'Commission Released to Available'
+            : newLedgerStatus === 'On Hold'
+              ? 'Commission Placed On Hold'
+              : 'Commission Reversed';
+        await tx.insert(notifications).values({
+          userId: root.beneficiaryScoutId,
+          category: 'WALLET',
+          title: notifTitle,
+          body: `${formattedAmount} for ${order.productTitle} (${order.id}) — ${reasonLabel}.`,
+          actionUrl: '/wallet',
+          isRead: false,
         });
       }
     }
@@ -7054,3 +7073,309 @@ export async function getReferralEventDestinationById(
     senderHandle: senderRows[0]?.username ?? null,
   };
 }
+
+// NS-SCT-075 & NS-UI-319: Authoritative server-side withdrawal request (minimum ₦5,000, 15th monthly schedule)
+export interface WithdrawalRequestDTO {
+  id: string;
+  amountKobo: number;
+  bankSummary: string;
+  scheduledPayoutDate: string;
+  status: string;
+  failureReason: string | null;
+  requestedAt: string;
+  processedAt: string | null;
+}
+
+function getNextLagosPayoutDate(): string {
+  const now = new Date();
+  const lagosNow = new Date(now.getTime() + 60 * 60 * 1000);
+  const year = lagosNow.getUTCFullYear();
+  const month = lagosNow.getUTCMonth();
+  const day = lagosNow.getUTCDate();
+  const target =
+    day < 15
+      ? new Date(Date.UTC(year, month, 15))
+      : new Date(Date.UTC(year, month + 1, 15));
+  return target.toISOString().slice(0, 10);
+}
+
+export async function requestWithdrawalForActor(
+  actorUserId: string,
+  input?: { amountKobo?: number }
+): Promise<WithdrawalRequestDTO> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertActiveAccount(ctx);
+  assertCapabilityNotRestricted(ctx, 'REQUEST_WITHDRAWAL');
+  assertWithdrawalNotInCooldown(ctx);
+
+  return db.transaction(async (tx) => {
+    const verifRows = await tx
+      .select()
+      .from(verificationRecords)
+      .where(eq(verificationRecords.userId, actorUserId));
+
+    const kycOk = verifRows.some(
+      (v) => v.category === 'IDENTITY' && normalizeVerificationStatus(v.status) === 'VERIFIED'
+    );
+    const bankRecord = verifRows.find(
+      (v) => v.category === 'PAYOUT_BANK' && normalizeVerificationStatus(v.status) === 'VERIFIED'
+    );
+
+    if (!kycOk || !bankRecord) {
+      throw new AuthorizationError(
+        'Verified Identity KYC and a confirmed same-name Nigerian bank account are required before requesting a payout.',
+        403,
+        'KYC_OR_BANK_REQUIRED'
+      );
+    }
+
+    const wallet = await computeWalletFromDb(
+      tx as unknown as NairaScoutDb,
+      actorUserId,
+      verifRows
+    );
+    const withdrawableNowKobo = wallet.withdrawableNowKobo ?? wallet.availableKobo;
+    const requestedAmountKobo =
+      input?.amountKobo && Number.isFinite(input.amountKobo) && input.amountKobo > 0
+        ? Math.floor(input.amountKobo)
+        : withdrawableNowKobo;
+
+    if (requestedAmountKobo < 500000) {
+      throw new AuthorizationError(
+        'Minimum Scout withdrawal threshold is ₦5,000.00 (500,000 kobo).',
+        400,
+        'MINIMUM_WITHDRAWAL_NOT_MET'
+      );
+    }
+    if (requestedAmountKobo > withdrawableNowKobo) {
+      throw new AuthorizationError(
+        'Requested payout exceeds your authoritative ledger Available balance.',
+        400,
+        'INSUFFICIENT_AVAILABLE_BALANCE'
+      );
+    }
+
+    const bankSummary = bankRecord.reviewerNotes?.trim() || 'Verified Naira Bank Account';
+    const scheduledPayoutDate = getNextLagosPayoutDate();
+
+    const [created] = await tx
+      .insert(withdrawalRequests)
+      .values({
+        userId: actorUserId,
+        amountKobo: requestedAmountKobo,
+        bankSummary,
+        scheduledPayoutDate,
+        status: 'PENDING',
+      })
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      actorId: actorUserId,
+      affectedUserId: actorUserId,
+      action: 'WITHDRAWAL_REQUESTED',
+      entityType: 'withdrawal_requests',
+      entityId: created.id,
+      newValue: {
+        amountKobo: requestedAmountKobo,
+        scheduledPayoutDate,
+        bankSummary,
+      },
+      reason: 'Scout queued monthly payout withdrawal request',
+    });
+
+    await tx.insert(notifications).values({
+      userId: actorUserId,
+      category: 'WALLET',
+      title: 'Withdrawal Queued for Monthly Payout',
+      body: `₦${(requestedAmountKobo / 100).toLocaleString('en-NG', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })} queued for the ${scheduledPayoutDate} payout cycle (${bankSummary}).`,
+      actionUrl: '/wallet',
+      isRead: false,
+    });
+
+    return {
+      id: created.id,
+      amountKobo: Number(created.amountKobo),
+      bankSummary: created.bankSummary,
+      scheduledPayoutDate: created.scheduledPayoutDate,
+      status: created.status,
+      failureReason: created.failureReason ?? null,
+      requestedAt: created.requestedAt.toISOString(),
+      processedAt: created.processedAt?.toISOString() ?? null,
+    };
+  });
+}
+
+// NS-SCT-070 & NS-UI-319: 20-record cursor-paginated Financial Ledger with Africa/Lagos date boundaries
+export interface PaginatedLedgerEntryDTO extends LedgerEntry {
+  productTitle?: string;
+}
+
+export interface PaginatedLedgerResponse {
+  entries: PaginatedLedgerEntryDTO[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  totalCount: number;
+}
+
+const VALID_LEDGER_STATUSES = new Set<string>([
+  'Pending',
+  'Available',
+  'On Hold',
+  'Paid',
+  'Reversed',
+]);
+
+export async function getCursorPaginatedLedgerForActor(
+  actorUserId: string,
+  params?: {
+    cursor?: string | null;
+    limit?: number;
+    status?: string | null;
+    from?: string | null;
+    to?: string | null;
+    product?: string | null;
+  }
+): Promise<PaginatedLedgerResponse> {
+  const db = requireDb();
+  await ensureTablesReady(db);
+
+  const ctx = await loadDbAuthContext(actorUserId);
+  assertAccountOperational(ctx);
+
+  const limit = Math.min(Math.max(Number(params?.limit || 20), 1), 50);
+  const conditions = [eq(commissionLedgerEntries.beneficiaryScoutId, actorUserId)];
+
+  const statusParam = params?.status?.trim();
+  if (statusParam && statusParam !== 'All' && VALID_LEDGER_STATUSES.has(statusParam)) {
+    conditions.push(eq(commissionLedgerEntries.status, statusParam));
+  }
+
+  const fromParam = params?.from?.trim();
+  if (fromParam && /^\d{4}-\d{2}-\d{2}$/.test(fromParam)) {
+    const startLagos = new Date(`${fromParam}T00:00:00+01:00`);
+    if (!Number.isNaN(startLagos.getTime())) {
+      conditions.push(gte(commissionLedgerEntries.createdAt, startLagos));
+    }
+  }
+
+  const toParam = params?.to?.trim();
+  if (toParam && /^\d{4}-\d{2}-\d{2}$/.test(toParam)) {
+    const endLagos = new Date(`${toParam}T23:59:59.999+01:00`);
+    if (!Number.isNaN(endLagos.getTime())) {
+      conditions.push(lte(commissionLedgerEntries.createdAt, endLagos));
+    }
+  }
+
+  const productParam = params?.product?.trim();
+  if (productParam) {
+    const matchingOrders = await db
+      .select({ id: marketplaceOrders.id })
+      .from(marketplaceOrders)
+      .where(ilike(marketplaceOrders.productTitle, `%${productParam}%`));
+    const matchingIds = matchingOrders.map((o) => o.id);
+    if (matchingIds.length > 0) {
+      conditions.push(
+        or(
+          inArray(commissionLedgerEntries.orderId, matchingIds),
+          ilike(commissionLedgerEntries.description, `%${productParam}%`),
+          ilike(commissionLedgerEntries.orderId, `%${productParam}%`),
+          ilike(commissionLedgerEntries.reference, `%${productParam}%`)
+        )!
+      );
+    } else {
+      conditions.push(
+        or(
+          ilike(commissionLedgerEntries.description, `%${productParam}%`),
+          ilike(commissionLedgerEntries.orderId, `%${productParam}%`),
+          ilike(commissionLedgerEntries.reference, `%${productParam}%`)
+        )!
+      );
+    }
+  }
+
+  const baseWhere = and(...conditions);
+
+  const countRows = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(commissionLedgerEntries)
+    .where(baseWhere);
+  const totalCount = Number(countRows[0]?.count ?? 0);
+
+  const pageConditions = [...conditions];
+  const cursorParam = params?.cursor?.trim();
+  if (cursorParam) {
+    const [rawTs, rawId] = cursorParam.split('|');
+    const cursorDate = new Date(rawTs);
+    if (!Number.isNaN(cursorDate.getTime())) {
+      if (isUuid(rawId)) {
+        pageConditions.push(
+          or(
+            lt(commissionLedgerEntries.createdAt, cursorDate),
+            and(
+              eq(commissionLedgerEntries.createdAt, cursorDate),
+              lt(commissionLedgerEntries.id, rawId)
+            )
+          )!
+        );
+      } else {
+        pageConditions.push(lt(commissionLedgerEntries.createdAt, cursorDate));
+      }
+    }
+  }
+
+  const rows = await db
+    .select()
+    .from(commissionLedgerEntries)
+    .where(and(...pageConditions))
+    .orderBy(desc(commissionLedgerEntries.createdAt), desc(commissionLedgerEntries.id))
+    .limit(limit + 1);
+
+  const hasMore = rows.length > limit;
+  const pageRows = hasMore ? rows.slice(0, limit) : rows;
+  const lastRow = pageRows[pageRows.length - 1];
+  const nextCursor =
+    hasMore && lastRow ? `${lastRow.createdAt.toISOString()}|${lastRow.id}` : null;
+
+  const orderIds = Array.from(new Set(pageRows.map((r) => r.orderId).filter(Boolean)));
+  const orderTitleById = new Map<string, string>();
+  if (orderIds.length > 0) {
+    const ordRows = await db
+      .select({ id: marketplaceOrders.id, productTitle: marketplaceOrders.productTitle })
+      .from(marketplaceOrders)
+      .where(inArray(marketplaceOrders.id, orderIds));
+    for (const o of ordRows) {
+      orderTitleById.set(o.id, o.productTitle);
+    }
+  }
+
+  const entries: PaginatedLedgerEntryDTO[] = pageRows.map((l) => ({
+    id: l.id,
+    reference: l.reference,
+    orderId: l.orderId,
+    referralEventId: l.referralEventId,
+    beneficiaryScoutId: l.beneficiaryScoutId,
+    generation: l.generation,
+    fractionLabel: l.fractionLabel,
+    amountKobo: Number(l.amountKobo),
+    status: l.status as LedgerEntryStatus,
+    ruleVersion: l.ruleVersion,
+    description: l.description,
+    createdAt: l.createdAt.toISOString().slice(0, 10),
+    linkedToReference: l.linkedToReference ?? undefined,
+    productTitle: orderTitleById.get(l.orderId),
+  }));
+
+  return {
+    entries,
+    nextCursor,
+    hasMore,
+    totalCount,
+  };
+}
+

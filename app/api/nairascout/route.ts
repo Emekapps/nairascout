@@ -18,6 +18,7 @@ import {
   markReferralEventOpenedForActor,
   OrderFulfilmentStatus,
   reportAbuseForActor,
+  requestWithdrawalForActor,
   respondToInvitationForActor,
   SellerPlanId,
   submitGovernanceAppealForActor,
@@ -205,6 +206,17 @@ export async function POST(req: NextRequest) {
         evidencePaths: Array.isArray(body.evidencePaths) ? body.evidencePaths.map(String) : [],
       });
       return NextResponse.json({ appeal, snapshot: await getNairaScoutSnapshot(actorUserId) });
+    }
+
+    if (action === 'request_withdrawal') {
+      const withdrawal = await requestWithdrawalForActor(actorUserId, {
+        amountKobo: body.amountKobo !== undefined ? Number(body.amountKobo) : undefined,
+      });
+      return NextResponse.json({
+        ok: true,
+        withdrawal,
+        snapshot: await getNairaScoutSnapshot(actorUserId),
+      });
     }
 
     if (action === 'close_seller') {

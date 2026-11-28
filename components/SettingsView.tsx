@@ -18,7 +18,6 @@ import {
   ShieldCheck,
   Smartphone,
   Trash2,
-  User,
 } from 'lucide-react';
 import {
   formatRemainingCooldown,
@@ -62,17 +61,6 @@ function containsReservedImpersonationTerm(value: string): string | null {
     if (normalized.includes(term)) return term;
   }
   return null;
-}
-
-function formatLagosDate(isoString: string): string {
-  const date = new Date(isoString);
-  if (Number.isNaN(date.getTime())) return isoString.slice(0, 10);
-  return date.toLocaleDateString('en-NG', {
-    timeZone: 'Africa/Lagos',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
 }
 
 interface SettingsViewProps {
@@ -765,253 +753,214 @@ export default function SettingsView({ initialSnapshot, initialTab }: SettingsVi
                 'Scout profile updated.'
               );
             }}
-            className="bg-card border border-border rounded-2xl p-6 space-y-5 max-w-2xl"
+            className="space-y-4 max-w-2xl"
           >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <User className="w-4 h-4 text-foreground" aria-hidden="true" />
-                <h2 className="font-sans text-lg font-bold text-foreground">
-                  Scout Profile
-                </h2>
-              </div>
-              <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-secondary text-secondary-foreground border border-border">
-                Visibility: {profileVisibility === 'PRIVATE' ? 'Private (Default)' : profileVisibility === 'NETWORK_ONLY' ? 'Scouts List Only' : 'Public Directory'}
-              </span>
-            </div>
-
-            {/* NS-SCT-010: Read-only foundational identity block */}
-            <div className="p-4 rounded-xl border border-border bg-muted/40 space-y-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <p className="font-sans text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  Foundational Identity (Read-Only)
-                </p>
-                <span className="text-[11px] text-muted-foreground">
-                  No public /scouts/[username] page
-                </span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div>
-                  <span className="text-muted-foreground block">Account Name</span>
-                  <span className="font-semibold text-foreground">{scout.displayName}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground block">Registered Email</span>
-                  <span className="font-semibold text-foreground">{scout.email}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground block">Account Creation Date</span>
-                  <span className="font-semibold text-foreground">
-                    {scout.accountCreatedAt ? formatLagosDate(scout.accountCreatedAt) : 'Active Member'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground block">Account Status</span>
-                  <span className="font-semibold text-foreground">{scout.accountStatus}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Supabase Profile Photo / Avatar Uploader (NS-SCT-012) */}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-xl border border-border bg-muted/40">
-              <UserAvatar
-                avatarUrl={scout.avatarUrl}
-                displayName={displayName || scout.displayName}
-                username={username || scout.handle}
-                size="xl"
-                shape="rounded-square"
-              />
-              <div className="flex-1 space-y-2">
-                <div>
-                  <p className="font-sans text-sm font-semibold text-foreground">
-                    Profile Photo
-                  </p>
-                  <p className="font-sans text-xs text-muted-foreground">
-                    Static JPG, PNG, or WebP (minimum 200 × 200 px, up to 5 MB). Square-cropped with EXIF/GPS metadata stripped automatically.
-                  </p>
-                </div>
-                <input
-                  ref={avatarInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  onChange={handleAvatarFileChange}
-                  className="sr-only"
-                  aria-label="Upload profile photo"
+            {/* Card 1: Profile Photo Uploader */}
+            <div className="rounded-2xl border border-border bg-card p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                <UserAvatar
+                  avatarUrl={scout.avatarUrl}
+                  displayName={displayName || scout.displayName}
+                  username={username || scout.handle}
+                  size="xl"
+                  shape="rounded-square"
                 />
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={avatarBusy}
-                    onClick={() => avatarInputRef.current?.click()}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
-                  >
-                    {avatarBusy ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
-                    ) : (
-                      <Camera className="w-3.5 h-3.5" aria-hidden="true" />
-                    )}
-                    {avatarBusy
-                      ? 'Uploading...'
-                      : scout.avatarUrl
-                        ? 'Replace Photo'
-                        : 'Upload Avatar'}
-                  </button>
-                  {scout.avatarUrl && (
+                <div className="flex-1 space-y-2">
+                  <div>
+                    <h2 className="font-sans text-base font-bold text-foreground">
+                      Profile Photo
+                    </h2>
+                    <p className="font-sans text-xs text-muted-foreground mt-0.5">
+                      Static JPG, PNG, or WebP (minimum 200 × 200 px, up to 5 MB). Square-cropped with EXIF/GPS metadata stripped automatically.
+                    </p>
+                  </div>
+                  <input
+                    ref={avatarInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={handleAvatarFileChange}
+                    className="sr-only"
+                    aria-label="Upload profile photo"
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       disabled={avatarBusy}
-                      onClick={handleRemoveAvatar}
-                      className="px-3.5 py-2 text-xs font-semibold text-destructive border border-destructive/30 rounded-xl hover:bg-destructive/10 disabled:opacity-50 cursor-pointer"
+                      onClick={() => avatarInputRef.current?.click()}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-50 cursor-pointer"
                     >
-                      Remove
+                      {avatarBusy ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Camera className="w-3.5 h-3.5" aria-hidden="true" />
+                      )}
+                      {avatarBusy
+                        ? 'Uploading...'
+                        : scout.avatarUrl
+                          ? 'Replace Photo'
+                          : 'Upload Avatar'}
                     </button>
-                  )}
+                    {scout.avatarUrl && (
+                      <button
+                        type="button"
+                        disabled={avatarBusy}
+                        onClick={handleRemoveAvatar}
+                        className="px-3.5 py-2 text-xs font-semibold text-destructive border border-destructive/30 rounded-xl hover:bg-destructive/10 disabled:opacity-50 cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">
-                  Display Name
-                </label>
-                <input
-                  type="text"
-                  required
-                  maxLength={64}
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">
-                  Username
-                </label>
-                <input
-                  type="text"
-                  required
-                  maxLength={32}
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full px-3 py-2 font-sans text-sm bg-background text-foreground border border-input rounded-xl"
-                />
+            {/* Card 2: Display Name & Username */}
+            <div className="rounded-2xl border border-border bg-card p-5 space-y-4">
+              <h2 className="font-sans text-base font-bold text-foreground">
+                Public Handle &amp; Display Name
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    Display Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={64}
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    className="w-full px-3.5 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    Username
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={32}
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="w-full px-3.5 py-2 font-sans text-sm bg-background text-foreground border border-input rounded-xl"
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Card 3: State & LGA */}
+            <div className="rounded-2xl border border-border bg-card p-5 space-y-4">
+              <h2 className="font-sans text-base font-bold text-foreground">
+                Location
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label
+                    htmlFor="settings-location-state"
+                    className="block text-xs font-medium text-muted-foreground mb-1"
+                  >
+                    Location State (Optional)
+                  </label>
+                  <select
+                    id="settings-location-state"
+                    value={locationState}
+                    onChange={(e) => setLocationState(e.target.value)}
+                    className="w-full px-3.5 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
+                  >
+                    {availableStates.map((st) => (
+                      <option key={st.code + st.name} value={st.name}>
+                        {st.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label
+                    htmlFor="settings-location-lga"
+                    className="block text-xs font-medium text-muted-foreground mb-1"
+                  >
+                    LGA (Optional)
+                  </label>
+                  <input
+                    id="settings-location-lga"
+                    type="text"
+                    maxLength={80}
+                    value={locationLga}
+                    onChange={(e) => setLocationLga(e.target.value)}
+                    placeholder="e.g. Ikeja, Eti-Osa, Wuse II"
+                    className="w-full px-3.5 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Card 4: Bio & Preferred Categories */}
+            <div className="rounded-2xl border border-border bg-card p-5 space-y-4">
+              <h2 className="font-sans text-base font-bold text-foreground">
+                Bio &amp; Preferred Categories
+              </h2>
               <div>
-                <label
-                  htmlFor="settings-location-state"
-                  className="block text-xs font-medium text-muted-foreground mb-1"
-                >
-                  Location State (Optional)
-                </label>
-                <select
-                  id="settings-location-state"
-                  value={locationState}
-                  onChange={(e) => setLocationState(e.target.value)}
+                <div className="flex items-center justify-between mb-1">
+                  <label htmlFor="settings-bio" className="block text-xs font-medium text-muted-foreground">
+                    Bio (Optional)
+                  </label>
+                  <span className="text-[11px] font-mono tabular-nums text-muted-foreground">
+                    {bio.length} / {SCOUT_BIO_MAX_LENGTH}
+                  </span>
+                </div>
+                <textarea
+                  id="settings-bio"
+                  rows={3}
+                  maxLength={SCOUT_BIO_MAX_LENGTH}
+                  value={bio}
+                  onChange={(e) => setBio(e.target.value.slice(0, SCOUT_BIO_MAX_LENGTH))}
+                  placeholder="Share a brief note about products or categories you follow..."
                   className="w-full px-3.5 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
-                >
-                  {availableStates.map((st) => (
-                    <option key={st.code + st.name} value={st.name}>
-                      {st.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label
-                  htmlFor="settings-location-lga"
-                  className="block text-xs font-medium text-muted-foreground mb-1"
-                >
-                  LGA (Optional)
-                </label>
-                <input
-                  id="settings-location-lga"
-                  type="text"
-                  maxLength={80}
-                  value={locationLga}
-                  onChange={(e) => setLocationLga(e.target.value)}
-                  placeholder="e.g. Ikeja, Eti-Osa, Wuse II"
-                  className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
                 />
               </div>
-            </div>
 
-            <div>
-              <label
-                htmlFor="settings-profile-visibility"
-                className="block text-xs font-medium text-muted-foreground mb-1"
-              >
-                Profile Visibility (Private by Default)
-              </label>
-              <select
-                id="settings-profile-visibility"
-                value={profileVisibility}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (val === 'PRIVATE' || val === 'NETWORK_ONLY' || val === 'PUBLIC') {
-                    setProfileVisibility(val);
-                  }
-                }}
-                className="w-full px-3.5 py-2 text-sm border border-input rounded-xl bg-background text-foreground"
-              >
-                <option value="PRIVATE">Private (Default) — Optional bio &amp; location hidden</option>
-                <option value="NETWORK_ONLY">Scouts List Only — Visible to accepted contacts</option>
-                <option value="PUBLIC">Public Directory — Visible in Scouts search</option>
-              </select>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label htmlFor="settings-bio" className="block text-xs font-medium text-muted-foreground">
-                  Bio (Optional)
-                </label>
-                <span className="text-[11px] font-mono tabular-nums text-muted-foreground">
-                  {bio.length} / {SCOUT_BIO_MAX_LENGTH}
-                </span>
-              </div>
-              <textarea
-                id="settings-bio"
-                rows={3}
-                maxLength={SCOUT_BIO_MAX_LENGTH}
-                value={bio}
-                onChange={(e) => setBio(e.target.value.slice(0, SCOUT_BIO_MAX_LENGTH))}
-                placeholder="Share a brief note about products or categories you follow..."
-                className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl"
-              />
-            </div>
-
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">Preferred Categories</p>
-              <div className="flex flex-wrap gap-2">
-                {availableCategoryNames.map((cat) => {
-                  const active = preferredCategories.includes(cat);
-                  return (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => toggleCategory(cat)}
-                      className={`px-3 py-1.5 text-xs rounded-xl border cursor-pointer ${
-                        active
-                          ? 'bg-primary text-primary-foreground border-primary-border'
-                          : 'bg-background text-muted-foreground border-border'
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  );
-                })}
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-2">Preferred Categories</p>
+                <div className="flex flex-wrap gap-2">
+                  {availableCategoryNames.map((cat) => {
+                    const active = preferredCategories.includes(cat);
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => toggleCategory(cat)}
+                        className={`px-3 py-1.5 text-xs rounded-xl border cursor-pointer ${
+                          active
+                            ? 'bg-[#2E5339] text-[#FFFFFF] border-[#2E5339] dark:bg-[#3A6B49] dark:border-[#3A6B49] font-semibold'
+                            : 'bg-background text-muted-foreground border-border'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
-            <button
-              type="submit"
-              disabled={busy}
-              className="px-5 py-2.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
-            >
-              {busy ? 'Saving...' : 'Save Profile Changes'}
-            </button>
+            {/* Card 5: Save & Privacy Link */}
+            <div className="rounded-2xl border border-border bg-card p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <button
+                type="submit"
+                disabled={busy}
+                className="px-5 py-2.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
+              >
+                {busy ? 'Saving...' : 'Save Profile Changes'}
+              </button>
+              <Link
+                href="/settings/privacy"
+                className="text-xs font-semibold text-foreground hover:underline"
+              >
+                Manage Privacy &amp; Profile Visibility →
+              </Link>
+            </div>
           </form>
         )}
 

@@ -1,5 +1,6 @@
 'use client';
 
+// NS-UI-310 & NS-UI-312: Top Header Brand Wordmark & Enlarged 44x44 / 74x58 Mobile Touch Targets
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
@@ -199,15 +200,15 @@ export function TopUtilityBar({
       searchResults!.people.length > 0);
 
   return (
-    <header className="sticky top-0 z-30 h-16 border-b border-border bg-background/85 backdrop-blur-md">
-      <div className="h-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-3 sm:gap-5">
-        {/* Mobile Brand Wordmark */}
+    <header className="sticky top-0 z-30 h-[76px] md:h-16 border-b border-border bg-background/85 backdrop-blur-md">
+      <div className="h-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-2 sm:gap-5">
+        {/* Mobile Brand Wordmark (Lexend Extrabold 27px, Deep Forest Olive Light / White Dark) */}
         <button
           type="button"
           onClick={onSelectHome}
           className="md:hidden shrink-0 cursor-pointer"
         >
-          <span className="font-brand font-extrabold text-xl tracking-tight text-foreground">
+          <span className="font-brand font-extrabold text-[27px] leading-none tracking-tight text-[#2E5339] dark:text-[#FFFFFF]">
             NairaScout
           </span>
         </button>
@@ -483,15 +484,15 @@ export function TopUtilityBar({
           </button>
         </div>
 
-        {/* Right Utility Cluster: Mobile Search (left of Bell) + Notifications (+ Desktop Sign In when logged out) */}
-        <div className="flex items-center gap-2 shrink-0 ml-auto">
+        {/* Right Utility Cluster: Mobile Search (74x58 wrapper, 44x44 icon) + Notifications Bell (74x58 wrapper, 44x44 icon) */}
+        <div className="flex items-center gap-1 md:gap-2 shrink-0 ml-auto">
           <button
             type="button"
             onClick={onOpenMobileSearch}
             aria-label="Open search"
-            className="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg border border-border bg-card text-foreground hover:bg-muted transition-colors cursor-pointer"
+            className="md:hidden inline-flex items-center justify-center h-[74px] w-[58px] rounded-xl text-foreground hover:bg-muted/70 transition-colors cursor-pointer"
           >
-            <Search className="w-4 h-4" aria-hidden="true" />
+            <Search className="w-[44px] h-[44px] p-2.5" aria-hidden="true" />
           </button>
 
           {/* Notifications Bell navigating directly to dedicated Notifications page */}
@@ -500,13 +501,13 @@ export function TopUtilityBar({
             aria-label={
               unreadCount > 0 ? `Notifications (${unreadCount} unread)` : 'Notifications'
             }
-            className="relative inline-flex items-center justify-center w-10 h-10 rounded-lg border border-border bg-card text-foreground hover:bg-muted transition-colors"
+            className="relative inline-flex items-center justify-center h-[74px] w-[58px] md:w-10 md:h-10 rounded-xl md:rounded-lg md:border md:border-border md:bg-card text-foreground hover:bg-muted/70 transition-colors"
           >
-            <Bell className="w-4 h-4" aria-hidden="true" />
+            <Bell className="w-[44px] h-[44px] p-2.5 md:w-4 md:h-4 md:p-0" aria-hidden="true" />
             {unreadCount > 0 && (
               <span
                 aria-hidden="true"
-                className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#5C7C5D] dark:bg-[#6E9470] text-white font-numeric text-[10px] font-bold tabular-nums flex items-center justify-center shadow-xs"
+                className="absolute top-3.5 right-1.5 md:-top-1 md:-right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#5C7C5D] dark:bg-[#6E9470] text-white font-numeric text-[10px] font-bold tabular-nums flex items-center justify-center shadow-xs"
               >
                 {unreadCount > 99 ? '99+' : unreadCount}
               </span>

@@ -3,8 +3,8 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  /* LIGHT MODE — Warm Botanical Earth & Forest Olive (NS-PDP-001) */
-  --background: #F6EFE6;              /* Warm Oat / Linen */
+  /* LIGHT MODE — Warm Ivory & Botanical Earth Olive (NS-UI-310, NS-UI-311) */
+  --background: #FBF7F2;              /* Warm Ivory */
   --foreground: #1E241E;              /* Deep Charcoal Olive */
 
   --card: #FFFFFF;                    /* Pure White */

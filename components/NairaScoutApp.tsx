@@ -36,16 +36,21 @@ import TrustGuideDrawer from './TrustGuideDrawer';
 import { MobileSearchView } from './search/MobileSearchView';
 import { LocationPickerSheet } from './location/LocationPickerSheet';
 
+// NS-UI-310: Support initialSearchQuery and initialCategory from URL params
 interface NairaScoutAppProps {
   initialSnapshot: NairaScoutSnapshot;
   initialRefEvent?: string | null;
   initialTab?: NavTab;
+  initialSearchQuery?: string;
+  initialCategory?: string;
 }
 
 export default function NairaScoutApp({
   initialSnapshot,
   initialRefEvent,
   initialTab,
+  initialSearchQuery = '',
+  initialCategory = 'All',
 }: NairaScoutAppProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -53,11 +58,11 @@ export default function NairaScoutApp({
   const [activeTab, setActiveTab] = useState<NavTab>(
     initialTab ?? (initialRefEvent ? 'referrals' : 'marketplace')
   );
-  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const [globalSearchQuery, setGlobalSearchQuery] = useState(initialSearchQuery);
   const [locationFilter, setLocationFilter] = useState<string>('All');
   const [locationSheetOpen, setLocationSheetOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
-  const [marketplaceCategoryFilter, setMarketplaceCategoryFilter] = useState<string>('All');
+  const [marketplaceCategoryFilter, setMarketplaceCategoryFilter] = useState<string>(initialCategory);
   const [networkSubTab, setNetworkSubTab] = useState<NetworkSubTab>('explorer');
   const [networkScoutSearch, setNetworkScoutSearch] = useState('');
   const [checkoutSession, setCheckoutSession] = useState<{
@@ -425,6 +430,11 @@ export default function NairaScoutApp({
         onSelectTab={setActiveTab}
         onOpenGuide={() => setGuideOpen(true)}
         inboxCount={activeInboxCount}
+        totalEarningsKobo={
+          (snapshot.wallet.availableKobo ?? 0) +
+          (snapshot.wallet.pendingKobo ?? 0) +
+          (snapshot.wallet.paidKobo ?? 0)
+        }
         notifications={snapshot.notifications}
         authenticated={snapshot.authenticated}
         activeScout={snapshot.activeScout}

@@ -1,5 +1,6 @@
 'use client';
 
+// NS-UI-310 & NS-UI-317: Dedicated Seller Setup, Seller Hub, Listings & Order Fulfilment Views
 import { useRef, useState } from 'react';
 import Link from 'next/link';
 import {
@@ -35,8 +36,11 @@ import {
 } from '@/lib/auth/rbac';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 
+export type SellerViewMode = 'all' | 'setup' | 'hub' | 'listings' | 'orders';
+
 interface SellerHubViewProps {
   snapshot: NairaScoutSnapshot;
+  viewMode?: SellerViewMode;
   onAdvanceOrder: (orderId: string, nextStatus: OrderFulfilmentStatus) => Promise<void>;
   onPublishListing: (listingId: string) => Promise<void>;
   onSelectPlan: (planId: SellerPlanId) => Promise<void>;
@@ -58,6 +62,7 @@ interface SellerHubViewProps {
 
 export default function SellerHubView({
   snapshot,
+  viewMode = 'all',
   onAdvanceOrder,
   onPublishListing,
   onSelectPlan,
@@ -590,7 +595,6 @@ export default function SellerHubView({
     (m) => (m.status === 'ACTIVE' || m.status === 'INVITED') && m.role !== 'BUSINESS_OWNER'
   ).length;
 
-
   const handleInviteTeam = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!memberEmail.trim()) return;
@@ -605,11 +609,17 @@ export default function SellerHubView({
     setSubmitting(false);
   };
 
-  return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-5 border-b border-border pb-6">
-        <div className="flex flex-col items-start gap-2.5">
-          {/* Row 1: Rounded-square Business Logo uploader alongside Seller Hub heading */}
+  // Dedicated Seller Setup status page when user already submitted Seller activation
+  if (viewMode === 'setup') {
+    return (
+      <div className="max-w-3xl mx-auto space-y-6">
+        <div className="border-b border-border pb-5">
+          <h1 className="font-sans text-xl md:text-2xl font-bold tracking-tight text-foreground">
+            Seller Setup &amp; Verification Status
+          </h1>
+        </div>
+
+        <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
           <div className="flex items-center gap-3.5">
             <div className="relative shrink-0">
               <UserAvatar
@@ -619,123 +629,273 @@ export default function SellerHubView({
                 size="logo"
                 shape="rounded-square"
               />
-              <input
-                ref={activeLogoInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                onChange={handleLogoFileChange}
-                className="sr-only"
-                aria-label="Update business profile photo"
-              />
-              <button
-                type="button"
-                disabled={logoBusy}
-                onClick={() => activeLogoInputRef.current?.click()}
-                title="Change Business Photo"
-                aria-label="Change Business Photo"
-                className="absolute -bottom-1.5 -right-1.5 w-7 h-7 rounded-lg bg-card border border-border flex items-center justify-center text-foreground hover:bg-muted shadow-xs cursor-pointer"
-              >
-                {logoBusy ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
-                ) : (
-                  <Camera className="w-3.5 h-3.5" aria-hidden="true" />
-                )}
-              </button>
+              {sellerProfile.sellerStatus === 'ACTIVE' && (
+                <span
+                  title="Seller Active"
+                  aria-label="Seller Active"
+                  className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-[#10B981] border-2 border-card"
+                />
+              )}
             </div>
-            <h1 className="font-sans text-xl md:text-2xl font-bold tracking-tight text-foreground">
-              Seller Hub
-            </h1>
+            <div>
+              <p className="font-sans text-lg font-bold text-foreground">
+                {sellerProfile.sellerName}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Seller Status: {sellerProfile.sellerStatus} · Verification:{' '}
+                {scout.sellerVerificationStatus}
+              </p>
+            </div>
           </div>
 
-          {/* Row 2: Business Name */}
-          <p className="font-sans text-base md:text-lg font-bold text-foreground">
-            {sellerProfile.sellerName}{' '}
-            <span className="text-xs font-medium text-muted-foreground">
-              ({sellerProfile.sellerType})
-            </span>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {canPublishNow
+              ? 'Your Seller storefront is verified and active. Manage your storefront, listings, and order fulfilment from Seller Hub.'
+              : 'Your Seller application is recorded. You can create and save Draft listings now; public publishing unlocks as soon as a Verification Officer marks your Seller verification as VERIFIED.'}
           </p>
 
-          {/* Row 3: Seller Status alongside Verification Status */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-md bg-[#F7F5F0] dark:bg-muted border border-border font-sans text-xs font-semibold text-foreground">
-              Seller: {sellerProfile.sellerStatus}
-            </span>
-            <span
-              className={`inline-flex items-center px-2.5 py-0.5 rounded-md font-sans text-xs font-semibold border ${
-                scout.sellerVerificationStatus === 'VERIFIED'
-                  ? 'bg-[#F2F6F2] border-[#5C7C5D]/30 text-[#5C7C5D] dark:bg-[#1F2E24] dark:text-[#6E9470] dark:border-[#6E9470]/40'
-                  : 'bg-[#C88A2B]/12 border-[#C88A2B]/30 text-[#6B4214] dark:text-[#E0A13B]'
-              }`}
-            >
-              Verification: {scout.sellerVerificationStatus}
-            </span>
-          </div>
-
-          {/* Row 4: Subscription Plan alongside red Close Seller Capabilities link */}
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-md bg-card text-muted-foreground border border-border font-sans text-xs font-medium">
-              Plan: {currentPlan.name} ({sellerProfile.subscriptionStatus})
-            </span>
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            {canPublishNow ? (
+              <Link
+                href="/seller/hub"
+                className="px-4 py-2 text-xs font-semibold rounded-xl bg-[#2E5339] text-[#FFFFFF] dark:bg-[#3A6B49] hover:opacity-90"
+              >
+                Open Seller Hub →
+              </Link>
+            ) : (
+              <Link
+                href="/seller/listings/new"
+                className="px-4 py-2 text-xs font-semibold rounded-xl bg-[#2E5339] text-[#FFFFFF] dark:bg-[#3A6B49] hover:opacity-90"
+              >
+                Create Draft Listing
+              </Link>
+            )}
             <Link
-              href="/settings/closure"
-              className="text-xs font-semibold text-destructive hover:text-destructive/80 underline"
+              href="/settings?tab=verification"
+              className="px-4 py-2 text-xs font-semibold rounded-xl border border-border bg-card text-foreground hover:bg-muted"
             >
-              Close Seller Capabilities
+              Review Verification Records
             </Link>
           </div>
-
-          {logoFeedback && (
-            <p
-              className={`text-xs font-medium ${
-                logoFeedback.type === 'ok' ? 'text-success' : 'text-destructive'
-              }`}
-            >
-              {logoFeedback.message}
-            </p>
-          )}
         </div>
+      </div>
+    );
+  }
 
-        {/* Navigation Pills directly under Row 4 (NS-UI-020 & NS-UI-021) */}
-        <div className="-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto no-scrollbar scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] max-w-full">
-          <div className="flex items-center gap-1.5 p-1 bg-[#F7F5F0] dark:bg-[#222925] border border-border rounded-xl w-max">
-            <button
-              type="button"
-              onClick={() => setSubTab('operations')}
-              className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
-                subTab === 'operations'
-                  ? 'bg-[#2E5339] text-[#FFFFFF] border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-sm'
-                  : 'bg-card text-foreground border-border font-medium hover:opacity-90'
-              }`}
-            >
-              Drafts, Listings &amp; Orders
-            </button>
-            <button
-              type="button"
-              onClick={() => setSubTab('plans')}
-              className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
-                subTab === 'plans'
-                  ? 'bg-[#2E5339] text-[#FFFFFF] border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-sm'
-                  : 'bg-card text-foreground border-border font-medium hover:opacity-90'
-              }`}
-            >
-              Plans ({currentPlan.name})
-            </button>
-            {sellerProfile.sellerType === 'BUSINESS' && (
-              <button
-                type="button"
-                onClick={() => setSubTab('team')}
-                className={`inline-flex items-center gap-1 px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
-                  subTab === 'team'
-                    ? 'bg-[#2E5339] text-[#FFFFFF] border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-sm'
-                    : 'bg-card text-foreground border-border font-medium hover:opacity-90'
-                }`}
-              >
-                <Users className="w-3.5 h-3.5" aria-hidden="true" />
-                Team
-              </button>
-            )}
+  const showProfileAndStats = viewMode === 'all' || viewMode === 'hub';
+  const showListingsSection = viewMode === 'all' || viewMode === 'listings';
+  const showOrdersSection = viewMode === 'all' || viewMode === 'orders';
+
+  const pageHeading =
+    viewMode === 'listings'
+      ? 'Listings'
+      : viewMode === 'orders'
+        ? 'Order Fulfilment'
+        : 'Seller Hub';
+
+  const listingsSectionNode = (
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="font-sans text-lg font-bold text-foreground">
+            Your Listings ({snapshot.sellerListings.length})
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {sellerStats.activeListingsCount} / {currentPlan.maxActiveListings} active ·{' '}
+            {sellerStats.draftListingsCount} drafts · {sellerStats.monthlyPublicationsUsed} /{' '}
+            {currentPlan.monthlyPublications} monthly publications
+          </p>
+        </div>
+        {canPublishNow ? (
+          <Link
+            href="/seller/listings/new"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-[#2E5339] text-white dark:bg-[#3A6B49] hover:opacity-90 transition-opacity"
+          >
+            <PackagePlus className="w-3.5 h-3.5" aria-hidden="true" />
+            Create Listing
+          </Link>
+        ) : (
+          <Link
+            href="/seller/listings/new"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl border border-border bg-card text-foreground hover:bg-muted transition-colors"
+          >
+            <PackagePlus className="w-3.5 h-3.5" aria-hidden="true" />
+            Create Draft
+          </Link>
+        )}
+      </div>
+      <div className="bg-card border border-border rounded-2xl divide-y divide-border">
+        {snapshot.sellerListings.length === 0 ? (
+          <div className="p-6 text-sm text-muted-foreground">
+            No listings yet. Create a product draft using the Create Listing wizard.
           </div>
-        </div>
+        ) : (
+          snapshot.sellerListings.map((lst) => (
+            <div
+              key={lst.id}
+              className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+            >
+              <div>
+                <p className="font-sans text-xs text-muted-foreground">
+                  {lst.id} · {lst.category} ·{' '}
+                  <span
+                    className={
+                      lst.status === 'PUBLISHED'
+                        ? 'text-success font-semibold'
+                        : 'text-amber-600 dark:text-amber-400 font-semibold'
+                    }
+                  >
+                    {lst.status}
+                  </span>
+                </p>
+                <p className="font-sans text-sm font-semibold text-foreground mt-0.5">
+                  {lst.title}
+                </p>
+                <p className="font-numeric text-xs text-muted-foreground mt-0.5 tabular-nums">
+                  {formatWholeNaira(lst.priceKobo)} · {lst.stock} in stock ·{' '}
+                  {lst.imageUrls?.length || 1} image{(lst.imageUrls?.length || 1) === 1 ? '' : 's'}
+                  {lst.videoLinks && lst.videoLinks.length > 0
+                    ? ` · ${lst.videoLinks.length} video${lst.videoLinks.length === 1 ? '' : 's'}`
+                    : ''}
+                </p>
+              </div>
+
+              {lst.status === 'DRAFT' && (
+                <button
+                  type="button"
+                  disabled={!canPublishNow}
+                  title={
+                    canPublishNow
+                      ? 'Publish listing to Marketplace'
+                      : 'SELLER verification must be VERIFIED and Seller status ACTIVE before publishing'
+                  }
+                  onClick={() => onPublishListing(lst.id)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-45 shrink-0 cursor-pointer"
+                >
+                  {canPublishNow ? (
+                    <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
+                  ) : (
+                    <Lock className="w-3.5 h-3.5" aria-hidden="true" />
+                  )}
+                  Publish Listing
+                </button>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+
+  const ordersSectionNode = (
+    <section className="space-y-4">
+      <div>
+        <h2 className="font-sans text-lg font-bold text-foreground">
+          Order Fulfilment &amp; Commission Release Pipeline
+        </h2>
+        <p className="text-xs text-muted-foreground">
+          Confirming delivery transitions linked Scout commissions from Pending to Available in the
+          immutable ledger.
+        </p>
+      </div>
+
+      <div className="bg-card border border-border rounded-2xl divide-y divide-border">
+        {snapshot.orders.length === 0 ? (
+          <div className="p-6 text-sm text-muted-foreground">No orders yet.</div>
+        ) : (
+          snapshot.orders.map((order) => (
+            <div key={order.id} className="p-5 space-y-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p className="font-sans text-xs font-semibold text-success">
+                    {order.id} ·{' '}
+                    {order.attributionType === 'referral_card'
+                      ? `Referral-Generated (${order.referralEventId})`
+                      : 'Direct Marketplace'}
+                  </p>
+                  <h3 className="mt-1 font-sans text-base font-semibold text-foreground">
+                    {order.productTitle} (×{order.quantity})
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Seller: {order.sellerName} · Merchandise:{' '}
+                    <span className="font-numeric text-foreground tabular-nums">
+                      {formatKoboToNaira(order.eligibleMerchandiseKobo)}
+                    </span>
+                  </p>
+                </div>
+
+                <span className="font-sans text-xs font-semibold px-2.5 py-1 rounded-lg bg-muted text-foreground">
+                  {order.fulfilmentStatus}
+                </span>
+              </div>
+
+              {order.fulfilmentStatus !== 'Delivered' && order.fulfilmentStatus !== 'Refunded' && (
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
+                  {order.fulfilmentStatus === 'Paid' && (
+                    <button
+                      type="button"
+                      onClick={() => onAdvanceOrder(order.id, 'Processing')}
+                      className="px-3 py-1.5 text-xs font-medium bg-secondary hover:bg-muted rounded-lg text-secondary-foreground cursor-pointer"
+                    >
+                      Mark Processing
+                    </button>
+                  )}
+                  {(order.fulfilmentStatus === 'Paid' ||
+                    order.fulfilmentStatus === 'Processing') && (
+                    <button
+                      type="button"
+                      onClick={() => onAdvanceOrder(order.id, 'Dispatched')}
+                      className="px-3 py-1.5 text-xs font-medium bg-secondary hover:bg-muted rounded-lg text-secondary-foreground cursor-pointer"
+                    >
+                      Mark Dispatched
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => onAdvanceOrder(order.id, 'Delivered')}
+                    className="px-3 py-1.5 text-xs font-semibold bg-primary border border-primary-border hover:bg-primary/90 rounded-lg text-primary-foreground cursor-pointer"
+                  >
+                    Confirm Delivery (Release Commission)
+                  </button>
+                  {order.fulfilmentStatus !== 'Disputed' && (
+                    <button
+                      type="button"
+                      onClick={() => onAdvanceOrder(order.id, 'Disputed')}
+                      className="px-3 py-1.5 text-xs font-medium border border-amber-500/40 text-amber-600 dark:text-amber-400 rounded-lg hover:bg-amber-500/10 cursor-pointer"
+                    >
+                      Hold (Dispute)
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => onAdvanceOrder(order.id, 'Refunded')}
+                    className="px-3 py-1.5 text-xs font-medium border border-destructive/30 text-destructive rounded-lg hover:bg-destructive/10 cursor-pointer"
+                  >
+                    Refund &amp; Reverse
+                  </button>
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+
+  return (
+    <div className="space-y-8">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-5">
+        <h1 className="font-sans text-xl md:text-2xl font-bold tracking-tight text-foreground">
+          {pageHeading}
+        </h1>
+        {viewMode !== 'all' && viewMode !== 'hub' && (
+          <Link
+            href="/seller/hub"
+            className="text-xs font-semibold text-[#2E5339] dark:text-[#6E9470] hover:underline"
+          >
+            ← Back to Seller Hub
+          </Link>
+        )}
       </div>
 
       {/* Mandatory Verification & Lifecycle Gate Banner */}
@@ -761,507 +921,524 @@ export default function SellerHubView({
         </div>
       )}
 
-      {subTab === 'operations' && (
-        <div className="space-y-10">
-          <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 border-b border-border pb-8">
-            <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
-              <p className="text-xs text-muted-foreground">Eligible Merchandise Revenue</p>
-              <p className="mt-1 font-numeric text-2xl font-bold text-foreground tabular-nums">
-                {formatKoboToNaira(sellerStats.eligibleMerchandiseKobo)}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {sellerStats.directOrdersCount} direct · {sellerStats.referralOrdersCount} referral
-              </p>
-            </div>
-            <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
-              <p className="text-xs text-muted-foreground">NairaScout 10% Commission</p>
-              <p className="mt-1 font-numeric text-2xl font-bold text-foreground tabular-nums">
-                {formatKoboToNaira(sellerStats.marketplaceCommissionKobo)}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Pool share: {formatKoboToNaira(sellerStats.referralPoolGeneratedKobo)}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
-              <p className="text-xs text-muted-foreground">Net Seller Proceeds (90%)</p>
-              <p className="mt-1 font-numeric text-2xl font-bold text-success tabular-nums">
-                {formatKoboToNaira(sellerStats.netSellerProceedsKobo)}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">Separate from Scout wallet</p>
-            </div>
-            <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
-              <p className="text-xs text-muted-foreground">Listings &amp; Publications</p>
-              <p className="mt-1 font-numeric text-2xl font-bold text-foreground tabular-nums">
-                {sellerStats.activeListingsCount} / {currentPlan.maxActiveListings}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {sellerStats.draftListingsCount} drafts · {sellerStats.monthlyPublicationsUsed} /{' '}
-                {currentPlan.monthlyPublications} monthly pubs
-              </p>
-            </div>
-          </section>
+      {showProfileAndStats && (
+        <div className="space-y-6">
+          {/* Seller Hub Profile Card with Medium Emerald (#10B981) Active Dot (NS-UI-317) */}
+          <div className="rounded-2xl border border-border bg-card p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-4 min-w-0">
+                <div className="relative shrink-0">
+                  <UserAvatar
+                    avatarUrl={sellerProfile.logoUrl}
+                    displayName={sellerProfile.sellerName}
+                    username={scout.handle}
+                    size="logo"
+                    shape="rounded-square"
+                  />
+                  {sellerProfile.sellerStatus === 'ACTIVE' && (
+                    <span
+                      title="Seller Active"
+                      aria-label="Seller Active"
+                      className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-[#10B981] border-2 border-card"
+                    />
+                  )}
+                </div>
 
-          <div className="space-y-8">
-            {/* Seller Listings */}
-            <section className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="font-sans text-lg font-bold text-foreground">
-                  Your Listings ({snapshot.sellerListings.length})
-                </h2>
-                {canPublishNow ? (
-                  <Link
-                    href="/seller/listings/new"
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-[#2E5339] text-white dark:bg-[#3A6B49] hover:opacity-90 transition-opacity"
-                  >
-                    <PackagePlus className="w-3.5 h-3.5" aria-hidden="true" />
-                    Create Listing
-                  </Link>
-                ) : (
-                  <Link
-                    href="/seller/listings/new"
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl border border-border bg-card text-foreground hover:bg-muted transition-colors"
-                  >
-                    <PackagePlus className="w-3.5 h-3.5" aria-hidden="true" />
-                    Create Draft
-                  </Link>
-                )}
-              </div>
-              <div className="bg-card border border-border rounded-2xl divide-y divide-border">
-                {snapshot.sellerListings.length === 0 ? (
-                  <div className="p-6 text-sm text-muted-foreground">
-                    No listings yet. Create a product draft using the Create Listing wizard.
-                  </div>
-                ) : (
-                  snapshot.sellerListings.map((lst) => (
-                    <div
-                      key={lst.id}
-                      className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                <div className="min-w-0 space-y-1.5">
+                  <p className="font-sans text-base md:text-lg font-bold text-foreground">
+                    {sellerProfile.sellerName}{' '}
+                    <span className="text-xs font-medium text-muted-foreground">
+                      ({sellerProfile.sellerType})
+                    </span>
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-md bg-[#F7F5F0] dark:bg-muted border border-border font-sans text-xs font-semibold text-foreground">
+                      Seller: {sellerProfile.sellerStatus}
+                    </span>
+                    <span
+                      className={`inline-flex items-center px-2.5 py-0.5 rounded-md font-sans text-xs font-semibold border ${
+                        scout.sellerVerificationStatus === 'VERIFIED'
+                          ? 'bg-[#F2F6F2] border-[#5C7C5D]/30 text-[#5C7C5D] dark:bg-[#1F2E24] dark:text-[#6E9470] dark:border-[#6E9470]/40'
+                          : 'bg-[#C88A2B]/12 border-[#C88A2B]/30 text-[#6B4214] dark:text-[#E0A13B]'
+                      }`}
                     >
-                      <div>
-                        <p className="font-sans text-xs text-muted-foreground">
-                          {lst.id} · {lst.category} ·{' '}
-                          <span
-                            className={
-                              lst.status === 'PUBLISHED'
-                                ? 'text-success font-semibold'
-                                : 'text-amber-600 dark:text-amber-400 font-semibold'
-                            }
-                          >
-                            {lst.status}
-                          </span>
-                        </p>
-                        <p className="font-sans text-sm font-semibold text-foreground mt-0.5">
-                          {lst.title}
-                        </p>
-                        <p className="font-numeric text-xs text-muted-foreground mt-0.5 tabular-nums">
-                          {formatWholeNaira(lst.priceKobo)} · {lst.stock} in stock ·{' '}
-                          {lst.imageUrls?.length || 1} image{(lst.imageUrls?.length || 1) === 1 ? '' : 's'}
-                          {lst.videoLinks && lst.videoLinks.length > 0
-                            ? ` · ${lst.videoLinks.length} video${lst.videoLinks.length === 1 ? '' : 's'}`
-                            : ''}
-                        </p>
-                      </div>
+                      Verification: {scout.sellerVerificationStatus}
+                    </span>
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-md bg-card text-muted-foreground border border-border font-sans text-xs font-medium">
+                      Plan: {currentPlan.name} ({sellerProfile.subscriptionStatus})
+                    </span>
+                  </div>
+                </div>
+              </div>
 
-                      {lst.status === 'DRAFT' && (
-                        <button
-                          type="button"
-                          disabled={!canPublishNow}
-                          title={
-                            canPublishNow
-                              ? 'Publish listing to Marketplace'
-                              : 'SELLER verification must be VERIFIED and Seller status ACTIVE before publishing'
-                          }
-                          onClick={() => onPublishListing(lst.id)}
-                          className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-45 shrink-0 cursor-pointer"
-                        >
-                          {canPublishNow ? (
-                            <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
-                          ) : (
-                            <Lock className="w-3.5 h-3.5" aria-hidden="true" />
-                          )}
-                          Publish Listing
-                        </button>
-                      )}
-                    </div>
-                  ))
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <input
+                  ref={activeLogoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handleLogoFileChange}
+                  className="sr-only"
+                  aria-label="Update business profile photo"
+                />
+                <button
+                  type="button"
+                  disabled={logoBusy}
+                  onClick={() => activeLogoInputRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border border-border bg-card text-foreground hover:bg-muted cursor-pointer disabled:opacity-50"
+                >
+                  {logoBusy ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Camera className="w-3.5 h-3.5" aria-hidden="true" />
+                  )}
+                  Change Logo
+                </button>
+                <Link
+                  href="/settings/closure"
+                  className="px-3 py-2 text-xs font-semibold rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Close Seller Capabilities
+                </Link>
+              </div>
+            </div>
+
+            {logoFeedback && (
+              <p
+                className={`text-xs font-medium ${
+                  logoFeedback.type === 'ok' ? 'text-success' : 'text-destructive'
+                }`}
+              >
+                {logoFeedback.message}
+              </p>
+            )}
+
+            {/* Inline Hub Toggle Pills (Overview / Plan / Team) */}
+            <div className="pt-2 border-t border-border -mx-1 px-1 overflow-x-auto no-scrollbar scrollbar-none">
+              <div className="flex items-center gap-1.5 p-1 bg-[#F7F5F0] dark:bg-[#222925] border border-border rounded-xl w-max">
+                <button
+                  type="button"
+                  onClick={() => setSubTab('operations')}
+                  className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
+                    subTab === 'operations'
+                      ? 'bg-[#2E5339] text-[#FFFFFF] border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-sm'
+                      : 'bg-card text-foreground border-border font-medium hover:opacity-90'
+                  }`}
+                >
+                  Overview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSubTab('plans')}
+                  className={`px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
+                    subTab === 'plans'
+                      ? 'bg-[#2E5339] text-[#FFFFFF] border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-sm'
+                      : 'bg-card text-foreground border-border font-medium hover:opacity-90'
+                  }`}
+                >
+                  Plans ({currentPlan.name})
+                </button>
+                {sellerProfile.sellerType === 'BUSINESS' && (
+                  <button
+                    type="button"
+                    onClick={() => setSubTab('team')}
+                    className={`inline-flex items-center gap-1 px-3.5 py-2 text-xs rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer border ${
+                      subTab === 'team'
+                        ? 'bg-[#2E5339] text-[#FFFFFF] border-[#2E5339] dark:bg-[#3A6B49] dark:text-[#FFFFFF] dark:border-[#3A6B49] font-semibold shadow-sm'
+                        : 'bg-card text-foreground border-border font-medium hover:opacity-90'
+                    }`}
+                  >
+                    <Users className="w-3.5 h-3.5" aria-hidden="true" />
+                    Team
+                  </button>
                 )}
               </div>
-            </section>
+            </div>
+          </div>
 
-            {/* Orders & Fulfilment */}
-            <section className="space-y-3">
-              <div>
-                <h2 className="font-sans text-lg font-bold text-foreground">
-                  Order Fulfilment &amp; Commission Release Pipeline
-                </h2>
-                <p className="text-xs text-muted-foreground">
-                  Confirming delivery transitions linked Scout commissions from Pending to
-                  Available in the immutable ledger.
+          {subTab === 'operations' && (
+            <div className="space-y-6">
+              {/* Vertically Stacked Stat Cards on /seller/hub (NS-UI-317) */}
+              <section
+                className={
+                  viewMode === 'hub'
+                    ? 'grid grid-cols-1 gap-3'
+                    : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3'
+                }
+              >
+                <div className="rounded-2xl border border-border bg-card p-5 shadow-xs">
+                  <p className="text-xs text-muted-foreground">Eligible Merchandise Revenue</p>
+                  <p className="mt-1 font-numeric text-2xl font-bold text-foreground tabular-nums">
+                    {formatKoboToNaira(sellerStats.eligibleMerchandiseKobo)}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {sellerStats.directOrdersCount} direct · {sellerStats.referralOrdersCount}{' '}
+                    referral
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-border bg-card p-5 shadow-xs">
+                  <p className="text-xs text-muted-foreground">NairaScout 10% Commission</p>
+                  <p className="mt-1 font-numeric text-2xl font-bold text-foreground tabular-nums">
+                    {formatKoboToNaira(sellerStats.marketplaceCommissionKobo)}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Pool share: {formatKoboToNaira(sellerStats.referralPoolGeneratedKobo)}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-border bg-card p-5 shadow-xs">
+                  <p className="text-xs text-muted-foreground">Net Seller Proceeds (90%)</p>
+                  <p className="mt-1 font-numeric text-2xl font-bold text-success tabular-nums">
+                    {formatKoboToNaira(sellerStats.netSellerProceedsKobo)}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">Separate from Scout wallet</p>
+                </div>
+
+                {viewMode === 'all' && (
+                  <div className="rounded-2xl border border-border bg-card p-5 shadow-xs">
+                    <p className="text-xs text-muted-foreground">Listings &amp; Publications</p>
+                    <p className="mt-1 font-numeric text-2xl font-bold text-foreground tabular-nums">
+                      {sellerStats.activeListingsCount} / {currentPlan.maxActiveListings}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {sellerStats.draftListingsCount} drafts · {sellerStats.monthlyPublicationsUsed}{' '}
+                      / {currentPlan.monthlyPublications} monthly pubs
+                    </p>
+                  </div>
+                )}
+              </section>
+
+              {viewMode === 'hub' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Link
+                    href="/seller/listings"
+                    className="rounded-2xl border border-border bg-card p-5 hover:border-foreground/30 transition-colors flex items-center justify-between gap-3"
+                  >
+                    <div>
+                      <p className="font-sans text-sm font-bold text-foreground">
+                        Listings ({snapshot.sellerListings.length})
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {sellerStats.activeListingsCount} / {currentPlan.maxActiveListings} active ·{' '}
+                        {sellerStats.draftListingsCount} drafts
+                      </p>
+                    </div>
+                    <span className="text-xs font-semibold text-[#2E5339] dark:text-[#6E9470]">
+                      Open →
+                    </span>
+                  </Link>
+                  <Link
+                    href="/seller/orders"
+                    className="rounded-2xl border border-border bg-card p-5 hover:border-foreground/30 transition-colors flex items-center justify-between gap-3"
+                  >
+                    <div>
+                      <p className="font-sans text-sm font-bold text-foreground">
+                        Order Fulfilment ({snapshot.orders.length})
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Dispatch orders &amp; confirm delivery
+                      </p>
+                    </div>
+                    <span className="text-xs font-semibold text-[#2E5339] dark:text-[#6E9470]">
+                      Open →
+                    </span>
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
+
+          {subTab === 'plans' && (
+            <div className="space-y-6">
+              <div className="bg-card border border-border rounded-2xl p-5 flex items-start gap-3">
+                <Store className="w-5 h-5 text-foreground shrink-0 mt-0.5" aria-hidden="true" />
+                <p className="text-sm text-muted-foreground">
+                  Seller subscriptions purchase Seller listing, video, and operational capacity.
+                  Subscriptions are strictly separate from the referral commission programme.
                 </p>
               </div>
 
-              <div className="bg-card border border-border rounded-2xl divide-y divide-border">
-                {snapshot.orders.length === 0 ? (
-                  <div className="p-6 text-sm text-muted-foreground">No orders yet.</div>
-                ) : (
-                  snapshot.orders.map((order) => (
-                    <div key={order.id} className="p-5 space-y-3">
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div>
-                          <p className="font-sans text-xs font-semibold text-success">
-                            {order.id} ·{' '}
-                            {order.attributionType === 'referral_card'
-                              ? `Referral-Generated (${order.referralEventId})`
-                              : 'Direct Marketplace'}
-                          </p>
-                          <h3 className="mt-1 font-sans text-base font-semibold text-foreground">
-                            {order.productTitle} (×{order.quantity})
-                          </h3>
-                          <p className="text-xs text-muted-foreground">
-                            Seller: {order.sellerName} · Merchandise:{' '}
-                            <span className="font-numeric text-foreground tabular-nums">
-                              {formatKoboToNaira(order.eligibleMerchandiseKobo)}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {(['starter', 'traction', 'growth', 'sprawl'] as SellerPlanId[]).map((planId) => {
+                  const plan = SELLER_PLANS[planId];
+                  const isCurrent = scout.sellerPlan === planId;
+                  return (
+                    <div
+                      key={planId}
+                      className={`bg-card rounded-2xl p-6 flex flex-col justify-between gap-6 border ${
+                        isCurrent ? 'border-foreground' : 'border-border'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <h3 className="font-sans text-lg font-bold text-foreground">{plan.name}</h3>
+                          {isCurrent && (
+                            <span className="font-sans text-xs font-semibold text-success">
+                              Current
                             </span>
-                          </p>
+                          )}
                         </div>
+                        <p className="mt-1 text-xs text-muted-foreground min-h-[32px]">
+                          {plan.tagline}
+                        </p>
 
-                        <span className="font-sans text-xs font-semibold px-2.5 py-1 rounded-lg bg-muted text-foreground">
-                          {order.fulfilmentStatus}
-                        </span>
+                        <p className="mt-4 font-numeric text-2xl font-bold text-foreground tabular-nums">
+                          {plan.monthlyPriceKobo === 0
+                            ? 'Free'
+                            : `${formatWholeNaira(plan.monthlyPriceKobo)}/mo`}
+                        </p>
+
+                        <ul className="mt-5 pt-4 border-t border-border space-y-2.5 text-xs">
+                          <li className="flex items-center gap-2 text-foreground">
+                            <CheckCircle2
+                              className="h-4 w-4 text-[#5C7C5D] dark:text-[#6E9470] shrink-0"
+                              aria-hidden="true"
+                            />
+                            <span>{plan.maxActiveListings} active product listings</span>
+                          </li>
+                          <li className="flex items-center gap-2 text-foreground">
+                            <CheckCircle2
+                              className="h-4 w-4 text-[#5C7C5D] dark:text-[#6E9470] shrink-0"
+                              aria-hidden="true"
+                            />
+                            <span>{plan.monthlyPublications} monthly publications</span>
+                          </li>
+                          <li className="flex items-center gap-2 text-foreground">
+                            <CheckCircle2
+                              className="h-4 w-4 text-[#5C7C5D] dark:text-[#6E9470] shrink-0"
+                              aria-hidden="true"
+                            />
+                            <span>{plan.maxCategories} product categories</span>
+                          </li>
+                          <li
+                            className={`flex items-center gap-2 ${
+                              plan.videoQuota === 'None' ? 'text-muted-foreground' : 'text-foreground'
+                            }`}
+                          >
+                            {plan.videoQuota === 'None' ? (
+                              <XCircle className="h-4 w-4 text-destructive shrink-0" aria-hidden="true" />
+                            ) : (
+                              <CheckCircle2
+                                className="h-4 w-4 text-[#5C7C5D] dark:text-[#6E9470] shrink-0"
+                                aria-hidden="true"
+                              />
+                            )}
+                            <span>Video: {plan.videoQuota}</span>
+                          </li>
+                          <li
+                            className={`flex items-center gap-2 ${
+                              plan.promotionalPlacements ? 'text-foreground' : 'text-muted-foreground'
+                            }`}
+                          >
+                            {plan.promotionalPlacements ? (
+                              <CheckCircle2
+                                className="h-4 w-4 text-[#5C7C5D] dark:text-[#6E9470] shrink-0"
+                                aria-hidden="true"
+                              />
+                            ) : (
+                              <XCircle className="h-4 w-4 text-destructive shrink-0" aria-hidden="true" />
+                            )}
+                            <span>Promotions</span>
+                          </li>
+                          <li
+                            className={`flex items-center gap-2 ${
+                              plan.sellerTeamAccounts ? 'text-foreground' : 'text-muted-foreground'
+                            }`}
+                          >
+                            {plan.sellerTeamAccounts ? (
+                              <CheckCircle2
+                                className="h-4 w-4 text-[#5C7C5D] dark:text-[#6E9470] shrink-0"
+                                aria-hidden="true"
+                              />
+                            ) : (
+                              <XCircle className="h-4 w-4 text-destructive shrink-0" aria-hidden="true" />
+                            )}
+                            <span>
+                              {plan.sellerTeamAccounts
+                                ? `Team (Up to ${plan.maxTeamSeats} seats)`
+                                : 'Team'}
+                            </span>
+                          </li>
+                        </ul>
                       </div>
 
-                      {order.fulfilmentStatus !== 'Delivered' &&
-                        order.fulfilmentStatus !== 'Refunded' && (
-                          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
-                            {order.fulfilmentStatus === 'Paid' && (
-                              <button
-                                type="button"
-                                onClick={() => onAdvanceOrder(order.id, 'Processing')}
-                                className="px-3 py-1.5 text-xs font-medium bg-secondary hover:bg-muted rounded-lg text-secondary-foreground cursor-pointer"
-                              >
-                                Mark Processing
-                              </button>
-                            )}
-                            {(order.fulfilmentStatus === 'Paid' ||
-                              order.fulfilmentStatus === 'Processing') && (
-                              <button
-                                type="button"
-                                onClick={() => onAdvanceOrder(order.id, 'Dispatched')}
-                                className="px-3 py-1.5 text-xs font-medium bg-secondary hover:bg-muted rounded-lg text-secondary-foreground cursor-pointer"
-                              >
-                                Mark Dispatched
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => onAdvanceOrder(order.id, 'Delivered')}
-                              className="px-3 py-1.5 text-xs font-semibold bg-primary border border-primary-border hover:bg-primary/90 rounded-lg text-primary-foreground cursor-pointer"
-                            >
-                              Confirm Delivery (Release Commission)
-                            </button>
-                            {order.fulfilmentStatus !== 'Disputed' && (
-                              <button
-                                type="button"
-                                onClick={() => onAdvanceOrder(order.id, 'Disputed')}
-                                className="px-3 py-1.5 text-xs font-medium border border-amber-500/40 text-amber-600 dark:text-amber-400 rounded-lg hover:bg-amber-500/10 cursor-pointer"
-                              >
-                                Hold (Dispute)
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => onAdvanceOrder(order.id, 'Refunded')}
-                              className="px-3 py-1.5 text-xs font-medium border border-destructive/30 text-destructive rounded-lg hover:bg-destructive/10 cursor-pointer"
-                            >
-                              Refund &amp; Reverse
-                            </button>
-                          </div>
-                        )}
-                    </div>
-                  ))
-                )}
-              </div>
-            </section>
-          </div>
-        </div>
-      )}
-
-      {subTab === 'plans' && (
-        <div className="space-y-6">
-          <div className="bg-card border border-border rounded-2xl p-5 flex items-start gap-3">
-            <Store className="w-5 h-5 text-foreground shrink-0 mt-0.5" aria-hidden="true" />
-            <p className="text-sm text-muted-foreground">
-              Seller subscriptions purchase Seller listing, video, and operational capacity.
-              Subscriptions are strictly separate from the referral commission programme.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {(['starter', 'traction', 'growth', 'sprawl'] as SellerPlanId[]).map((planId) => {
-              const plan = SELLER_PLANS[planId];
-              const isCurrent = scout.sellerPlan === planId;
-              return (
-                <div
-                  key={planId}
-                  className={`bg-card rounded-2xl p-6 flex flex-col justify-between gap-6 border ${
-                    isCurrent ? 'border-foreground' : 'border-border'
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-sans text-lg font-bold text-foreground">{plan.name}</h3>
-                      {isCurrent && (
-                        <span className="font-sans text-xs font-semibold text-success">
-                          Current
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground min-h-[32px]">
-                      {plan.tagline}
-                    </p>
-
-                    <p className="mt-4 font-numeric text-2xl font-bold text-foreground tabular-nums">
-                      {plan.monthlyPriceKobo === 0
-                        ? 'Free'
-                        : `${formatWholeNaira(plan.monthlyPriceKobo)}/mo`}
-                    </p>
-
-                    <ul className="mt-5 pt-4 border-t border-border space-y-2.5 text-xs">
-                      <li className="flex items-center gap-2 text-foreground">
-                        <CheckCircle2 className="h-4 w-4 text-[#5C7C5D] dark:text-[#6E9470] shrink-0" aria-hidden="true" />
-                        <span>{plan.maxActiveListings} active product listings</span>
-                      </li>
-                      <li className="flex items-center gap-2 text-foreground">
-                        <CheckCircle2 className="h-4 w-4 text-[#5C7C5D] dark:text-[#6E9470] shrink-0" aria-hidden="true" />
-                        <span>{plan.monthlyPublications} monthly publications</span>
-                      </li>
-                      <li className="flex items-center gap-2 text-foreground">
-                        <CheckCircle2 className="h-4 w-4 text-[#5C7C5D] dark:text-[#6E9470] shrink-0" aria-hidden="true" />
-                        <span>{plan.maxCategories} product categories</span>
-                      </li>
-                      <li
-                        className={`flex items-center gap-2 ${
-                          plan.videoQuota === 'None' ? 'text-muted-foreground' : 'text-foreground'
-                        }`}
-                      >
-                        {plan.videoQuota === 'None' ? (
-                          <XCircle className="h-4 w-4 text-destructive shrink-0" aria-hidden="true" />
-                        ) : (
-                          <CheckCircle2
-                            className="h-4 w-4 text-[#5C7C5D] dark:text-[#6E9470] shrink-0"
-                            aria-hidden="true"
-                          />
-                        )}
-                        <span>Video: {plan.videoQuota}</span>
-                      </li>
-                      <li
-                        className={`flex items-center gap-2 ${
-                          plan.promotionalPlacements ? 'text-foreground' : 'text-muted-foreground'
-                        }`}
-                      >
-                        {plan.promotionalPlacements ? (
-                          <CheckCircle2
-                            className="h-4 w-4 text-[#5C7C5D] dark:text-[#6E9470] shrink-0"
-                            aria-hidden="true"
-                          />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-destructive shrink-0" aria-hidden="true" />
-                        )}
-                        <span>Promotions</span>
-                      </li>
-                      <li
-                        className={`flex items-center gap-2 ${
-                          plan.sellerTeamAccounts ? 'text-foreground' : 'text-muted-foreground'
-                        }`}
-                      >
-                        {plan.sellerTeamAccounts ? (
-                          <CheckCircle2
-                            className="h-4 w-4 text-[#5C7C5D] dark:text-[#6E9470] shrink-0"
-                            aria-hidden="true"
-                          />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-destructive shrink-0" aria-hidden="true" />
-                        )}
-                        <span>
-                          {plan.sellerTeamAccounts
-                            ? `Team (Up to ${plan.maxTeamSeats} seats)`
-                            : 'Team'}
-                        </span>
-                      </li>
-                    </ul>
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled={isCurrent}
-                    onClick={() => onSelectPlan(planId)}
-                    className={`w-full py-2.5 px-4 text-xs font-semibold rounded-xl transition-colors cursor-pointer ${
-                      isCurrent
-                        ? 'bg-muted text-muted-foreground cursor-default'
-                        : 'bg-primary text-primary-foreground border border-primary-border hover:bg-primary/90'
-                    }`}
-                  >
-                    {isCurrent ? 'Active Plan' : `Switch to ${plan.name}`}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {subTab === 'team' && (
-        <div className="space-y-6">
-          {!currentPlan.sellerTeamAccounts ? (
-            <div className="bg-card border border-border rounded-2xl p-8 space-y-3">
-              <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
-                <Lock className="w-5 h-5" aria-hidden="true" />
-                <h2 className="font-sans text-lg font-bold text-foreground">
-                  Seller Team Accounts Require the Sprawl Plan
-                </h2>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Business Sellers on the Sprawl plan (₦250,000/mo) can delegate listing, order, and
-                analytics permissions to team members while keeping primary Scout identities
-                separate.
-              </p>
-              <button
-                type="button"
-                onClick={() => setSubTab('plans')}
-                className="px-4 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
-              >
-                View Sprawl Plan Entitlements
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-              <div className="lg:col-span-7 bg-card border border-border rounded-2xl divide-y divide-border overflow-hidden">
-                <div className="p-4 flex items-center justify-between text-xs bg-muted/50">
-                  <span className="font-semibold text-foreground">Active Team Members</span>
-                  <span className="font-numeric font-semibold text-foreground px-2.5 py-1 rounded-full bg-background border border-border tabular-nums">
-                    Seats Used: {delegatedSeatsUsed} / {SPRAWL_MAX_TEAM_SEATS}
-                  </span>
-                </div>
-                {scout.teamMembers.map((m) => (
-                  <div key={m.id} className="p-4 flex items-center justify-between gap-4">
-                    <UserIdentityRow
-                      displayName={m.displayName}
-                      username={m.username}
-                      size="sm"
-                      subtitle={`${SELLER_TEAM_ROLE_LABELS[m.role]?.label || m.role} (${m.role}) · ${m.email}`}
-                    />
-                    {m.role !== 'BUSINESS_OWNER' && (
                       <button
                         type="button"
-                        onClick={() => onManageTeam({ operation: 'revoke', memberId: m.id })}
-                        className="px-3 py-1.5 text-xs font-medium text-destructive border border-destructive/30 rounded-lg cursor-pointer"
+                        disabled={isCurrent}
+                        onClick={() => onSelectPlan(planId)}
+                        className={`w-full py-2.5 px-4 text-xs font-semibold rounded-xl transition-colors cursor-pointer ${
+                          isCurrent
+                            ? 'bg-muted text-muted-foreground cursor-default'
+                            : 'bg-primary text-primary-foreground border border-primary-border hover:bg-primary/90'
+                        }`}
                       >
-                        Revoke
+                        {isCurrent ? 'Active Plan' : `Switch to ${plan.name}`}
                       </button>
-                    )}
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
               </div>
+            </div>
+          )}
 
-              <div className="lg:col-span-5 bg-card border border-border rounded-2xl p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-sans text-base font-bold text-foreground">
-                    Add Business Team Member
-                  </h3>
-                  <span className="font-numeric text-xs font-semibold text-muted-foreground tabular-nums">
-                    Seats Used: {delegatedSeatsUsed} / {SPRAWL_MAX_TEAM_SEATS}
-                  </span>
-                </div>
-                <form onSubmit={handleInviteTeam} className="space-y-3">
-                  <input
-                    type="email"
-                    required
-                    disabled={delegatedSeatsUsed >= SPRAWL_MAX_TEAM_SEATS}
-                    value={memberEmail}
-                    onChange={(e) => setMemberEmail(e.target.value)}
-                    placeholder="Registered Scout email..."
-                    className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl disabled:opacity-55"
-                  />
-                  <div className="relative">
-                    <select
-                      aria-label="Seller Team Role"
-                      disabled={delegatedSeatsUsed >= SPRAWL_MAX_TEAM_SEATS}
-                      value={memberRole}
-                      onChange={(e) => {
-                        const val = e.target.value as SellerTeamRole;
-                        if (val === 'BUSINESS_OWNER') return;
-                        setMemberRole(val);
-                        setMemberPerms(SELLER_TEAM_ROLE_PERMISSIONS[val]);
-                      }}
-                      className="w-full appearance-none pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground disabled:opacity-55"
-                    >
-                      {ALL_SELLER_TEAM_ROLES.map((roleKey) => (
-                        <option
-                          key={roleKey}
-                          value={roleKey}
-                          disabled={roleKey === 'BUSINESS_OWNER'}
-                        >
-                          {SELLER_TEAM_ROLE_LABELS[roleKey].label}
-                          {roleKey === 'BUSINESS_OWNER' ? ' (Primary Owner Only)' : ''}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      className="w-4 h-4 text-muted-foreground absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                      aria-hidden="true"
-                    />
+          {subTab === 'team' && (
+            <div className="space-y-6">
+              {!currentPlan.sellerTeamAccounts ? (
+                <div className="bg-card border border-border rounded-2xl p-8 space-y-3">
+                  <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                    <Lock className="w-5 h-5" aria-hidden="true" />
+                    <h2 className="font-sans text-lg font-bold text-foreground">
+                      Seller Team Accounts Require the Sprawl Plan
+                    </h2>
                   </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    {SELLER_TEAM_ROLE_LABELS[memberRole].summary}
+                  <p className="text-sm text-muted-foreground">
+                    Business Sellers on the Sprawl plan (₦250,000/mo) can delegate listing, order, and
+                    analytics permissions to team members while keeping primary Scout identities
+                    separate.
                   </p>
-                  <div className="space-y-1.5 text-xs text-muted-foreground">
-                    {(
-                      [
-                        ['canManageListings', 'Manage Listings'],
-                        ['canManageOrders', 'Manage Orders'],
-                        ['canViewAnalytics', 'View Analytics / Financial Summaries'],
-                        ['canManageBilling', 'Manage Billing (Owner Only)'],
-                        ['canManageTeam', 'Manage Team'],
-                      ] as const
-                    ).map(([key, label]) => {
-                      const isBillingLocked = key === 'canManageBilling';
-                      return (
-                        <label
-                          key={key}
-                          className={`flex items-center gap-2 ${
-                            isBillingLocked ? 'opacity-55 cursor-not-allowed' : 'cursor-pointer'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            disabled={isBillingLocked || delegatedSeatsUsed >= SPRAWL_MAX_TEAM_SEATS}
-                            checked={isBillingLocked ? false : memberPerms[key]}
-                            onChange={(e) => {
-                              if (isBillingLocked) return;
-                              setMemberPerms((p) => ({ ...p, [key]: e.target.checked }));
-                            }}
-                            className="accent-foreground"
-                          />
-                          <span>{label}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
                   <button
-                    type="submit"
-                    disabled={submitting || delegatedSeatsUsed >= SPRAWL_MAX_TEAM_SEATS}
-                    className="w-full py-2.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-45 cursor-pointer"
+                    type="button"
+                    onClick={() => setSubTab('plans')}
+                    className="px-4 py-2 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 cursor-pointer"
                   >
-                    {delegatedSeatsUsed >= SPRAWL_MAX_TEAM_SEATS
-                      ? 'Seat Limit Reached (5 / 5)'
-                      : 'Add Team Member'}
+                    View Sprawl Plan Entitlements
                   </button>
-                </form>
-              </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                  <div className="lg:col-span-7 bg-card border border-border rounded-2xl divide-y divide-border overflow-hidden">
+                    <div className="p-4 flex items-center justify-between text-xs bg-muted/50">
+                      <span className="font-semibold text-foreground">Active Team Members</span>
+                      <span className="font-numeric font-semibold text-foreground px-2.5 py-1 rounded-full bg-background border border-border tabular-nums">
+                        Seats Used: {delegatedSeatsUsed} / {SPRAWL_MAX_TEAM_SEATS}
+                      </span>
+                    </div>
+                    {scout.teamMembers.map((m) => (
+                      <div key={m.id} className="p-4 flex items-center justify-between gap-4">
+                        <UserIdentityRow
+                          displayName={m.displayName}
+                          username={m.username}
+                          size="sm"
+                          subtitle={`${SELLER_TEAM_ROLE_LABELS[m.role]?.label || m.role} (${m.role}) · ${m.email}`}
+                        />
+                        {m.role !== 'BUSINESS_OWNER' && (
+                          <button
+                            type="button"
+                            onClick={() => onManageTeam({ operation: 'revoke', memberId: m.id })}
+                            className="px-3 py-1.5 text-xs font-medium text-destructive border border-destructive/30 rounded-lg cursor-pointer"
+                          >
+                            Revoke
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="lg:col-span-5 bg-card border border-border rounded-2xl p-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-sans text-base font-bold text-foreground">
+                        Add Business Team Member
+                      </h3>
+                      <span className="font-numeric text-xs font-semibold text-muted-foreground tabular-nums">
+                        Seats Used: {delegatedSeatsUsed} / {SPRAWL_MAX_TEAM_SEATS}
+                      </span>
+                    </div>
+                    <form onSubmit={handleInviteTeam} className="space-y-3">
+                      <input
+                        type="email"
+                        required
+                        disabled={delegatedSeatsUsed >= SPRAWL_MAX_TEAM_SEATS}
+                        value={memberEmail}
+                        onChange={(e) => setMemberEmail(e.target.value)}
+                        placeholder="Registered Scout email..."
+                        className="w-full px-3 py-2 text-sm bg-background text-foreground border border-input rounded-xl disabled:opacity-55"
+                      />
+                      <div className="relative">
+                        <select
+                          aria-label="Seller Team Role"
+                          disabled={delegatedSeatsUsed >= SPRAWL_MAX_TEAM_SEATS}
+                          value={memberRole}
+                          onChange={(e) => {
+                            const val = e.target.value as SellerTeamRole;
+                            if (val === 'BUSINESS_OWNER') return;
+                            setMemberRole(val);
+                            setMemberPerms(SELLER_TEAM_ROLE_PERMISSIONS[val]);
+                          }}
+                          className="w-full appearance-none pl-3.5 pr-10 py-2 text-sm border border-input rounded-xl bg-background text-foreground disabled:opacity-55"
+                        >
+                          {ALL_SELLER_TEAM_ROLES.map((roleKey) => (
+                            <option
+                              key={roleKey}
+                              value={roleKey}
+                              disabled={roleKey === 'BUSINESS_OWNER'}
+                            >
+                              {SELLER_TEAM_ROLE_LABELS[roleKey].label}
+                              {roleKey === 'BUSINESS_OWNER' ? ' (Primary Owner Only)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown
+                          className="w-4 h-4 text-muted-foreground absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                          aria-hidden="true"
+                        />
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        {SELLER_TEAM_ROLE_LABELS[memberRole].summary}
+                      </p>
+                      <div className="space-y-1.5 text-xs text-muted-foreground">
+                        {(
+                          [
+                            ['canManageListings', 'Manage Listings'],
+                            ['canManageOrders', 'Manage Orders'],
+                            ['canViewAnalytics', 'View Analytics / Financial Summaries'],
+                            ['canManageBilling', 'Manage Billing (Owner Only)'],
+                            ['canManageTeam', 'Manage Team'],
+                          ] as const
+                        ).map(([key, label]) => {
+                          const isBillingLocked = key === 'canManageBilling';
+                          return (
+                            <label
+                              key={key}
+                              className={`flex items-center gap-2 ${
+                                isBillingLocked ? 'opacity-55 cursor-not-allowed' : 'cursor-pointer'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                disabled={isBillingLocked || delegatedSeatsUsed >= SPRAWL_MAX_TEAM_SEATS}
+                                checked={isBillingLocked ? false : memberPerms[key]}
+                                onChange={(e) => {
+                                  if (isBillingLocked) return;
+                                  setMemberPerms((p) => ({ ...p, [key]: e.target.checked }));
+                                }}
+                                className="accent-foreground"
+                              />
+                              <span>{label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={submitting || delegatedSeatsUsed >= SPRAWL_MAX_TEAM_SEATS}
+                        className="w-full py-2.5 text-xs font-semibold text-primary-foreground bg-primary border border-primary-border rounded-xl hover:bg-primary/90 disabled:opacity-45 cursor-pointer"
+                      >
+                        {delegatedSeatsUsed >= SPRAWL_MAX_TEAM_SEATS
+                          ? 'Seat Limit Reached (5 / 5)'
+                          : 'Add Team Member'}
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
+
+      {showListingsSection && (subTab === 'operations' || viewMode === 'listings') && listingsSectionNode}
+      {showOrdersSection && (subTab === 'operations' || viewMode === 'orders') && ordersSectionNode}
     </div>
   );
 }

@@ -6,8 +6,15 @@ import NairaScoutApp from '@/components/NairaScoutApp';
 
 export const dynamic = 'force-dynamic';
 
+// NS-UI-310: Forward q and category searchParams into NairaScoutApp
 interface HomePageProps {
-  searchParams: Promise<{ refEvent?: string; refScout?: string; tab?: string }>;
+  searchParams: Promise<{
+    refEvent?: string;
+    refScout?: string;
+    tab?: string;
+    q?: string;
+    category?: string;
+  }>;
 }
 
 const VALID_TABS = new Set(['marketplace', 'referrals', 'network', 'wallet', 'seller']);
@@ -40,6 +47,8 @@ export default async function HomePage({ searchParams }: HomePageProps) {
       initialTab={
         requestedTab as 'marketplace' | 'referrals' | 'network' | 'wallet' | 'seller' | undefined
       }
+      initialSearchQuery={params.q ?? ''}
+      initialCategory={params.category ?? 'All'}
     />
   );
 }
